@@ -182,6 +182,29 @@ export const API_FRAMEWORKS = [
     path: '/api/json',
   },
   {
+    // Experimental: skipped with a warning when scriptc is not installed, and
+    // not required for `publish` (see `optional`).
+    id: 'krate-ts-scriptc',
+    name: 'Krate - TS API route (scriptc, experimental)',
+    fixture: 'krate',
+    install: false,
+    optional: true,
+    available: scriptcUnavailable,
+    async prepare(ctx) {
+      await prepareKrateApp(ctx);
+      const cfgPath = await writeScriptcConfig(ctx, 0);
+      const res = await run(ctx.krateBin, ['build', '--config', cfgPath], { cwd: ctx.workDir });
+      if (res.code !== 0) throw new Error(res.stderr || res.stdout || 'krate build failed');
+    },
+    async start(ctx, port) {
+      const cfgPath = await writeScriptcConfig(ctx, port);
+      return spawnProcess(ctx.krateBin, ['serve', '--config', cfgPath, '.'], {
+        cwd: ctx.workDir,
+      });
+    },
+    path: '/api/json',
+  },
+  {
     id: 'nextjs',
     name: 'Next.js - route handler',
     fixture: 'next',
@@ -233,6 +256,38 @@ export const API_FRAMEWORKS = [
     path: '/api/json',
   },
 ];
+
+// scriptcUnavailable returns why the scriptc target cannot run here, or null.
+// scriptc needs its own CLI and the linker it uses (clang, or zig on Windows,
+// or whatever SCRIPTC_LINKER names).
+async function scriptcUnavailable() {
+  const probe = async (cmd) => (await run(cmd, ['--version'])).code === 0;
+  if (!(await probe('scriptc'))) return 'scriptc is not on PATH (npm install -g scriptc, needs Node 24 or later)';
+  if (process.env.SCRIPTC_LINKER) return null;
+  const linker = process.platform === 'win32' ? 'zig' : 'clang';
+  if (!(await probe(linker))) return `${linker} is not on PATH (scriptc links with it; or set SCRIPTC_LINKER)`;
+  return null;
+}
+
+async function writeScriptcConfig(ctx, port) {
+  const cfgPath = join(ctx.workDir, '.krate', 'bench-scriptc-config.ts');
+  await writeText(
+    cfgPath,
+    [
+      'export default {',
+      "  entry: 'src/pages/index.tsx',",
+      "  outDir: 'dist',",
+      "  pagesDir: 'src/pages',",
+      "  publicDir: 'public',",
+      '  minify: true,',
+      `  devServer: { port: ${port || 3000}, open: false },`,
+      "  ssr: { apiRuntime: 'scriptc', scriptcStrict: true },",
+      '};',
+      '',
+    ].join('\n'),
+  );
+  return cfgPath;
+}
 
 const runtimePkgDir = join(pkgRoot, '..', 'runtime');
 

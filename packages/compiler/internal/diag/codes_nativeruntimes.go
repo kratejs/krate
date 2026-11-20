@@ -19,6 +19,8 @@ const (
 	CodeScriptcToolchain Code = "KR7236"
 	// CodeScriptcRuntime: scriptc rejects the Krate host child runtime itself.
 	CodeScriptcRuntime Code = "KR7237"
+	// CodeScriptcAPIRoute: an API route cannot be compiled by scriptc and runs on the embedded runtime.
+	CodeScriptcAPIRoute Code = "KR7238"
 )
 
 func init() {
@@ -86,6 +88,17 @@ func init() {
 			Explanation: "The host code compiled, but scriptc rejected a line of the Krate host child runtime " +
 				"(packages/native/hostchild) that serves the call protocol. This is a limitation of the installed " +
 				"scriptc version, not of your code. Update scriptc, or use another host runtime.",
+		},
+		CodeInfo{
+			Code:  CodeScriptcAPIRoute,
+			Title: "API route cannot be compiled by scriptc",
+			Explanation: "With `ssr.apiRuntime` set to `\"scriptc\"` (experimental), each TypeScript API route that " +
+				"scriptc accepts is compiled into one native server executable. A route scriptc rejects, or one " +
+				"that cannot be compiled on its own (a default export, `export *`, no HTTP method export, a " +
+				"`runtime = \"nodejs\"` route), is reported here and keeps running on the embedded QuickJS runtime. " +
+				"The message carries scriptc's own diagnostic code (SC####) and hint, or the reason Krate left " +
+				"the route out. Set `ssr.scriptcStrict` to make each of these a build error. " +
+				"`scriptc coverage <entry> --fail-on=blockers` reports the same blockers by hand.",
 		},
 	)
 }

@@ -198,3 +198,46 @@ func TestAPIRouteStaticLeafUnderDynamicDir(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddedPoolDefaultsToOne(t *testing.T) {
+	if DefaultEmbeddedPoolSize != 1 {
+		t.Fatalf("DefaultEmbeddedPoolSize = %d, want 1", DefaultEmbeddedPoolSize)
+	}
+	a := NewAPIRouteRuntime(t.TempDir())
+	if a.workers != 1 || cap(a.idle) != 1 {
+		t.Errorf("API pool = %d workers, idle cap %d; want 1", a.workers, cap(a.idle))
+	}
+	a.SetPool(3, false)
+	if a.workers != 3 || cap(a.idle) != 3 {
+		t.Errorf("explicit SetPool(3) gave %d workers, idle cap %d", a.workers, cap(a.idle))
+	}
+	m := NewLazyMiddlewareRuntime(filepath.Join(t.TempDir(), "middleware.js"))
+	if m.workers != 1 || cap(m.tokens) != 1 {
+		t.Errorf("middleware pool = %d workers, tokens cap %d; want 1", m.workers, cap(m.tokens))
+	}
+	if DefaultAPIWorkers() < 1 {
+		t.Errorf("sidecar default must stay at least 1")
+	}
+}
+
+// TestAPIRouteLowercaseMethodDispatch checks that a request sent with a
+// lower-case method still reaches the upper-case handler, while the Request
+// the handler sees keeps the method as sent.
+func TestAPIRouteLowercaseMethodDispatch(t *testing.T) {
+	apiDir := filepath.Join(t.TempDir(), "api")
+	_ = os.MkdirAll(apiDir, 0755)
+	routeCode := `
+function GET(request) {
+	return new Response(request.method);
+}
+`
+	_ = os.WriteFile(filepath.Join(apiDir, "m.js"), []byte(routeCode), 0644)
+	rt := NewAPIRouteRuntime(apiDir)
+	result := rt.Execute(APIRequest{Method: "get", Path: "/api/m"})
+	if result.Status != 200 {
+		t.Fatalf("status = %d (%s), want 200", result.Status, result.Body)
+	}
+	if got := string(result.Body); got != "get" && got != "GET" {
+		t.Errorf("body = %q, want the request method", got)
+	}
+}

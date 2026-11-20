@@ -10,7 +10,7 @@ This is the support contract for React compatibility. A surface is only marked
 supported or stable when the referenced tests pass. Known divergences are
 listed instead of silently hidden.
 
-Last verified: **2026-11-13**. See the [roadmap](/roadmap/) for phase
+Last verified: **2026-11-20**. See the [roadmap](/roadmap/) for phase
 status and the [React compatibility guide](/docs/guides/react-compatibility/)
 for usage.
 
@@ -73,6 +73,7 @@ for usage.
 | @tanstack/react-table (v8) | n/a | Supported | Supported | Run as Preact islands |
 | next-themes | n/a | Supported | Supported | Run as Preact islands |
 | motion v12+ (motion/react) | n/a | Supported | Supported | Run as Preact islands |
+| API routes on scriptc (ssr.apiRuntime "scriptc") | Partial | n/a | n/a | Experimental: compile TypeScript API routes to one native executable |
 
 ## Krate Native
 
@@ -1568,6 +1569,22 @@ Known limits:
 - Building a page that imports motion/react logs the warning KR7116 (two motion-dom modules export scrapeMotionValuesFromProps); it does not affect the result.
 
 Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### API routes on scriptc (ssr.apiRuntime "scriptc")
+
+**Source:** Partial - **Islands:** n/a - **SSR:** n/a
+
+With ssr.apiRuntime set to "scriptc", krate build compiles the TypeScript routes that scriptc accepts (checked with scriptc coverage per route) from their original sources into one native server, and krate serve runs it behind the same secret, middleware, body limits and route budgets as the Node sidecar. Routes scriptc rejects, default exports and Node-only routes keep running on the embedded runtime or Node with a KR7238 warning (an error with ssr.scriptcStrict). The Go tests run the whole build and serve path against a stand-in scriptc; TestScriptcBuildAndServeReal runs it with the real scriptc (0.4.x) when KRATE_SCRIPTC=1.
+
+Known limits:
+
+- Experimental and production only: krate dev runs every route on the embedded runtime, so a route can fall back only in krate build.
+- The compiled server has no request.cookies, request.nextUrl, request-store helpers (cookies(), headers(), draftMode()), revalidatePath, revalidateTag or after(), and a route cannot import @krate/* or next/* modules; the build detects these by name in the route and the local modules it imports and runs such a route on the embedded runtime with KR7238.
+- Needs scriptc (Node 24 or later) and clang or zig at build time, and the executable is built for the build machine's platform; routes scriptc rejects fall back instead of failing unless ssr.scriptcStrict is set.
+
+Diagnostics: `KR7236`, `KR7238`
+
+Evidence: `TestScriptcPartitionAndFallback`, `TestScriptcEntryUsesNamedImportsOnly`, `TestScriptcBuildAndServeWithStandIn`, `TestScriptcBuildAndServeReal`, `TestScriptcSidecarProxy`, `TestScriptcRouteFindings`, `TestScriptcServeCrashingExecutableAnswers503`, `TestAPIRuntimeScriptcValidation`
 
 ## How claims are verified
 

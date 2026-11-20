@@ -22,6 +22,9 @@ import (
 // directory. It reloads when manifest.json changes (a dev rebuild rewrites it).
 type segmentIndex struct {
 	absOut string
+	// fixed means the output never changes (production serve): once loaded,
+	// the manifest is not stat-ed again.
+	fixed bool
 
 	mu      sync.Mutex
 	modTime time.Time
@@ -35,10 +38,18 @@ type segmentIndex struct {
 }
 
 func newSegmentIndex(absOut string) *segmentIndex {
-	return &segmentIndex{absOut: absOut}
+	return &segmentIndex{absOut: absOut, fixed: lookupOutIndex(absOut) != nil}
 }
 
 func (s *segmentIndex) load() ([]SegmentEntry, map[string]string) {
+	if s.fixed {
+		s.mu.Lock()
+		entries, dirs, ok := s.entries, s.segDirs, s.segDirs != nil
+		s.mu.Unlock()
+		if ok {
+			return entries, dirs
+		}
+	}
 	path := ResolveManifestPath(s.absOut, "manifest.json")
 	fi, err := os.Stat(path)
 	s.mu.Lock()

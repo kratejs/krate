@@ -486,8 +486,9 @@ ssr: {
   timeout: 5000,              // max render time (ms)
   maxCacheSize: 128,          // ISR in-memory cache size
   middlewareRuntime: "quickjs",  // middleware.ts runtime
-  apiRuntime: "quickjs",        // API route runtime
-  apiWorkers: 8,                // embedded QuickJS API worker pool (default min(NumCPU, 8))
+  apiRuntime: "quickjs",        // API route runtime: quickjs | node | bun | deno | scriptc (experimental)
+  scriptcStrict: false,         // apiRuntime "scriptc": fail the build for a route scriptc cannot compile
+  apiWorkers: 1,                // embedded QuickJS API worker pool (default 1)
   apiIsolation: false,          // true = fresh VM per request (no shared state; slower)
   nodeWorkers: 8,               // Node sidecar worker processes (cluster)
   rendererWorkers: 1,           // SSR renderer worker processes (cluster; default 1)
@@ -501,7 +502,7 @@ ssr: {
 - **`streaming`** - forces all *static* (SSG) pages into streaming mode.
   Explicit per-page `isr`/`ssr` config still wins.
 - **`middlewareRuntime`** and **`apiRuntime`** (`"quickjs"` | `"node"` |
-  `"bun"` | `"deno"`) choose which runtime executes middleware and API routes.
+  `"bun"` | `"deno"`; `apiRuntime` also accepts `"scriptc"`, below) choose which runtime executes middleware and API routes.
   Unset (default) uses the embedded QuickJS runtime with no Node.js
   dependency, and serves an API route from the Node sidecar when it imports a
   Node built-in or uses a global the embedded runtime lacks (`Buffer`,
@@ -512,6 +513,15 @@ ssr: {
   shim) - the fastest JS/TS sidecar option. The build bundles each API route
   only for the runtime that serves it, so run `krate build` again after
   changing `apiRuntime`; `krate serve` warns when the build is for another one.
+- **`apiRuntime: "scriptc"`** is experimental and production only. `krate build`
+  compiles the TypeScript routes that [scriptc](https://scriptc.dev) accepts
+  into one native executable (needs `scriptc` on `PATH`, which needs Node 24 or
+  later, and `clang` or `zig`; a missing tool is
+  [`KR7236`](/docs/reference/diagnostics/#kr7236)); `krate serve` runs it as a
+  sidecar. A route scriptc rejects keeps running on the embedded runtime and
+  is reported as [`KR7238`](/docs/reference/diagnostics/#kr7238); **`scriptcStrict`**
+  makes that an error. `krate dev` runs every route on the embedded runtime. See
+  [API routes](/docs/features/api-routes/#native-typescript-routes-with-scriptc-experimental).
 - **`nodeWorkers`** forks that many Node worker processes (`cluster`) for the
   API sidecar when `apiRuntime` (or `middlewareRuntime`) is
   `node`/`bun`/`deno`. (Ignored by the Bun sidecar, which is single-process.)
@@ -520,9 +530,12 @@ ssr: {
   (single process). Region and ISR caches are per-worker, and ISR disk
   persistence is disabled while clustered. Irrelevant when all request-time
   regions render on the Go host (Go components).
-- **`apiWorkers`** sizes the embedded QuickJS API worker pool. Workers are
-  long-lived VMs that each load a route once and reuse it, so module state
-  persists across requests (Node semantics) and requests run in parallel.
+- **`apiWorkers`** sizes the embedded QuickJS API worker pool (default `1`).
+  Workers are long-lived VMs that each load a route once and reuse it, so
+  module state persists across requests (Node semantics) and a pool larger than
+  one runs requests in parallel. The default is 1 because the embedded VM's
+  allocator takes one process-wide lock, so extra VMs mostly add contention;
+  raise it for handlers that wait on I/O or timers.
 - **`apiIsolation`** runs every API request in a fresh VM (no shared module
   state). Slower; dev uses it automatically so route edits are picked up.
 

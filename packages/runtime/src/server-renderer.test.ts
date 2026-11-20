@@ -12,6 +12,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { decodeFrames, REGION_FRAMES_TYPE } from "./region-wire.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const here = path.dirname(new URL(import.meta.url).pathname);
@@ -149,6 +150,26 @@ async function regions(body: object, headers: Record<string, string> = secret) {
   return { res, frames: text.split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, any>) };
 }
 
+// Frames with the fields a client reads: empty values and the renderer's
+// internal "cached" flag dropped, so NDJSON and binary frames compare equal.
+function norm(f: Record<string, any>) {
+  const out: Record<string, any> = {};
+  // A stack's async frames vary between renders, so only its first line counts;
+  // the digest hashes the stack, so only its presence does.
+  for (const [k, v] of Object.entries(f)) if (v !== "" && v !== false && v !== 0 && k !== "cached") out[k] = k === "stack" ? String(v).split("\n")[0] : k === "digest" ? true : v;
+  return out;
+}
+
+async function binaryRegions(body: object, headers: Record<string, string> = secret) {
+  const res = await fetch(url("/__krate/regions"), {
+    method: "POST",
+    headers: { ...headers, accept: REGION_FRAMES_TYPE },
+    body: JSON.stringify(body),
+  });
+  const data = new Uint8Array(await res.arrayBuffer());
+  return { res, frames: res.status === 200 ? decodeFrames(data) : [] };
+}
+
 describe.skipIf(!built)("server-renderer sidecar", () => {
   beforeAll(async () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "krate-ssr-"));
@@ -169,6 +190,36 @@ describe.skipIf(!built)("server-renderer sidecar", () => {
       expect((await fetch(url("/__krate/ssr/cache-invalidate"), { method: "POST", body: "{}" })).status).toBe(403);
       expect((await fetch(url("/__krate/ssr/cache-invalidate"), { method: "POST", body: "{}", headers: { "x-krate-internal": "wrong" } })).status).toBe(403);
       expect((await fetch(url("/ssr/[id]"))).status).toBe(403);
+    });
+  });
+
+  describe("region frame formats", () => {
+    const page = { id: "page", kind: "page" };
+    const cases: Array<[string, object]> = [
+      ["component and server regions", { route: "/regions", url: "/regions", regions: [{ id: "fast", kind: "component" }, { id: "bad", kind: "component" }, { id: "price", kind: "component" }, { id: "nope", kind: "component" }] }],
+      ["manifest regions when none are listed", { route: "/regions", url: "/regions" }],
+      ["page region with params and query", { route: "/ssr/[id]", url: "/ssr/7?q=a%26b", params: { id: "7" }, query: { q: "a&b" }, regions: [page] }],
+      ["page region that throws", { route: "/boom", url: "/boom", regions: [page] }],
+      ["page region that redirects", { route: "/redirect", url: "/redirect", regions: [page] }],
+      ["page region that is not found", { route: "/missing", url: "/missing", regions: [page] }],
+      ["unknown page", { route: "/nowhere", url: "/nowhere", regions: [page] }],
+    ];
+    for (const [name, body] of cases) {
+      it(`binary frames match NDJSON frames: ${name}`, async () => {
+        const nd = await regions(body);
+        const bin = await binaryRegions(body);
+        expect(nd.res.headers.get("content-type")).toContain("application/x-ndjson");
+        expect(bin.res.headers.get("content-type")).toBe(REGION_FRAMES_TYPE);
+        expect(bin.frames.length).toBeGreaterThan(0);
+        const key = (f: Record<string, any>) => `${f.type}:${f.id || ""}`;
+        const sort = (l: Array<Record<string, any>>) => l.map(norm).sort((a, b) => key(a).localeCompare(key(b)));
+        expect(sort(bin.frames)).toEqual(sort(nd.frames));
+        expect(bin.frames[bin.frames.length - 1].type).toBe("end");
+      });
+    }
+
+    it("still checks the secret before answering in binary", async () => {
+      expect((await binaryRegions({ route: "/regions", url: "/regions" }, {})).res.status).toBe(403);
     });
   });
 

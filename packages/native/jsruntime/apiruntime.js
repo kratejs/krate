@@ -282,6 +282,17 @@
   // __krate_begin starts a handler. Returns '' when the request is running
   // (poll __krate_phase) or a JSON object for an immediate answer.
   G.__krate_begin = function (routeId, method, rawJson) {
+    return begin(routeId, method, rawJson, null);
+  };
+  // __krate_begin_req is the one-global form the Go host uses: the envelope
+  // carries the route id and method too.
+  G.__krate_begin_req = function () {
+    var rawJson = G.__krate_req;
+    var raw = JSON.parse(rawJson);
+    // Dispatch uses the upper-cased method; the Request keeps it as sent.
+    return begin(raw.route, String(raw.method).toUpperCase(), rawJson, raw);
+  };
+  function begin(routeId, method, rawJson, parsed) {
     G.__krate_timers_clear();
     abortController = null;
     S = { phase: 'pending', head: null, reader: null, chunk: null, headOnly: false };
@@ -300,7 +311,7 @@
         return JSON.stringify({ status: 500, error: 'API route must export a handler function (GET, POST, etc. or default).' });
       }
     }
-    var raw = JSON.parse(rawJson);
+    var raw = parsed || JSON.parse(rawJson);
     try {
       if (!named && fn.length >= 2) {
         S.legacy = true;
@@ -314,7 +325,7 @@
       Promise.resolve().then(function () { return fn(request, ctxArg); }).then(settle, fail);
     } catch (e) { fail(e); }
     return '';
-  };
+  }
 
   G.__krate_phase = function () { return S.phase; };
   G.__krate_abort = function () {

@@ -1,7 +1,6 @@
 package build
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -367,11 +366,22 @@ const server = http.createServer(async (req, res) => {
           // are produced instead of after the handler finishes.
           const reader = response.body.getReader();
           res.on('close', () => { reader.cancel().catch(() => {}); });
-          for (;;) {
-            const r = await reader.read();
-            if (r.done) break;
-            const chunk = typeof r.value === 'string' ? r.value : Buffer.from(r.value);
-            if (!res.write(chunk)) await new Promise((ok) => res.once('drain', ok));
+          const toChunk = (v) => (typeof v === 'string' ? v : Buffer.from(v));
+          let r = await reader.read();
+          if (!r.done && !res.hasHeader('content-length')) {
+            // A body that is already complete (Response.json, a string) ends in
+            // microtasks. Sending it with res.end gives it a Content-Length and
+            // one write; a body still being produced is flushed on the next
+            // macrotask, so streaming stays prompt.
+            const first = r;
+            const pending = reader.read();
+            const settled = await Promise.race([pending, new Promise((ok) => setImmediate(ok, null))]);
+            if (settled && settled.done) return res.end(toChunk(first.value));
+            if (!res.write(toChunk(first.value))) await new Promise((ok) => res.once('drain', ok));
+            r = settled || (await pending);
+          }
+          for (; !r.done; r = await reader.read()) {
+            if (!res.write(toChunk(r.value))) await new Promise((ok) => res.once('drain', ok));
           }
           res.end();
         } else if (response !== undefined && response !== null) {
@@ -790,39 +800,6 @@ const (
 // are matched separately.
 var regionOpenRe = regexp.MustCompile(`<!--(suspense|region):([^>]+?)-->`)
 
-// regionFrame is one NDJSON frame from the sidecar's /__krate/regions stream.
-type regionFrame struct {
-	Type        string `json:"type"`
-	ID          string `json:"id,omitempty"`
-	Kind        string `json:"kind,omitempty"`
-	Status      int    `json:"status,omitempty"`
-	HTML        string `json:"html,omitempty"`
-	Error       string `json:"error,omitempty"`
-	Count       int    `json:"count,omitempty"`
-	CacheStatus string `json:"cacheStatus,omitempty"`
-	NotFound    bool   `json:"notFound,omitempty"`
-	Redirect    string `json:"redirect,omitempty"`
-	// Denied is 401 or 403 when the render called unauthorized() or forbidden().
-	Denied int    `json:"denied,omitempty"`
-	Title  string `json:"title,omitempty"`
-	// Head is the <Head> tags (meta, link, script) the region rendered, to be
-	// merged into the document head (see headmerge.go).
-	Head string `json:"head,omitempty"`
-	// NoStore is set when the render read request state (headers/cookies) or
-	// otherwise opted out of caching. The page response must not be public.
-	NoStore bool `json:"noStore,omitempty"`
-	// ErrorCaught is set when an error boundary rendered its fallback in the
-	// region: the response is a 500 that must never be cached.
-	ErrorCaught bool `json:"errorCaught,omitempty"`
-	// Fatal marks a failed render that has no usable baked content (an async
-	// server component): the response must be an error, not the shell.
-	Fatal bool `json:"fatal,omitempty"`
-	// Digest and Stack describe a failed render: the renderer logs the full
-	// error with the digest, and the server shows visitors only the digest.
-	Digest string `json:"digest,omitempty"`
-	Stack  string `json:"stack,omitempty"`
-}
-
 // regionPageResult carries sidecar outcome back to the caller so it can apply
 // ISR cache headers, status, redirects, and title swaps that page-region
 // renders report.
@@ -897,16 +874,47 @@ const regionShellVerifyLimit = 1 << 20
 // regionShellCache memoizes parsed shells by path so the hot path skips the disk
 // read and marker parse. It reloads when the file's size/mtime changes (dev
 // rebuilds rewrite the shell).
+//
+// A fixed cache (production) parses each shell once and never touches the disk
+// for it again: the served output cannot change while the server runs.
 type regionShellCache struct {
-	mu sync.Mutex
-	m  map[string]*regionShell
+	mu    sync.Mutex
+	m     map[string]*regionShell
+	fixed bool
 }
 
 func newRegionShellCache() *regionShellCache {
 	return &regionShellCache{m: map[string]*regionShell{}}
 }
 
+// newFixedRegionShellCache returns a cache that keeps every parsed shell for
+// the life of the process, with no per-request stat, read or hash.
+func newFixedRegionShellCache() *regionShellCache {
+	return &regionShellCache{m: map[string]*regionShell{}, fixed: true}
+}
+
 func (c *regionShellCache) load(absPath string) (*regionShell, error) {
+	if c.fixed {
+		c.mu.Lock()
+		e, ok := c.m[absPath]
+		c.mu.Unlock()
+		if ok {
+			return e, nil
+		}
+		data, err := os.ReadFile(absPath)
+		if err != nil {
+			return nil, err
+		}
+		e = parseRegionShell(string(data))
+		c.mu.Lock()
+		if prev, ok := c.m[absPath]; ok {
+			e = prev
+		} else {
+			c.m[absPath] = e
+		}
+		c.mu.Unlock()
+		return e, nil
+	}
 	fi, err := os.Stat(absPath)
 	if err != nil {
 		return nil, err
@@ -1204,8 +1212,8 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 
 	// The caller owns Content-Type and the no-store header for non-ISR pages.
 	// The 200 status is committed implicitly by the first body write below;
-	// this function only writes the body, flushing after each splice so the
-	// page streams progressively.
+	// this function only writes the body. Every region has resolved by now, so
+	// the page goes out in one flush instead of one per splice.
 	flush := func() {
 		if flusher != nil {
 			flusher.Flush()
@@ -1214,7 +1222,7 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 
 	// Write the shell, replacing each marker block's inner content with its
 	// region HTML (or the baked content when the region render failed/skipped),
-	// flushing after each splice so the page streams progressively. Nested
+	// then flushing once. Nested
 	// markers are spliced recursively: when a parent region is replaced its
 	// baked body (and any markers inside it) is discarded, but when a suspense
 	// region keeps its baked fallback, markers nested inside are still spliced.
@@ -1231,7 +1239,6 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 			}
 			// Standalone runtime regions with no frame leave the empty slot empty.
 			cursor = b.fbEnd
-			flush()
 		}
 		writeShell(cursor, hi)
 	}
@@ -1249,20 +1256,13 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 // TCP handshake) and bounds the whole exchange so a stalled sidecar can't pin the
 // request goroutine forever.
 func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, regionHTML map[string]string, res *regionPageResult, internalSecret string) error {
-	reqBody, _ := json.Marshal(map[string]interface{}{
-		"route":   route,
-		"url":     regionURL(ctx, route),
-		"method":  "GET",
-		"headers": headers,
-		"params":  params,
-		"query":   query,
-		"regions": regionList,
-	})
+	reqBody := nodeRegionsRequest{Route: route, URL: regionURL(ctx, route), Method: "GET", Headers: headers, Params: params, Query: query, Regions: regionList}.marshal()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/__krate/regions", ssrPort), bytes.NewReader(reqBody))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	acceptsFrames(req)
 	if internalSecret != "" {
 		req.Header.Set(internalSecretHeader, internalSecret)
 	}
@@ -1275,12 +1275,12 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 		return fmt.Errorf("ssr regions: unexpected status %d", resp.StatusCode)
 	}
 
-	tcpBuf := bufio.NewReaderSize(resp.Body, 256)
+	stream := newFrameStream(resp)
 
-	// Read one NDJSON line per region, collecting region HTML + page metadata.
+	// Read one frame per region, collecting region HTML + page metadata.
 	framesLeft := len(regionList)
 	for framesLeft > 0 {
-		line, err := tcpBuf.ReadBytes('\n')
+		frame, ok, err := stream.next()
 		if err != nil {
 			// The renderer died or the stream was cut mid-way: the regions that
 			// never arrived keep their baked content, which must not pass as a
@@ -1290,8 +1290,7 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 			}
 			break
 		}
-		var frame regionFrame
-		if err := json.Unmarshal(line, &frame); err != nil {
+		if !ok {
 			continue
 		}
 		switch frame.Type {
@@ -1704,8 +1703,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	}
 
 	absOut := revalOut
+	if hub == nil {
+		// The output is fixed while serving in production: probe it once.
+		defer registerOutIndex(absOut)()
+	}
 
-	fileServer := http.FileServer(hardenedDir{http.Dir(absOut)})
+	fileServer := http.FileServer(newStaticFS(absOut))
 	mux := http.NewServeMux()
 
 	// Load the build manifest to learn which dynamic routes are closed
@@ -1715,6 +1718,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Parsed baked shells (per route) so the region hot path skips the disk read
 	// and marker parse. Reloads automatically when a dev rebuild rewrites a shell.
 	regionShells := newRegionShellCache()
+	if hub == nil && lookupOutIndex(absOut) != nil {
+		regionShells = newFixedRegionShellCache()
+	}
 
 	if msg := apiArtifactMismatch(apiRTOption, apiDir, nodeAPIDir); msg != "" {
 		fmt.Fprintf(os.Stderr, "  %s! %s%s\n", cYellow, msg, cReset)
@@ -1759,6 +1765,24 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		nodeAPIProxy = nodeReady.wrap(apiProxy)
 	}
 
+	// ssr.apiRuntime "scriptc": the routes the build compiled go to the native
+	// server, the rest to the embedded runtime. Dev never uses it.
+	var scriptc *scriptcSidecar
+	var scriptcRoutes map[string]bool
+	if strings.EqualFold(apiRTOption, "scriptc") {
+		if hub != nil {
+			scriptcDevNotice()
+		} else if plan := loadScriptcServePlan(root); plan.warning != "" {
+			eprintf("  %s! %s%s\n", cYellow, plan.warning, cReset)
+		} else if plan.exe != "" && apiRT != nil {
+			scriptcPort := internalPort(port + 3)
+			scriptc = newScriptcSidecar(plan.exe, scriptcPort, revalHost.secret, revalHost.EnvList(), apiBudgets)
+			scriptcRoutes = plan.routes
+			printf("  %s*%s scriptc API server (%d routes) -> %shttp://localhost:%d%s\n", cCyan, cReset, len(plan.routes), cCyan, scriptcPort, cReset)
+			go scriptc.Run()
+		}
+	}
+
 	// Optional user-provided API sidecar. Requests it owns are forwarded first;
 	// a 404 falls through to the built-in Go/TS/QuickJS routes below.
 	customSidecar, err := newAPISidecar(root, cfg)
@@ -1797,6 +1821,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	// Middleware (matcher-scoped) runs in front of pages, API routes and
 	// server actions alike.
+	staticFS := newStaticFS(absOut)
 	gate := &middlewareGate{
 		rt:           middlewareRT,
 		dev:          hub != nil,
@@ -1806,7 +1831,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		secret:       revalHost.secret,
 		sidecarReady: nodeReady,
 		staticExists: func(urlPath string) bool {
-			f, err := hardenedDir{http.Dir(absOut)}.Open(urlPath)
+			if d, ok := staticFS.(indexedDir); ok {
+				return d.isFile(urlPath)
+			}
+			f, err := staticFS.Open(urlPath)
 			if err != nil {
 				return false
 			}
@@ -1852,6 +1880,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// the way the JS runtimes do: 405 + Allow, and automatic OPTIONS.
 		if goAPI != nil && goAPI.Active() && apiRT != nil && apiRT.ResolveFile(r.URL.Path) == "" {
 			if allowed, ok := goAPI.AllowedMethods(r.URL.Path); ok && writeGoMethodResponse(w, r, allowed) {
+				return
+			}
+		}
+
+		if scriptc != nil {
+			if file := apiRT.ResolveFile(r.URL.Path); scriptcRoutes[file] {
+				scriptc.ServeRoute(w, r, file)
 				return
 			}
 		}
@@ -2735,6 +2770,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			customSidecar.Stop()
 			printf("  %s+%s API sidecar stopped\n", cGreen, cReset)
 		}
+		if scriptc != nil {
+			scriptc.Stop()
+			printf("  %s+%s scriptc API server stopped\n", cGreen, cReset)
+		}
 		nodeAPICmdMu.Lock()
 		nc := nodeAPICmd
 		nodeAPICmdMu.Unlock()
@@ -3005,6 +3044,13 @@ func staticRouteExists(absOut, urlPath string) bool {
 	} else if strings.HasSuffix(rel, "/") {
 		rel = rel + "index.html"
 	}
+	if idx := lookupOutIndex(absOut); idx != nil {
+		rel = path.Clean(rel)
+		if rel == "." {
+			rel = ""
+		}
+		return idx.isFile(rel) || idx.isFile(relJoin(rel, "index.html"))
+	}
 	candidates := []string{
 		filepath.Join(absOut, filepath.FromSlash(rel)),               // literal file
 		filepath.Join(absOut, filepath.FromSlash(rel), "index.html"), // folder route
@@ -3049,6 +3095,9 @@ func isBakedAsset(absOut, urlPath string) bool {
 		return false
 	}
 	rel := strings.TrimPrefix(path.Clean("/"+up), "/")
+	if idx := lookupOutIndex(absOut); idx != nil {
+		return idx.isFile(rel)
+	}
 	fi, err := os.Stat(filepath.Join(absOut, filepath.FromSlash(rel)))
 	return err == nil && !fi.IsDir()
 }
@@ -3415,6 +3464,9 @@ func staticDirExists(absOut, urlPath string) bool {
 	up, err := url.PathUnescape(urlPath)
 	if err != nil {
 		up = urlPath
+	}
+	if idx := lookupOutIndex(absOut); idx != nil {
+		return idx.isDir(cleanRel(up))
 	}
 	fi, err := os.Stat(filepath.Join(absOut, filepath.FromSlash(path.Clean("/"+up))))
 	return err == nil && fi.IsDir()

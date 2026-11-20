@@ -176,8 +176,8 @@ func stripExports(code string) string {
 func NewAPIRouteRuntime(apiDir string) *APIRouteRuntime {
 	return &APIRouteRuntime{
 		apiDir:  apiDir,
-		workers: DefaultAPIWorkers(),
-		idle:    make(chan *apiWorker, DefaultAPIWorkers()),
+		workers: DefaultEmbeddedPoolSize,
+		idle:    make(chan *apiWorker, DefaultEmbeddedPoolSize),
 		prep:    make(map[string]*preparedRoute),
 	}
 }

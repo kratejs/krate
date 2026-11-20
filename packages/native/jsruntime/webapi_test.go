@@ -15,7 +15,11 @@ func evalAsync(t *testing.T, rt *Runtime, body string) string {
 	if _, err := rt.Execute(code); err != nil {
 		t.Fatalf("exec: %v\n%s", err, body)
 	}
-	err := rt.waitFor(context.Background(), 5*time.Second, func() bool {
+	hot, err := compileHot(rt, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = rt.waitFor(context.Background(), 5*time.Second, hot, func() bool {
 		v, _ := rt.Execute("globalThis.__t_out !== undefined || globalThis.__t_err !== undefined")
 		b, _ := v.(bool)
 		return b

@@ -286,6 +286,13 @@ async function runApi(opts, krateBin) {
   const rows = [];
   for (const fw of API_FRAMEWORKS) {
     if (opts.filter && fw.id !== opts.filter) continue;
+    if (fw.available) {
+      const why = await fw.available();
+      if (why) {
+        warn(`${fw.name} skipped: ${why}`);
+        continue;
+      }
+    }
     if (!(await maybeInstall(fw, opts))) continue;
 
     const dir = fixtureDir(fw.fixture);
@@ -415,7 +422,9 @@ async function publish() {
     for (const fw of list) if (!ids.has(fw.id)) missing.push(fw.id);
   };
   have(results.build, BUILD_FRAMEWORKS);
-  have(results.api, API_FRAMEWORKS);
+  // Optional targets (experimental runtimes that need extra tools) are
+  // published when a run has them, and never required.
+  have(results.api, API_FRAMEWORKS.filter((fw) => !fw.optional));
   have(results.ssr, SSR_FRAMEWORKS);
   if (results.meta?.filter || missing.length) {
     warn(`refusing to publish a partial run (missing: ${missing.join(', ') || 'filtered run'}); run \`node src/run.mjs all\``);

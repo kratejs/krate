@@ -589,6 +589,7 @@ type gzipResponseWriter struct {
 	wantsGzip   bool
 	useGzip     bool
 	wroteHeader bool
+	dirty       bool // bytes written to zw since its last flush
 }
 
 func (g *gzipResponseWriter) decide(status int) {
@@ -629,6 +630,9 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 		if g.zw == nil {
 			return 0, io.ErrClosedPipe
 		}
+		if len(b) > 0 {
+			g.dirty = true
+		}
 		return g.zw.Write(b)
 	}
 	return g.ResponseWriter.Write(b)
@@ -640,8 +644,9 @@ func (g *gzipResponseWriter) Flush() {
 	} else {
 		g.decide(http.StatusOK)
 	}
-	if g.useGzip && g.zw != nil {
+	if g.useGzip && g.zw != nil && g.dirty {
 		g.zw.Flush()
+		g.dirty = false
 	}
 	if f, ok := g.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
@@ -680,33 +685,65 @@ func precompressedMiddleware(root string, next http.Handler) http.Handler {
 // must not use a sibling (request-time pages whose baked HTML is only a shell).
 func precompressedMiddlewareIf(root string, skip func(*http.Request) bool, next http.Handler) http.Handler {
 	root = filepath.Clean(root)
+	idx := lookupOutIndex(root)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if (r.Method != http.MethodGet && r.Method != http.MethodHead) || (skip != nil && skip(r)) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		full, ok := precompressedBase(root, r.URL.Path)
-		if !ok {
-			next.ServeHTTP(w, r)
-			return
-		}
+		var f http.File
+		var fi fs.FileInfo
+		var base string
+		var enc string
 		ae := r.Header.Get("Accept-Encoding")
-		enc, base, ok := pickPrecompressed(full, acceptsEncoding(ae, "br"), acceptsEncoding(ae, "gzip"))
-		if !ok {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		f, err := os.Open(base + precompressedSuffix(enc))
-		if err != nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		defer f.Close()
-		fi, err := f.Stat()
-		if err != nil {
-			next.ServeHTTP(w, r)
-			return
+		if idx != nil {
+			rel, ok := idx.precompressedRel(r.URL.Path)
+			if !ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+			wantBr, wantGz := acceptsEncoding(ae, "br"), acceptsEncoding(ae, "gzip")
+			switch {
+			case wantBr && idx.isFile(rel+".br"):
+				enc = "br"
+			case wantGz && idx.isFile(rel+".gz"):
+				enc = "gzip"
+			default:
+				next.ServeHTTP(w, r)
+				return
+			}
+			base = rel
+			var err error
+			if f, err = idx.open(rel + precompressedSuffix(enc)); err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			defer f.Close()
+			fi, _ = f.Stat()
+		} else {
+			full, ok := precompressedBase(root, r.URL.Path)
+			if !ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+			var pok bool
+			enc, base, pok = pickPrecompressed(full, acceptsEncoding(ae, "br"), acceptsEncoding(ae, "gzip"))
+			if !pok {
+				next.ServeHTTP(w, r)
+				return
+			}
+			osf, err := os.Open(base + precompressedSuffix(enc))
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			defer osf.Close()
+			f = osf
+			fi, err = f.Stat()
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 
 		h := w.Header()
@@ -745,6 +782,22 @@ func precompressedBase(root, urlPath string) (string, bool) {
 		return filepath.Join(full, "index.html"), true
 	}
 	return full, true
+}
+
+// precompressedRel is precompressedBase against the index: the slash path of
+// the asset (or of a folder's index.html) relative to the root.
+func (x *outIndex) precompressedRel(urlPath string) (string, bool) {
+	if isInternalOutputPath(urlPath) || isHiddenPath(urlPath) {
+		return "", false
+	}
+	rel := cleanRel(urlPath)
+	if x.isDir(rel) {
+		if !strings.HasSuffix(urlPath, "/") {
+			return "", false
+		}
+		return relJoin(rel, "index.html"), true
+	}
+	return rel, true
 }
 
 // pickPrecompressed returns the preferred precompressed sibling of base that the

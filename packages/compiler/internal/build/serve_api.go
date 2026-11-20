@@ -367,6 +367,8 @@ type middlewareGate struct {
 	// sidecarMatcher is what the sidecar last reported about the module's
 	// matcher: 0 unknown, 1 none declared, 2 declared.
 	sidecarMatcher atomic.Int32
+	// fileState caches fileExists outside dev: 0 unknown, 1 present, 2 absent.
+	fileState atomic.Int32
 	// staticExists reports whether a URL path is a file served by the static
 	// layer. Nil means nothing is: middleware then runs for every request.
 	staticExists func(urlPath string) bool
@@ -400,7 +402,7 @@ func (g *middlewareGate) wrap(next http.Handler) http.Handler {
 			g.apply(w, r, next, res)
 			return
 		}
-		if _, err := os.Stat(g.file); err != nil {
+		if !g.fileExists() {
 			if g.required {
 				g.failMissing(w, r)
 				return
@@ -417,6 +419,25 @@ func (g *middlewareGate) wrap(next http.Handler) http.Handler {
 		}
 		g.viaSidecar(w, r, next)
 	})
+}
+
+// fileExists reports whether the middleware module is on disk. Outside dev it
+// cannot change while serving, so the answer is read once.
+func (g *middlewareGate) fileExists() bool {
+	if !g.dev {
+		if s := g.fileState.Load(); s != 0 {
+			return s == 1
+		}
+	}
+	_, err := os.Stat(g.file)
+	if !g.dev {
+		if err == nil {
+			g.fileState.Store(1)
+		} else {
+			g.fileState.Store(2)
+		}
+	}
+	return err == nil
 }
 
 func (g *middlewareGate) apply(w http.ResponseWriter, r *http.Request, next http.Handler, res jsruntime.MiddlewareResult) {

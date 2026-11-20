@@ -1,7 +1,6 @@
 package build
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,7 +10,16 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+// defaultRegionCoalesceWindow is how long a streamed page waits for its
+// regions to resolve before the first flush. Regions that finish inside it
+// share the shell's write; slower ones keep streaming as they finish.
+const defaultRegionCoalesceWindow = time.Millisecond
+
+// regionCoalesceWindow is a variable only so tests can widen it on slow runners.
+var regionCoalesceWindow = defaultRegionCoalesceWindow
 
 type regionURLKey struct{}
 
@@ -117,17 +125,17 @@ func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher ht
 			flusher.Flush()
 		}
 	}
-	_, _ = w.Write([]byte(prefix))
-	flush()
 
-	for ev := range frames {
+	// handle turns one frame into the chunk that inserts its region ("" when
+	// the frame adds nothing), recording failures on res.
+	handle := func(ev regionFrameEvent) string {
 		if ev.err != nil {
 			res.renderErr = ev.err.Error()
-			continue
+			return ""
 		}
 		f := ev.frame
 		if f.Type != "region" || f.ID == "" {
-			continue
+			return ""
 		}
 		if f.NoStore {
 			res.noStore = true
@@ -139,11 +147,11 @@ func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher ht
 			if f.Error != "" {
 				res.renderErr = f.Error
 			}
-			continue
+			return ""
 		}
 		html := f.HTML
 		if html == "" && f.Head == "" && f.Title == "" {
-			continue
+			return ""
 		}
 		if f.Head != "" || f.Title != "" {
 			warnStreamedHead(route, f.ID)
@@ -152,12 +160,72 @@ func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher ht
 			resolved, err := resolveGoMarkersE(html, reqCtx, renderGo)
 			if err != nil {
 				res.renderErr = err.Error()
-				continue
+				return ""
 			}
 			html = resolved
 		}
-		_, _ = w.Write([]byte(regionReplaceScript(f.ID, html, f.Head, f.Title)))
-		flush()
+		return regionReplaceScript(f.ID, html, f.Head, f.Title)
+	}
+
+	// Regions that resolve within the first window go out with the shell in
+	// one write and one flush. A slow region does not hold the shell back by
+	// more than the window.
+	var out bytes.Buffer
+	out.WriteString(prefix)
+	closed := false
+	timer := time.NewTimer(regionCoalesceWindow)
+collect:
+	for {
+		select {
+		case ev, ok := <-frames:
+			if !ok {
+				closed = true
+				break collect
+			}
+			out.WriteString(handle(ev))
+		case <-timer.C:
+			break collect
+		}
+	}
+	timer.Stop()
+	if closed {
+		out.WriteString(tail)
+	}
+	_, _ = w.Write(out.Bytes())
+	flush()
+	if closed {
+		return res
+	}
+
+	// Later regions stream as they finish. Frames that are already waiting
+	// share one flush, and so does the tail when the stream has ended.
+	for ev := range frames {
+		out.Reset()
+		out.WriteString(handle(ev))
+		ended := false
+	drain:
+		for {
+			select {
+			case next, ok := <-frames:
+				if !ok {
+					ended = true
+					break drain
+				}
+				out.WriteString(handle(next))
+			default:
+				break drain
+			}
+		}
+		if ended {
+			out.WriteString(tail)
+		}
+		if out.Len() > 0 {
+			_, _ = w.Write(out.Bytes())
+			flush()
+		}
+		if ended {
+			return res
+		}
 	}
 	_, _ = w.Write([]byte(tail))
 	flush()
@@ -167,21 +235,14 @@ func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher ht
 // streamNodeRegionEvents reads the sidecar's NDJSON stream and forwards each
 // frame as soon as it arrives (completion order, not document order).
 func streamNodeRegionEvents(ctx context.Context, ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, internalSecret string, out chan<- regionFrameEvent) {
-	reqBody, _ := json.Marshal(map[string]interface{}{
-		"route":   route,
-		"url":     regionURL(ctx, route),
-		"method":  "GET",
-		"headers": headers,
-		"params":  params,
-		"query":   query,
-		"regions": regionList,
-	})
+	reqBody := nodeRegionsRequest{Route: route, URL: regionURL(ctx, route), Method: "GET", Headers: headers, Params: params, Query: query, Regions: regionList}.marshal()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/__krate/regions", ssrPort), bytes.NewReader(reqBody))
 	if err != nil {
 		out <- regionFrameEvent{err: err}
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	acceptsFrames(req)
 	if internalSecret != "" {
 		req.Header.Set(internalSecretHeader, internalSecret)
 	}
@@ -195,14 +256,11 @@ func streamNodeRegionEvents(ctx context.Context, ssrPort int, route string, para
 		out <- regionFrameEvent{err: fmt.Errorf("ssr regions: unexpected status %d", resp.StatusCode)}
 		return
 	}
-	reader := bufio.NewReaderSize(resp.Body, 256)
+	stream := newFrameStream(resp)
 	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			var frame regionFrame
-			if json.Unmarshal(line, &frame) == nil {
-				out <- regionFrameEvent{frame: frame}
-			}
+		frame, ok, err := stream.next()
+		if ok {
+			out <- regionFrameEvent{frame: frame}
 		}
 		if err != nil {
 			return
