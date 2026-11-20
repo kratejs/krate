@@ -5,6 +5,7 @@ import { mkdir, readdir, readFile, writeFile, rm, cp, stat } from 'node:fs/promi
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
+import { gzipSync } from 'node:zlib';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -92,6 +93,29 @@ export async function dirSize(dir) {
       const p = join(cur, entry.name);
       if (entry.isDirectory()) stack.push(p);
       else total += (await stat(p)).size;
+    }
+  }
+  return total;
+}
+
+/**
+ * Total gzip size (level 9) of the .js/.mjs files under dir, skipping any
+ * directory whose name is in `skip`. Used to compare the client JavaScript each
+ * framework emits; precompressed .gz/.br copies are not counted.
+ */
+export async function jsGzipSize(dir, skip = []) {
+  if (!existsSync(dir)) return null;
+  let total = 0;
+  const stack = [dir];
+  while (stack.length) {
+    const cur = stack.pop();
+    for (const entry of await readdir(cur, { withFileTypes: true })) {
+      const p = join(cur, entry.name);
+      if (entry.isDirectory()) {
+        if (!skip.includes(entry.name)) stack.push(p);
+      } else if (/\.m?js$/.test(entry.name)) {
+        total += gzipSync(await readFile(p), { level: 9 }).length;
+      }
     }
   }
   return total;

@@ -114,6 +114,9 @@ jobs:
       - name: Check compatibility matrix
         run: pnpm run check:matrix
 
+      - name: Check benchmarks page is in sync
+        run: node scripts/sync-benchmarks.mjs --check
+
       - name: Check roadmap and v1 gates
         run: pnpm run check:roadmap
 

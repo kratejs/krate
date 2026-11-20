@@ -7,17 +7,17 @@
 //   node src/run.mjs report
 import os from 'node:os';
 import { existsSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { BUILD_FRAMEWORKS, API_FRAMEWORKS, SSR_FRAMEWORKS, npxCmd, exeName } from './lib/frameworks.mjs';
 import {
   pkgRoot,
-  exists,
   run,
   timed,
   spawnProcess,
   freePort,
   waitForUrl,
   dirSize,
+  jsGzipSize,
   readJson,
   mkdirp,
   rmrf,
@@ -26,6 +26,9 @@ import { loadTest } from './lib/loadtest.mjs';
 import { median, formatMs, writeResults, renderMarkdown } from './lib/report.mjs';
 
 const RESULTS_DIR = join(pkgRoot, 'results');
+const repoRoot = join(pkgRoot, '..', '..');
+// The docs site reads published scores from here (see `publish`).
+const WEB_DATA = join(repoRoot, 'packages', 'web', 'src', 'data', 'benchmarks.json');
 const BIN_DIR = join(pkgRoot, '.krate-bench');
 
 function log(...a) {
@@ -43,8 +46,23 @@ function detectPm() {
   return 'npm';
 }
 
+// One autocannon process tops out around 20k req/s, so spread the client over a
+// few worker threads, leaving most cores for the server under test.
+function defaultClientWorkers() {
+  return Math.min(4, Math.max(1, Math.floor(os.cpus().length / 3)));
+}
+
 function parseArgs(argv) {
-  const opts = { command: 'all', filter: null, runs: 3, durationMs: 5000, connections: 32, connectionsList: [32], pm: detectPm() };
+  const opts = {
+    command: 'all',
+    filter: null,
+    runs: 3,
+    durationMs: 5000,
+    connections: 32,
+    connectionsList: [32],
+    clientWorkers: defaultClientWorkers(),
+    pm: detectPm(),
+  };
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -54,6 +72,7 @@ function parseArgs(argv) {
       case 'ssr':
       case 'all':
       case 'report':
+      case 'publish':
         opts.command = a;
         break;
       case '--filter':
@@ -75,6 +94,9 @@ function parseArgs(argv) {
         opts.connections = opts.connectionsList[0];
         break;
       }
+      case '--client-workers':
+        opts.clientWorkers = Math.max(1, parseInt(args[++i], 10) || 1);
+        break;
       case '--pm':
         opts.pm = args[++i];
         break;
@@ -91,7 +113,7 @@ function parseArgs(argv) {
 }
 
 const HELP = `
-Usage: node src/run.mjs <build|api|ssr|all|report> [options]
+Usage: node src/run.mjs <build|api|ssr|all|report|publish> [options]
 
 Commands:
   build    Time cold production builds across frameworks
@@ -99,6 +121,8 @@ Commands:
   ssr      Measure SSR page throughput (runtime TSX vs Go; node/bun sidecar)
   all      Run build + api + ssr (default)
   report   Print the latest results as Markdown
+  publish  Copy the latest full run into packages/web (benchmarks.json and the
+           docs page generated from it)
 
 Options:
   --filter <id>     Only run one target (e.g. krate, nextjs, krate-ssr-go-node)
@@ -106,16 +130,20 @@ Options:
   --duration ms     Load-test duration (default 5000)
   --connections N   Load-test concurrency; a comma list sweeps the SSR test
                     (e.g. --connections 16,64,256). Default 32
+  --client-workers N  autocannon worker threads driving the load (default
+                    min(4, max(1, cpus/3)); 1 = single process). The built-in
+                    fallback client is always single-process
   --pm <name>       Package manager for installs: npm|pnpm|yarn|bun (default: detected)
 
 Dependencies are installed automatically the first time a fixture is run. The
 SSR fixtures use the monorepo @krate/runtime, so run \`pnpm build\` first.
 `;
 
-// Build the krate CLI once (cached) so build timing excludes Go toolchain setup.
+// Build the krate CLI (outside any timed section) so build timing excludes Go
+// toolchain setup. It is rebuilt on every run so the benchmark never measures a
+// stale compiler; `go build` is incremental and fast when nothing changed.
 async function ensureKrateBin() {
   const bin = join(BIN_DIR, exeName('krate'));
-  if (exists(bin)) return bin;
   await mkdirp(BIN_DIR);
   const compilerDir = join(pkgRoot, '..', 'compiler');
   log('building krate CLI...');
@@ -126,7 +154,13 @@ async function ensureKrateBin() {
 
 async function collectMeta() {
   const go = await run('go', ['version']);
+  const rev = await run('git', ['rev-parse', '--short', 'HEAD'], { cwd: pkgRoot });
+  // Only the code that shapes the scores counts toward -dirty.
+  const dirty = await run('git', ['status', '--porcelain', '--', 'compiler', 'runtime', 'benchmark'], { cwd: join(pkgRoot, '..') });
+  const bun = await run('bun', ['--version']);
   return {
+    commit: rev.code === 0 ? rev.stdout.trim() + (dirty.stdout.trim() ? '-dirty' : '') : null,
+    bun: bun.code === 0 ? bun.stdout.trim() : null,
     date: new Date().toISOString(),
     node: process.version,
     go: go.stdout.trim().replace(/^go version go/, 'go'),
@@ -192,6 +226,14 @@ async function installedVersion(pkgName, dir) {
   }
 }
 
+// cleanBuildState removes a fixture's output directory and build caches so the
+// next build starts cold. Installed dependencies are kept.
+async function cleanBuildState(dir, fw) {
+  for (const rel of [fw.outDir, ...(fw.cleanPaths ?? [])]) {
+    await rmrf(join(dir, rel));
+  }
+}
+
 async function runBuild(opts, krateBin) {
   const rows = [];
   for (const fw of BUILD_FRAMEWORKS) {
@@ -201,13 +243,16 @@ async function runBuild(opts, krateBin) {
     const dir = fixtureDir(fw.fixture);
     const ctx = { workDir: dir, krateBin };
 
-    if (fw.prebuild) {
-      const s = fw.prebuild(ctx);
-      await run(s.cmd, s.args, { cwd: s.cwd ?? dir });
-    }
-
     const times = [];
     for (let i = 0; i < opts.runs; i++) {
+      // Cold build: drop output and build caches first (not timed), then redo
+      // any prebuild step whose output lives in a cleaned directory.
+      await cleanBuildState(dir, fw);
+      if (fw.prebuild) {
+        const p = fw.prebuild(ctx);
+        await run(p.cmd, p.args, { cwd: p.cwd ?? dir });
+      }
+      if (fw.setup) await fw.setup(ctx);
       const s = fw.build(ctx);
       const t = await timed(s.cmd, s.args, { cwd: s.cwd ?? dir });
       if (t.code !== 0) {
@@ -221,6 +266,7 @@ async function runBuild(opts, krateBin) {
 
     const version = fw.versionPackage ? await installedVersion(fw.versionPackage, dir) : 'source';
     const outputBytes = await dirSize(join(dir, fw.outDir));
+    const clientJsGzipBytes = fw.clientJs ? await jsGzipSize(join(dir, fw.clientJs.dir), fw.clientJs.skip) : null;
     rows.push({
       id: fw.id,
       name: fw.name,
@@ -228,6 +274,7 @@ async function runBuild(opts, krateBin) {
       medianMs: Math.round(median(times)),
       bestMs: Math.min(...times),
       outputBytes,
+      clientJsGzipBytes,
       runs: times,
     });
     log(`  ${fw.name}: median ${formatMs(median(times))}, best ${formatMs(Math.min(...times))}, output ${outputBytes} B`);
@@ -264,6 +311,7 @@ async function runApi(opts, krateBin) {
     const result = await loadTest(url, {
       durationMs: opts.durationMs,
       connections: opts.connections,
+      clientWorkers: opts.clientWorkers,
     });
     await handle.stop();
 
@@ -326,7 +374,11 @@ async function runSsr(opts, krateBin) {
     // Sweep concurrency levels so single-core vs multi-core scaling is visible.
     const levels = opts.connectionsList?.length ? opts.connectionsList : [opts.connections];
     for (const conn of levels) {
-      const result = await loadTest(url, { durationMs: opts.durationMs, connections: conn });
+      const result = await loadTest(url, {
+        durationMs: opts.durationMs,
+        connections: conn,
+        clientWorkers: opts.clientWorkers,
+      });
       rows.push({
         id: fw.id,
         name: fw.name,
@@ -347,6 +399,48 @@ async function runSsr(opts, krateBin) {
   return rows;
 }
 
+// publish copies the latest full run into the docs site's data file and
+// regenerates the docs page from it, so every published score has one source.
+async function publish() {
+  let results;
+  try {
+    results = await readJson(join(RESULTS_DIR, 'latest.json'));
+  } catch {
+    warn('no results yet - run `node src/run.mjs all` first');
+    process.exit(1);
+  }
+  const missing = [];
+  const have = (rows, list) => {
+    const ids = new Set((rows ?? []).map((r) => r.id));
+    for (const fw of list) if (!ids.has(fw.id)) missing.push(fw.id);
+  };
+  have(results.build, BUILD_FRAMEWORKS);
+  have(results.api, API_FRAMEWORKS);
+  have(results.ssr, SSR_FRAMEWORKS);
+  if (results.meta?.filter || missing.length) {
+    warn(`refusing to publish a partial run (missing: ${missing.join(', ') || 'filtered run'}); run \`node src/run.mjs all\``);
+    process.exit(1);
+  }
+  const pick = (rows, keys) => rows.map((r) => Object.fromEntries(keys.map((k) => [k, r[k] ?? null])));
+  const data = {
+    meta: results.meta,
+    buildMeta: results.buildMeta,
+    apiMeta: results.apiMeta,
+    ssrMeta: results.ssrMeta,
+    build: pick(results.build, ['id', 'name', 'version', 'medianMs', 'bestMs', 'outputBytes', 'clientJsGzipBytes']),
+    api: pick(results.api, ['id', 'name', 'rps', 'p50', 'p99', 'errors']),
+    ssr: pick(results.ssr, ['id', 'name', 'impl', 'sidecar', 'connections', 'rps', 'p50', 'p99', 'errors']),
+  };
+  writeFileSync(WEB_DATA, JSON.stringify(data, null, 2) + '\n');
+  log(`wrote ${relative(repoRoot, WEB_DATA)}`);
+  const res = await run('node', [join(repoRoot, 'scripts', 'sync-benchmarks.mjs')], { cwd: repoRoot });
+  process.stdout.write(res.stdout);
+  if (res.code !== 0) {
+    warn(res.stderr);
+    process.exit(1);
+  }
+}
+
 async function main() {
   const opts = parseArgs(process.argv);
 
@@ -360,8 +454,13 @@ async function main() {
     }
     return;
   }
+  if (opts.command === 'publish') {
+    await publish();
+    return;
+  }
 
   const meta = await collectMeta();
+  meta.filter = opts.filter;
   const krateBin = await ensureKrateBin();
 
   const results = {
@@ -370,8 +469,8 @@ async function main() {
     api: null,
     ssr: null,
     buildMeta: { runs: opts.runs },
-    apiMeta: { connections: opts.connections, durationMs: opts.durationMs },
-    ssrMeta: { connectionsList: opts.connectionsList, durationMs: opts.durationMs },
+    apiMeta: { connections: opts.connections, durationMs: opts.durationMs, clientWorkers: opts.clientWorkers },
+    ssrMeta: { connectionsList: opts.connectionsList, durationMs: opts.durationMs, clientWorkers: opts.clientWorkers },
   };
 
   if (opts.command === 'build' || opts.command === 'all') {

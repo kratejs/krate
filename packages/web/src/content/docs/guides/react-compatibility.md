@@ -1630,7 +1630,7 @@ reaches both kinds of island (see
 
 ### What it costs
 
-Real React is not part of Krate's runtime, and the 19 KB counter-page figure
+Real React is not part of Krate's runtime, and the 21 KB counter-page figure
 does not include it. The cost is paid only by pages that load a real-React
 island, as one shared chunk of `react`, `react-dom` and the libraries, cached
 across those pages: React plus `react-dom` is roughly 60 KB gzipped for the

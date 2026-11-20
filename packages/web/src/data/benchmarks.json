@@ -1,0 +1,170 @@
+{
+  "meta": {
+    "commit": "d5181ae5",
+    "bun": "1.4.2",
+    "date": "2026-11-20T16:50:40.657Z",
+    "node": "v24.22.2",
+    "go": "go1.27.2 linux/amd64",
+    "os": "Linux 6.12.113+deb13-amd64",
+    "arch": "x64",
+    "cpus": 12,
+    "model": "AMD EPYC-Rome Processor",
+    "filter": null
+  },
+  "buildMeta": {
+    "runs": 3
+  },
+  "apiMeta": {
+    "connections": 32,
+    "durationMs": 5000,
+    "clientWorkers": 4
+  },
+  "ssrMeta": {
+    "connectionsList": [
+      32
+    ],
+    "durationMs": 5000,
+    "clientWorkers": 4
+  },
+  "build": [
+    {
+      "id": "krate",
+      "name": "Krate",
+      "version": "source",
+      "medianMs": 524,
+      "bestMs": 519,
+      "outputBytes": 107938,
+      "clientJsGzipBytes": 21448
+    },
+    {
+      "id": "nextjs",
+      "name": "Next.js",
+      "version": "15.5.23",
+      "medianMs": 22709,
+      "bestMs": 22548,
+      "outputBytes": 65224758,
+      "clientJsGzipBytes": 484345
+    },
+    {
+      "id": "vite",
+      "name": "Vite + React",
+      "version": "6.4.3",
+      "medianMs": 2025,
+      "bestMs": 1970,
+      "outputBytes": 195127,
+      "clientJsGzipBytes": 60859
+    },
+    {
+      "id": "astro",
+      "name": "Astro",
+      "version": "5.18.2",
+      "medianMs": 3542,
+      "bestMs": 3457,
+      "outputBytes": 150365,
+      "clientJsGzipBytes": 47401
+    },
+    {
+      "id": "sveltekit",
+      "name": "SvelteKit",
+      "version": "2.70.4",
+      "medianMs": 5188,
+      "bestMs": 4856,
+      "outputBytes": 97269,
+      "clientJsGzipBytes": 38606
+    },
+    {
+      "id": "remix",
+      "name": "Remix",
+      "version": "2.17.5",
+      "medianMs": 3383,
+      "bestMs": 3380,
+      "outputBytes": 267481,
+      "clientJsGzipBytes": 85995
+    }
+  ],
+  "api": [
+    {
+      "id": "krate-go",
+      "name": "Krate - Go API route",
+      "rps": 70989,
+      "p50": 0,
+      "p99": 2,
+      "errors": 0
+    },
+    {
+      "id": "krate-ts",
+      "name": "Krate - TS API route",
+      "rps": 844,
+      "p50": 37,
+      "p99": 52,
+      "errors": 0
+    },
+    {
+      "id": "krate-ts-node",
+      "name": "Krate - TS API route (node)",
+      "rps": 9119,
+      "p50": 2,
+      "p99": 12,
+      "errors": 0
+    },
+    {
+      "id": "nextjs",
+      "name": "Next.js - route handler",
+      "rps": 886,
+      "p50": 33,
+      "p99": 75,
+      "errors": 0
+    },
+    {
+      "id": "node-http",
+      "name": "Node http (baseline)",
+      "rps": 20958,
+      "p50": 1,
+      "p99": 11,
+      "errors": 0
+    },
+    {
+      "id": "go-nethttp",
+      "name": "Go net/http (baseline)",
+      "rps": 76355,
+      "p50": 0,
+      "p99": 2,
+      "errors": 0
+    }
+  ],
+  "ssr": [
+    {
+      "id": "krate-ssr-tsx-node",
+      "name": "Krate - runtime TSX / node",
+      "impl": "tsx",
+      "sidecar": "node",
+      "connections": 32,
+      "rps": 8020,
+      "p50": 3,
+      "p99": 13,
+      "errors": 0
+    },
+    {
+      "id": "krate-ssr-tsx-bun",
+      "name": "Krate - runtime TSX / bun",
+      "impl": "tsx",
+      "sidecar": "bun",
+      "connections": 32,
+      "rps": 7539,
+      "p50": 3,
+      "p99": 17,
+      "errors": 0
+    },
+    {
+      "id": "krate-ssr-go",
+      "name": "Krate - runtime Go (Go host)",
+      "impl": "go",
+      "sidecar": null,
+      "connections": 32,
+      "rps": 7836,
+      "p50": 3,
+      "p99": 13,
+      "errors": 0
+    }
+  ]
+}

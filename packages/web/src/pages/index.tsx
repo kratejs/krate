@@ -1,5 +1,14 @@
 import { Code } from "@krate/components/code";
 import { CounterDemo } from "../components/counter-demo";
+import benchmarks from "../data/benchmarks.json";
+
+// Scores come from the published benchmark run (packages/benchmark, `publish`).
+const krateBuild = benchmarks.build.find((r) => r.id === "krate")!;
+const nextBuild = benchmarks.build.find((r) => r.id === "nextjs")!;
+const goApi = benchmarks.api.find((r) => r.id === "krate-go")!;
+const kb = (n: number) => `${Math.round(n / 1024)} KB`;
+const thousands = (n: number) => `${Math.round(n / 1000)}k`;
+const buildTime = (n: number) => (n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(1)} s`);
 
 export default function Home() {
   return (
@@ -13,7 +22,7 @@ export default function Home() {
         <h1 class="hero-title">Web applications with the power of a compiler.</h1>
         <p class="hero-subtitle">
           Krate compiles TSX/JSX into static HTML at build time and ships a small
-          signal-based hydration bundle (about 25 KB gzipped for a counter page). Fine-grained reactivity, file-based
+          signal-based hydration bundle (about {kb(krateBuild.clientJsGzipBytes!)} gzipped for a counter page). Fine-grained reactivity, file-based
           routing, SSR/ISR/streaming, a CSS pipeline, and a plugin system - all
           driven by a custom Go compiler. Drop into Go for server components and
           API routes whenever you want.
@@ -104,14 +113,15 @@ export default function Home() {
       <section class="section">
         <h2 class="section-title">Built for speed</h2>
         <p class="section-lede">
-          A Go API route saturates a core; a runtime Go component renders on a
-          compiled host with no Node in the path. <a href="https://github.com/kratejs/krate/tree/main/packages/benchmark">See the benchmarks</a>.
+          A cold build in {buildTime(krateBuild.medianMs)} against {buildTime(nextBuild.medianMs)} for
+          Next.js on the same page, and Go API routes compiled into a native
+          sidecar. <a href="/docs/guides/benchmarks/">See the benchmarks</a>.
         </p>
         <div class="stats">
-          <div class="stat"><div class="stat-value">46k</div><div class="stat-label">req/s, Go API route</div></div>
+          <div class="stat"><div class="stat-value">{buildTime(krateBuild.medianMs)}</div><div class="stat-label">Cold build, counter page</div></div>
+          <div class="stat"><div class="stat-value">{thousands(goApi.rps)}</div><div class="stat-label">req/s, Go API route</div></div>
+          <div class="stat"><div class="stat-value">{kb(krateBuild.clientJsGzipBytes!)}</div><div class="stat-label">JS gzipped, counter page</div></div>
           <div class="stat"><div class="stat-value">0 kB</div><div class="stat-label">JS on static pages</div></div>
-          <div class="stat"><div class="stat-value">1</div><div class="stat-label">Binary, no Node</div></div>
-          <div class="stat"><div class="stat-value">ES2020</div><div class="stat-label">Output baseline</div></div>
         </div>
       </section>
 
