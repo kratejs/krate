@@ -908,16 +908,47 @@ const regionShellVerifyLimit = 1 << 20
 // regionShellCache memoizes parsed shells by path so the hot path skips the disk
 // read and marker parse. It reloads when the file's size/mtime changes (dev
 // rebuilds rewrite the shell).
+//
+// A fixed cache (production) parses each shell once and never touches the disk
+// for it again: the served output cannot change while the server runs.
 type regionShellCache struct {
-	mu sync.Mutex
-	m  map[string]*regionShell
+	mu    sync.Mutex
+	m     map[string]*regionShell
+	fixed bool
 }
 
 func newRegionShellCache() *regionShellCache {
 	return &regionShellCache{m: map[string]*regionShell{}}
 }
 
+// newFixedRegionShellCache returns a cache that keeps every parsed shell for
+// the life of the process, with no per-request stat, read or hash.
+func newFixedRegionShellCache() *regionShellCache {
+	return &regionShellCache{m: map[string]*regionShell{}, fixed: true}
+}
+
 func (c *regionShellCache) load(absPath string) (*regionShell, error) {
+	if c.fixed {
+		c.mu.Lock()
+		e, ok := c.m[absPath]
+		c.mu.Unlock()
+		if ok {
+			return e, nil
+		}
+		data, err := os.ReadFile(absPath)
+		if err != nil {
+			return nil, err
+		}
+		e = parseRegionShell(string(data))
+		c.mu.Lock()
+		if prev, ok := c.m[absPath]; ok {
+			e = prev
+		} else {
+			c.m[absPath] = e
+		}
+		c.mu.Unlock()
+		return e, nil
+	}
 	fi, err := os.Stat(absPath)
 	if err != nil {
 		return nil, err
@@ -1729,6 +1760,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	goRegionsByRoute := loadGoRegions(absOut)
 	// Parsed baked shells (per route) so the region hot path skips the disk read
 	// and marker parse. Reloads automatically when a dev rebuild rewrites a shell.
+	if hub == nil && lookupOutIndex(absOut) != nil {
+		regionShells = newFixedRegionShellCache()
+	}
 	regionShells := newRegionShellCache()
 
 	if msg := apiArtifactMismatch(apiRTOption, apiDir, nodeAPIDir); msg != "" {
