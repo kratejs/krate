@@ -37,7 +37,7 @@ rejected: npm cannot use `1` as a tag). A stable version lower than the version
 npm serves as `latest` (a patch for an older line) is published as
 `latest-<major>.<minor>` so `latest` never moves backwards.
 
-If a release fails part way, fix the cause and re-run the job for the same tag.
+If a release fails part way, fix the cause and re-run the failed jobs for the same tag.
 `scripts/publish-packages.mjs` skips every package version already on npm and
 publishes the rest. A skipped package is whatever the earlier run uploaded; if
 that upload was wrong, publish a new version instead.
@@ -137,6 +137,16 @@ For a release, rollback is:
    backup. Krate does not write backups during a normal build.
 
 ## Release verification
+
+The release workflow does not re-run the test suites. Its `ci-gate` job
+requires a passed full CI run (a push to `dev` or `main`, the nightly run or a
+manual dispatch) of the exact tagged commit. It waits while that run is in
+progress, dispatches CI on the tag when the commit has none, and fails the
+release when the run failed: fix it on `dev`, or re-run the failed jobs, then
+re-run the release. Tag a commit whose `dev` or `main` CI is green and the gate
+passes at once. The release itself only runs what depends on the version: the
+seven platform packages (in parallel), `check:version`, `check:release`, the
+docs site build and the install smoke test of the tarballs it publishes.
 
 Run from a clean checkout with Node, pnpm, Go, and Playwright browsers installed:
 

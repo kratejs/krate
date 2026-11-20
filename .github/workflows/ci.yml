@@ -302,7 +302,7 @@ jobs:
           KRATE_ONLY_PLATFORM: ${{ matrix.platform }}
 
       - name: Test the release scripts
-        run: node --test scripts/smoke-helpers.test.mjs scripts/release-scripts.test.mjs
+        run: node --test scripts/smoke-helpers.test.mjs scripts/release-scripts.test.mjs scripts/release-ci-gate.test.mjs
 
       - name: Install and run the packages
         run: node scripts/smoke-install.mjs
