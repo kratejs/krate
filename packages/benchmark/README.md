@@ -4,7 +4,7 @@ Benchmarks for Krate: build time, API throughput, and SSR page throughput
 versus other web frameworks. The results are rendered to `results/latest.md`
 (Markdown) and `results/latest.json` (machine-readable). The published scores
 live in `packages/web/src/data/benchmarks.json`, and the docs page
-[Benchmarks](https://krate.js.org/docs/guides/benchmarks/) is generated from it.
+[Framework benchmarks](https://krate.js.org/docs/guides/benchmarks/) is generated from it.
 
 ## What's measured
 

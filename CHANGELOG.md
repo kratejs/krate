@@ -246,6 +246,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- Benchmarks page (docs guides/benchmarks) with cold build time, client JS size, API route and
+  runtime-component SSR throughput against Next.js, Vite, Astro, SvelteKit and Remix. Scores live in
+  `packages/web/src/data/benchmarks.json`, written by `node packages/benchmark/src/run.mjs publish`;
+  the docs page, the README block and the landing page all read from it, and CI checks they agree.
 - `@krate/auth` types can be augmented: `SessionUserExtensions` (fields on `session.user`) and
   `UserExtensions` replace the built-in field of the same name, so `role: Role` narrows `role`; the
   interfaces are empty by default and the existing types are unchanged. `DefaultSession` is exported
@@ -579,6 +583,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Benchmark harness: the Go API route and SvelteKit targets were silently skipped (stale import,
+  peer-dependency conflict), the load generator capped results near 21k req/s, timed builds were not
+  cold, a stale Krate CLI could be measured, and the Krate fixtures built against the npm runtime
+  instead of the checkout's.
 - A client navigation under a kept wrapper island no longer leaves the old page on screen. A "use
   client" provider in a layout (same props on every page, so a navigation keeps it mounted) whose
   children are a page with other islands got the new page appended after its range while the old

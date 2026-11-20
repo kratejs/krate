@@ -28,7 +28,7 @@ output, and configuration may change between releases.
 :::
 
 **Krate** compiles TSX/JSX pages into static HTML at build time and generates a
-small hydration bundle (about 19 KB gzipped for a counter page) that makes
+small hydration bundle (about 21 KB gzipped for a counter page) that makes
 pages interactive on the client. Builds run in
 milliseconds on a single Go binary with no bundler subprocess, and a static
 site needs no Node.js to build (Node is used by the npm wrapper,

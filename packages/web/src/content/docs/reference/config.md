@@ -29,7 +29,7 @@ error boundaries and class components) that the site's pages reference. The
 chunk is bundled from the runtime's ES modules, so within those pieces only the
 functions the site's code calls (and what they use) ship, and only those are
 defined on `window`. The router API (`krateRouter`, `navigate()`) is always
-defined. A counter page ships about 19 KB of gzipped runtime JS (about
+defined. A counter page ships about 21 KB of gzipped JS (about
 10 KB with `spa: false`); each extra piece adds between 1 and 5 KB gzipped.
 `krate dev` always serves the full runtime.
 
