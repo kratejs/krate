@@ -274,7 +274,7 @@ func TestIndexedPrecompressed(t *testing.T) {
 		t.Errorf("folder without slash must fall through, got %q", body)
 	}
 	if _, body = do("/.krate/manifest.json", "gzip"); !fellThrough {
-		t.Error("internal path must fall through")
+		t.Errorf("internal path must fall through, got %q", body)
 	}
 }
 

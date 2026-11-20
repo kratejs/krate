@@ -311,7 +311,7 @@ func serveWithBrokenExecutable(t *testing.T, script string) (statuses map[string
 				t.Errorf("GET %s: %v", p, err)
 				continue
 			}
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			statuses[p] = resp.StatusCode
 		}
