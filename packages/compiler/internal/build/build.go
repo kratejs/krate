@@ -1531,6 +1531,9 @@ func (b *Builder) BuildAll() error {
 	if apiErr == nil {
 		apiErr = b.BuildAllGoAPI()
 	}
+	if apiErr == nil {
+		apiErr = b.buildScriptcAPI()
+	}
 	if err := apiErr; err != nil {
 		fmt.Fprintf(os.Stderr, "  %sAPI Build error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  API: "+err.Error())
@@ -5369,6 +5372,25 @@ func isAPIRouteSource(path string) bool {
 	return false
 }
 
+// apiRouteSourceFiles lists the JS/TS route modules under apiSrcDir. Files
+// whose name starts with "_" are not routes.
+func apiRouteSourceFiles(apiSrcDir string) ([]string, error) {
+	var out []string
+	err := filepath.Walk(apiSrcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || strings.HasPrefix(filepath.Base(path), "_") {
+			return nil
+		}
+		if isAPIRouteSource(path) {
+			out = append(out, path)
+		}
+		return nil
+	})
+	return out, err
+}
+
 // buildJSAPI compiles the JS/TS API routes.
 func (b *Builder) buildJSAPI() error {
 	apiSrcDir := filepath.Join(b.Root, filepath.FromSlash(gohost.DefaultAPIDir))
@@ -5376,22 +5398,7 @@ func (b *Builder) buildJSAPI() error {
 		return nil // No API directory present, skip silently
 	}
 
-	var jsRoutes []string
-	err := filepath.Walk(apiSrcDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if strings.HasPrefix(filepath.Base(path), "_") {
-			return nil
-		}
-		if isAPIRouteSource(path) {
-			jsRoutes = append(jsRoutes, path)
-		}
-		return nil
-	})
+	jsRoutes, err := apiRouteSourceFiles(apiSrcDir)
 	if err != nil {
 		return fmt.Errorf("scanning api routes: %w", err)
 	}

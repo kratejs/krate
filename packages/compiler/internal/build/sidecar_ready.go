@@ -30,6 +30,8 @@ var sidecarStartTimeout = 30 * time.Second
 // answer 503 at once until a later start listens.
 type sidecarReady struct {
 	timeout time.Duration
+	// name is how messages call the sidecar; default "Node API sidecar".
+	name string
 	// showReason puts the failure reason in the 503 body (dev); production
 	// answers keep it in the server log.
 	showReason bool
@@ -41,6 +43,20 @@ type sidecarReady struct {
 	ch      chan struct{} // closed once the sidecar is up
 	failCh  chan struct{} // closed once the sidecar is known to have failed
 	failMsg string        // why, while failCh is closed
+}
+
+func (s *sidecarReady) label() string {
+	if s.name == "" {
+		return "Node API sidecar"
+	}
+	return s.name
+}
+
+func (s *sidecarReady) slowStartCause() string {
+	if s.name == "" {
+		return "instrumentation register() still pending, or the sidecar keeps crashing"
+	}
+	return "the sidecar keeps crashing"
 }
 
 func newSidecarReady(timeout time.Duration) *sidecarReady {
@@ -63,7 +79,7 @@ func (s *sidecarReady) down() {
 	defer s.mu.Unlock()
 	s.gen++
 	if !s.up.Load() {
-		s.failLocked("the Node API sidecar exited before it started listening; it is restarting")
+		s.failLocked("the " + s.label() + " exited before it started listening; it is restarting")
 	}
 	s.resetLocked()
 }
@@ -215,9 +231,9 @@ func (s *sidecarReady) unavailable(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if msg := s.failure(); msg != "" {
 		if s.logged.CompareAndSwap(false, true) {
-			fmt.Fprintf(os.Stderr, "  %s! answering 503 to requests that need the Node API sidecar: %s%s\n", cYellow, msg, cReset)
+			fmt.Fprintf(os.Stderr, "  %s! answering 503 to requests that need the %s: %s%s\n", cYellow, s.label(), msg, cReset)
 		}
-		body := "server unavailable: the Node API sidecar failed to start (see the server log)"
+		body := "server unavailable: the " + s.label() + " failed to start (see the server log)"
 		if s.showReason {
 			body = "server unavailable: " + msg
 		}
@@ -225,7 +241,7 @@ func (s *sidecarReady) unavailable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.logged.CompareAndSwap(false, true) {
-		fmt.Fprintf(os.Stderr, "  %s! Node API sidecar did not start listening within %s; answering 503 until it does (instrumentation register() still pending, or the sidecar keeps crashing)%s\n", cYellow, s.timeout, cReset)
+		fmt.Fprintf(os.Stderr, "  %s! %s did not start listening within %s; answering 503 until it does (%s)%s\n", cYellow, s.label(), s.timeout, s.slowStartCause(), cReset)
 	}
 	http.Error(w, "server is starting", http.StatusServiceUnavailable)
 }

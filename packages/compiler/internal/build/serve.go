@@ -1765,6 +1765,24 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		nodeAPIProxy = nodeReady.wrap(apiProxy)
 	}
 
+	// ssr.apiRuntime "scriptc": the routes the build compiled go to the native
+	// server, the rest to the embedded runtime. Dev never uses it.
+	var scriptc *scriptcSidecar
+	var scriptcRoutes map[string]bool
+	if strings.EqualFold(apiRTOption, "scriptc") {
+		if hub != nil {
+			scriptcDevNotice()
+		} else if plan := loadScriptcServePlan(root); plan.warning != "" {
+			fmt.Fprintf(os.Stderr, "  %s! %s%s\n", cYellow, plan.warning, cReset)
+		} else if plan.exe != "" && apiRT != nil {
+			scriptcPort := internalPort(port + 3)
+			scriptc = newScriptcSidecar(plan.exe, scriptcPort, revalHost.secret, revalHost.EnvList(), apiBudgets)
+			scriptcRoutes = plan.routes
+			printf("  %s*%s scriptc API server (%d routes) -> %shttp://localhost:%d%s\n", cCyan, cReset, len(plan.routes), cCyan, scriptcPort, cReset)
+			go scriptc.Run()
+		}
+	}
+
 	// Optional user-provided API sidecar. Requests it owns are forwarded first;
 	// a 404 falls through to the built-in Go/TS/QuickJS routes below.
 	customSidecar, err := newAPISidecar(root, cfg)
@@ -1862,6 +1880,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// the way the JS runtimes do: 405 + Allow, and automatic OPTIONS.
 		if goAPI != nil && goAPI.Active() && apiRT != nil && apiRT.ResolveFile(r.URL.Path) == "" {
 			if allowed, ok := goAPI.AllowedMethods(r.URL.Path); ok && writeGoMethodResponse(w, r, allowed) {
+				return
+			}
+		}
+
+		if scriptc != nil {
+			if file := apiRT.ResolveFile(r.URL.Path); scriptcRoutes[file] {
+				scriptc.ServeRoute(w, r, file)
 				return
 			}
 		}
@@ -2744,6 +2769,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if customSidecar != nil {
 			customSidecar.Stop()
 			printf("  %s+%s API sidecar stopped\n", cGreen, cReset)
+		}
+		if scriptc != nil {
+			scriptc.Stop()
+			printf("  %s+%s scriptc API server stopped\n", cGreen, cReset)
 		}
 		nodeAPICmdMu.Lock()
 		nc := nodeAPICmd

@@ -15,6 +15,9 @@ import (
 // TestNativeBudgetGUI and `krate native profile --memory`.
 
 func TestMain(m *testing.M) {
+	if code, ok := scriptcFakeMain(); ok {
+		os.Exit(code)
+	}
 	if mode := os.Getenv("KRATE_FAKE_SHELL"); mode != "" {
 		os.Exit(fakeShell(mode))
 	}

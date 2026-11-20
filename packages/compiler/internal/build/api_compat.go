@@ -14,10 +14,12 @@ import (
 )
 
 // embeddedRuntime reports whether a runtime option (ssr.apiRuntime or
-// ssr.middlewareRuntime) selects the embedded QuickJS runtime.
+// ssr.middlewareRuntime) selects the embedded QuickJS runtime. "scriptc"
+// counts: it builds every route for the embedded runtime too, which serves
+// the routes scriptc does not compile.
 func embeddedRuntime(option string) bool {
 	switch strings.ToLower(option) {
-	case "", "quickjs":
+	case "", "quickjs", "scriptc":
 		return true
 	}
 	return false
