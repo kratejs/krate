@@ -1,9 +1,11 @@
 // HTTP load testing.
 //
 // Prefers `autocannon` when it is installed (add it with `pnpm add -D autocannon`
-// in this package) because it can saturate fast servers that a single-process
-// Node client cannot. Otherwise falls back to a dependency-free keep-alive
-// client that is accurate enough for relative comparisons.
+// in this package). A single autocannon process saturates around 20k req/s, so
+// it runs with `clientWorkers` worker threads to keep the client from being the
+// bottleneck. Otherwise falls back to a dependency-free keep-alive client that
+// is single-process (it ignores `clientWorkers`) and is only accurate enough for
+// relative comparisons of slower servers.
 import http from 'node:http';
 import https from 'node:https';
 
@@ -12,7 +14,10 @@ const MAX_SAMPLES = 500_000;
 /**
  * Load-test a URL. Returns { requests, errors, durationMs, rps, latency }.
  */
-export async function loadTest(url, { durationMs = 5000, connections = 32, warmupMs = 1000 } = {}) {
+export async function loadTest(
+  url,
+  { durationMs = 5000, connections = 32, warmupMs = 1000, clientWorkers = 1 } = {},
+) {
   let autocannon;
   try {
     ({ default: autocannon } = await import('autocannon'));
@@ -20,21 +25,37 @@ export async function loadTest(url, { durationMs = 5000, connections = 32, warmu
     autocannon = null;
   }
 
-  if (autocannon) return loadTestAutocannon(autocannon, url, { durationMs, connections, warmupMs });
+  if (autocannon) return loadTestAutocannon(autocannon, url, { durationMs, connections, warmupMs, clientWorkers });
   return loadTestBuiltin(url, { durationMs, connections, warmupMs });
 }
 
-async function loadTestAutocannon(autocannon, url, { durationMs, connections, warmupMs }) {
-  const result = await autocannon({
+// effectiveWorkers returns the worker count to use: autocannon splits the
+// connections evenly (rounding down) across workers, so pick the largest count
+// <= requested that divides `connections` and the total stays exact.
+export function effectiveWorkers(requested, connections) {
+  let w = Math.max(1, Math.min(requested | 0 || 1, connections));
+  while (w > 1 && connections % w !== 0) w--;
+  return w;
+}
+
+async function loadTestAutocannon(autocannon, url, { durationMs, connections, warmupMs, clientWorkers }) {
+  const workers = effectiveWorkers(clientWorkers, connections);
+  const opts = {
     url,
     connections,
     duration: Math.max(1, durationMs / 1000),
-    warmup: warmupMs > 0,
-  });
+    // autocannon spreads this over the main options, so an explicit duration
+    // keeps the warmup short instead of repeating the full window.
+    warmup: warmupMs > 0 ? { duration: Math.max(1, warmupMs / 1000) } : undefined,
+  };
+  // workers: 0 (the default) keeps the single-process path.
+  if (workers > 1) opts.workers = workers;
+  const result = await autocannon(opts);
   return {
     requests: result.requests.total,
     errors: (result.errors ?? 0) + (result.non2xx ?? 0),
     durationMs,
+    clientWorkers: workers,
     rps: Math.round(result.requests.average),
     latency: {
       p50: round(result.latency.p50),

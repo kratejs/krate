@@ -63,15 +63,32 @@ node src/run.mjs report           # print latest.md to stdout
 | `--runs N` | Build timing runs (default `3`) |
 | `--duration ms` | Load-test duration (default `5000`) |
 | `--connections N` | Load-test concurrency; a comma list sweeps the SSR test (e.g. `16,64,256`) |
+| `--client-workers N` | autocannon worker threads driving the load (default `min(4, max(1, cpus/3))`; `1` = single process). Reduced to the largest count that divides `--connections` evenly. The built-in fallback client (used when autocannon is missing) is always single-process |
 | `--pm <name>` | Installer: `npm` (default), `pnpm`, `yarn`, or `bun` |
 
 ## Methodology
 
-- **Fair comparison** - the Krate CLI is compiled once (cached in
-  `.krate-bench/`) and reused for every timed run, so its own Go compilation is
-  excluded from build times, just like the preinstalled binaries of the other
-  frameworks.
-- **Cold builds** - every timed build starts from a clean output directory.
+- **Fair comparison** - the Krate CLI is rebuilt at the start of every run
+  (into `.krate-bench/`; `go build` is incremental) so the benchmark never
+  measures a stale compiler, and reused for every timed run, so its own Go
+  compilation is excluded from build times, just like the preinstalled binaries
+  of the other frameworks.
+- **Source runtime** - the Krate fixtures link this checkout's `@krate/runtime`
+  (build it first with `pnpm build`) rather than an npm release, and their
+  config needs no `@krate/core`. The Go API fixture resolves the Go helper
+  module through a `replace` to `packages/compiler`, so it benchmarks source.
+- **Cold builds** - before every timed build the harness removes the
+  framework's output directory and build caches (`.next` incl. its cache,
+  `node_modules/.vite`, `node_modules/.astro`, `.svelte-kit`, Krate's `.krate`).
+  Installed dependencies are kept; removal and SvelteKit's `svelte-kit sync`
+  are not timed.
+- **Load generator** - one autocannon process saturates near 20k req/s, which
+  would cap fast servers, so autocannon runs with several worker threads
+  (`--client-workers`; recorded in the results meta and the report). Use
+  `--client-workers 1` for the old single-process behavior.
+- **Clean tree** - runs do not leave tracked or untracked files behind: Krate
+  fixtures have no npm dependencies, the Go baseline binary is written to a
+  gitignored `.bin/`, and the other fixtures commit their lockfiles.
 - **Stable samples** - the median of several runs is reported to reduce noise;
   each API server is warmed up before the timed window. When `autocannon` is
   installed (a devDependency), it drives the load test; otherwise a built-in

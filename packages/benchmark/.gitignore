@@ -12,6 +12,9 @@ fixtures/*/.astro/
 fixtures/*/.svelte-kit/
 fixtures/*/build/
 fixtures/*/.krate/
+fixtures/*/.bin/
+fixtures/*/go.work
+fixtures/*/go.work.sum
 
 # Krate benchmark CLI binary cache
 .krate-bench/

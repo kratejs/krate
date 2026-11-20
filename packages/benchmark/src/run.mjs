@@ -43,8 +43,23 @@ function detectPm() {
   return 'npm';
 }
 
+// One autocannon process tops out around 20k req/s, so spread the client over a
+// few worker threads, leaving most cores for the server under test.
+function defaultClientWorkers() {
+  return Math.min(4, Math.max(1, Math.floor(os.cpus().length / 3)));
+}
+
 function parseArgs(argv) {
-  const opts = { command: 'all', filter: null, runs: 3, durationMs: 5000, connections: 32, connectionsList: [32], pm: detectPm() };
+  const opts = {
+    command: 'all',
+    filter: null,
+    runs: 3,
+    durationMs: 5000,
+    connections: 32,
+    connectionsList: [32],
+    clientWorkers: defaultClientWorkers(),
+    pm: detectPm(),
+  };
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -75,6 +90,9 @@ function parseArgs(argv) {
         opts.connections = opts.connectionsList[0];
         break;
       }
+      case '--client-workers':
+        opts.clientWorkers = Math.max(1, parseInt(args[++i], 10) || 1);
+        break;
       case '--pm':
         opts.pm = args[++i];
         break;
@@ -106,16 +124,20 @@ Options:
   --duration ms     Load-test duration (default 5000)
   --connections N   Load-test concurrency; a comma list sweeps the SSR test
                     (e.g. --connections 16,64,256). Default 32
+  --client-workers N  autocannon worker threads driving the load (default
+                    min(4, max(1, cpus/3)); 1 = single process). The built-in
+                    fallback client is always single-process
   --pm <name>       Package manager for installs: npm|pnpm|yarn|bun (default: detected)
 
 Dependencies are installed automatically the first time a fixture is run. The
 SSR fixtures use the monorepo @krate/runtime, so run \`pnpm build\` first.
 `;
 
-// Build the krate CLI once (cached) so build timing excludes Go toolchain setup.
+// Build the krate CLI (outside any timed section) so build timing excludes Go
+// toolchain setup. It is rebuilt on every run so the benchmark never measures a
+// stale compiler; `go build` is incremental and fast when nothing changed.
 async function ensureKrateBin() {
   const bin = join(BIN_DIR, exeName('krate'));
-  if (exists(bin)) return bin;
   await mkdirp(BIN_DIR);
   const compilerDir = join(pkgRoot, '..', 'compiler');
   log('building krate CLI...');
@@ -192,6 +214,14 @@ async function installedVersion(pkgName, dir) {
   }
 }
 
+// cleanBuildState removes a fixture's output directory and build caches so the
+// next build starts cold. Installed dependencies are kept.
+async function cleanBuildState(dir, fw) {
+  for (const rel of [fw.outDir, ...(fw.cleanPaths ?? [])]) {
+    await rmrf(join(dir, rel));
+  }
+}
+
 async function runBuild(opts, krateBin) {
   const rows = [];
   for (const fw of BUILD_FRAMEWORKS) {
@@ -201,13 +231,16 @@ async function runBuild(opts, krateBin) {
     const dir = fixtureDir(fw.fixture);
     const ctx = { workDir: dir, krateBin };
 
-    if (fw.prebuild) {
-      const s = fw.prebuild(ctx);
-      await run(s.cmd, s.args, { cwd: s.cwd ?? dir });
-    }
-
     const times = [];
     for (let i = 0; i < opts.runs; i++) {
+      // Cold build: drop output and build caches first (not timed), then redo
+      // any prebuild step whose output lives in a cleaned directory.
+      await cleanBuildState(dir, fw);
+      if (fw.prebuild) {
+        const p = fw.prebuild(ctx);
+        await run(p.cmd, p.args, { cwd: p.cwd ?? dir });
+      }
+      if (fw.setup) await fw.setup(ctx);
       const s = fw.build(ctx);
       const t = await timed(s.cmd, s.args, { cwd: s.cwd ?? dir });
       if (t.code !== 0) {
@@ -264,6 +297,7 @@ async function runApi(opts, krateBin) {
     const result = await loadTest(url, {
       durationMs: opts.durationMs,
       connections: opts.connections,
+      clientWorkers: opts.clientWorkers,
     });
     await handle.stop();
 
@@ -326,7 +360,11 @@ async function runSsr(opts, krateBin) {
     // Sweep concurrency levels so single-core vs multi-core scaling is visible.
     const levels = opts.connectionsList?.length ? opts.connectionsList : [opts.connections];
     for (const conn of levels) {
-      const result = await loadTest(url, { durationMs: opts.durationMs, connections: conn });
+      const result = await loadTest(url, {
+        durationMs: opts.durationMs,
+        connections: conn,
+        clientWorkers: opts.clientWorkers,
+      });
       rows.push({
         id: fw.id,
         name: fw.name,
@@ -370,8 +408,8 @@ async function main() {
     api: null,
     ssr: null,
     buildMeta: { runs: opts.runs },
-    apiMeta: { connections: opts.connections, durationMs: opts.durationMs },
-    ssrMeta: { connectionsList: opts.connectionsList, durationMs: opts.durationMs },
+    apiMeta: { connections: opts.connections, durationMs: opts.durationMs, clientWorkers: opts.clientWorkers },
+    ssrMeta: { connectionsList: opts.connectionsList, durationMs: opts.durationMs, clientWorkers: opts.clientWorkers },
   };
 
   if (opts.command === 'build' || opts.command === 'all') {

@@ -115,7 +115,9 @@ export function renderMarkdown(results) {
   lines.push(
     '- **API**: each server is built, warmed up, then load-tested with a fixed ' +
       'concurrency of keep-alive connections for a fixed window; requests per second and ' +
-      'latency percentiles are measured.',
+      'latency percentiles are measured. The load generator runs ' +
+      `${results.apiMeta?.clientWorkers ?? 1} client worker thread(s) (autocannon; the built-in ` +
+      'fallback client is single-process).',
   );
   lines.push(
     '- **SSR**: a streaming page rendering one runtime-tier component is warmed up, then ' +

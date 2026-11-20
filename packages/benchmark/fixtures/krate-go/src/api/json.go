@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"krate-goapi/runtime"
+	"github.com/kratejs/krate/packages/compiler/goext/runtime"
 )
 
 func GET(w http.ResponseWriter, r *http.Request) {
