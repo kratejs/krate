@@ -11,7 +11,16 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+// defaultRegionCoalesceWindow is how long a streamed page waits for its
+// regions to resolve before the first flush. Regions that finish inside it
+// share the shell's write; slower ones keep streaming as they finish.
+const defaultRegionCoalesceWindow = time.Millisecond
+
+// regionCoalesceWindow is a variable only so tests can widen it on slow runners.
+var regionCoalesceWindow = defaultRegionCoalesceWindow
 
 type regionURLKey struct{}
 
@@ -117,17 +126,17 @@ func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher ht
 			flusher.Flush()
 		}
 	}
-	_, _ = w.Write([]byte(prefix))
-	flush()
 
-	for ev := range frames {
+	// handle turns one frame into the chunk that inserts its region ("" when
+	// the frame adds nothing), recording failures on res.
+	handle := func(ev regionFrameEvent) string {
 		if ev.err != nil {
 			res.renderErr = ev.err.Error()
-			continue
+			return ""
 		}
 		f := ev.frame
 		if f.Type != "region" || f.ID == "" {
-			continue
+			return ""
 		}
 		if f.NoStore {
 			res.noStore = true
@@ -139,11 +148,11 @@ func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher ht
 			if f.Error != "" {
 				res.renderErr = f.Error
 			}
-			continue
+			return ""
 		}
 		html := f.HTML
 		if html == "" && f.Head == "" && f.Title == "" {
-			continue
+			return ""
 		}
 		if f.Head != "" || f.Title != "" {
 			warnStreamedHead(route, f.ID)
@@ -152,12 +161,72 @@ func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher ht
 			resolved, err := resolveGoMarkersE(html, reqCtx, renderGo)
 			if err != nil {
 				res.renderErr = err.Error()
-				continue
+				return ""
 			}
 			html = resolved
 		}
-		_, _ = w.Write([]byte(regionReplaceScript(f.ID, html, f.Head, f.Title)))
-		flush()
+		return regionReplaceScript(f.ID, html, f.Head, f.Title)
+	}
+
+	// Regions that resolve within the first window go out with the shell in
+	// one write and one flush. A slow region does not hold the shell back by
+	// more than the window.
+	var out bytes.Buffer
+	out.WriteString(prefix)
+	closed := false
+	timer := time.NewTimer(regionCoalesceWindow)
+collect:
+	for {
+		select {
+		case ev, ok := <-frames:
+			if !ok {
+				closed = true
+				break collect
+			}
+			out.WriteString(handle(ev))
+		case <-timer.C:
+			break collect
+		}
+	}
+	timer.Stop()
+	if closed {
+		out.WriteString(tail)
+	}
+	_, _ = w.Write(out.Bytes())
+	flush()
+	if closed {
+		return res
+	}
+
+	// Later regions stream as they finish. Frames that are already waiting
+	// share one flush, and so does the tail when the stream has ended.
+	for ev := range frames {
+		out.Reset()
+		out.WriteString(handle(ev))
+		ended := false
+	drain:
+		for {
+			select {
+			case next, ok := <-frames:
+				if !ok {
+					ended = true
+					break drain
+				}
+				out.WriteString(handle(next))
+			default:
+				break drain
+			}
+		}
+		if ended {
+			out.WriteString(tail)
+		}
+		if out.Len() > 0 {
+			_, _ = w.Write(out.Bytes())
+			flush()
+		}
+		if ended {
+			return res
+		}
 	}
 	_, _ = w.Write([]byte(tail))
 	flush()

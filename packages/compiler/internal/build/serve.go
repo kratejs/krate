@@ -1246,8 +1246,8 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 
 	// The caller owns Content-Type and the no-store header for non-ISR pages.
 	// The 200 status is committed implicitly by the first body write below;
-	// this function only writes the body, flushing after each splice so the
-	// page streams progressively.
+	// this function only writes the body. Every region has resolved by now, so
+	// the page goes out in one flush instead of one per splice.
 	flush := func() {
 		if flusher != nil {
 			flusher.Flush()
@@ -1256,7 +1256,7 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 
 	// Write the shell, replacing each marker block's inner content with its
 	// region HTML (or the baked content when the region render failed/skipped),
-	// flushing after each splice so the page streams progressively. Nested
+	// then flushing once. Nested
 	// markers are spliced recursively: when a parent region is replaced its
 	// baked body (and any markers inside it) is discarded, but when a suspense
 	// region keeps its baked fallback, markers nested inside are still spliced.
@@ -1273,7 +1273,6 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 			}
 			// Standalone runtime regions with no frame leave the empty slot empty.
 			cursor = b.fbEnd
-			flush()
 		}
 		writeShell(cursor, hi)
 	}
@@ -1760,10 +1759,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	goRegionsByRoute := loadGoRegions(absOut)
 	// Parsed baked shells (per route) so the region hot path skips the disk read
 	// and marker parse. Reloads automatically when a dev rebuild rewrites a shell.
+	regionShells := newRegionShellCache()
 	if hub == nil && lookupOutIndex(absOut) != nil {
 		regionShells = newFixedRegionShellCache()
 	}
-	regionShells := newRegionShellCache()
 
 	if msg := apiArtifactMismatch(apiRTOption, apiDir, nodeAPIDir); msg != "" {
 		fmt.Fprintf(os.Stderr, "  %s! %s%s\n", cYellow, msg, cReset)

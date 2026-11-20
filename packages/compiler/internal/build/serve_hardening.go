@@ -589,6 +589,7 @@ type gzipResponseWriter struct {
 	wantsGzip   bool
 	useGzip     bool
 	wroteHeader bool
+	dirty       bool // bytes written to zw since its last flush
 }
 
 func (g *gzipResponseWriter) decide(status int) {
@@ -629,6 +630,9 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 		if g.zw == nil {
 			return 0, io.ErrClosedPipe
 		}
+		if len(b) > 0 {
+			g.dirty = true
+		}
 		return g.zw.Write(b)
 	}
 	return g.ResponseWriter.Write(b)
@@ -640,8 +644,9 @@ func (g *gzipResponseWriter) Flush() {
 	} else {
 		g.decide(http.StatusOK)
 	}
-	if g.useGzip && g.zw != nil {
+	if g.useGzip && g.zw != nil && g.dirty {
 		g.zw.Flush()
+		g.dirty = false
 	}
 	if f, ok := g.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
