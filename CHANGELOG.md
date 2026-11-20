@@ -579,6 +579,17 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A client navigation under a kept wrapper island no longer leaves the old page on screen. A "use
+  client" provider in a layout (same props on every page, so a navigation keeps it mounted) whose
+  children are a page with other islands got the new page appended after its range while the old
+  one stayed, with its islands unmounted but their markup left (links, back/forward, `router.refresh()`
+  and the refresh after a revalidating action; 0.5.0-rc.8). An outer island's slot listed the nodes of
+  the islands nested in it, which went stale when a nested island rendered new children: Preact 10.24
+  places a slot's children again on every render and put the old nodes back, and a teardown through
+  the slot missed the nested island's current islands. A slot now re-reads its nested islands' nodes
+  from the document on every render (keyed by node, and rendered even when Preact would reuse it),
+  sets its context scope on its own nodes only, the router syncs kept islands after a swap, and an
+  unmount walks each island's current range.
 - `import.meta.url`, `import.meta.dirname`, `import.meta.filename`, `__dirname` and `__filename` in server
   code now name the module's own source file instead of the output bundle. A workspace package that did
   `path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..")` or

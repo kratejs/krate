@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { swapPreservingIslands, maskIslands, unmountIslandsIn, type IslandHandle, type IslandRecord } from './island-swap';
+import { mountIslands, checkIslands, island as srv, slot as srvSlot, wrapper, type FakeIsland } from './island-fakes.test.helpers';
 
 // Island markup as the server renders it.
 function island(e: string, props: unknown, html: string, m = 'cmod'): string {
@@ -279,5 +280,215 @@ describe('unmountIslandsIn', () => {
     for (const r of recs) r.handle.unmount.mockImplementation(() => void order.push(r.name));
     unmountIslandsIn([root.firstChild!]);
     expect(order).toEqual(['Inner', 'Outer']);
+  });
+});
+
+// Kept wrapper islands (a context provider in a layout) whose server children
+// change: the fakes render new server children inside the island's range, as
+// the island chunks do, and checkIslands() holds after every swap.
+describe('kept wrapper islands', () => {
+  // The site: Providers > ShellFrame (renders <main> around its slot) >
+  // BotWorkspaceProvider (same props on every bot page) > the page.
+  const site = (page: string, n: number, v = 0) =>
+    wrapper(
+      'Providers',
+      {},
+      'p' + n,
+      srv(
+        'ShellFrame',
+        { __krateChildren: { __krateSlotRef: 's' + n } },
+        `<div class="frame"><nav>nav</nav><main id="main">${srvSlot('s' + n, wrapper('BotWorkspaceProvider', { value: 'genesis-test@' + v }, 'b' + n, page))}</main></div>`,
+      ),
+    );
+  const modules = `<div class="bar">bar</div><header>Modules</header>${srv('ModulesList', {}, '<ul>modules</ul>')}`;
+  const brand = `<div class="bar">bar</div><header>Brand kit</header>${srv('BrandForm', {}, '<form>brand</form>')}`;
+  let recs: FakeIsland[] = [];
+  const named = (name: string) => recs.filter((r) => r.name === name && !r.gone);
+  const go = (html: string, opts = {}) => {
+    swapPreservingIslands(root, null, null, fragment(html), opts);
+    // The loader mounts the islands that are new.
+    recs.push(...mountIslands(root));
+    expect(checkIslands(recs)).toEqual([]);
+  };
+  // The provider's range holds exactly html's text, and nothing in <main> follows it.
+  const holds = (text: string) => {
+    const [p] = named('BotWorkspaceProvider');
+    let inside = '';
+    for (let n = p.start!.nextSibling; n && n !== p.end; n = n.nextSibling) inside += n.nodeType === 8 ? '' : n.textContent;
+    let after = '';
+    for (let n = p.end!.nextSibling; n; n = n.nextSibling) after += n.textContent;
+    expect(inside).toBe(text);
+    expect(after).toBe('');
+  };
+  beforeEach(() => {
+    root.innerHTML = site(modules, 1);
+    recs = mountIslands(root);
+  });
+
+  it('a navigation to a page with other islands renders them in the kept provider, in place of the old ones', () => {
+    const [providers] = named('Providers');
+    const [shell] = named('ShellFrame');
+    const [bwp] = named('BotWorkspaceProvider');
+    const [list] = named('ModulesList');
+    go(site(brand, 2), { sameProps: true });
+    holds('barBrand kitbrand');
+    expect(list.handle.unmount).toHaveBeenCalledTimes(1);
+    expect(list.connectedAtUnmount).toBe(true);
+    for (const r of [providers, shell, bwp]) expect(r.handle.unmount).not.toHaveBeenCalled();
+    expect(named('BrandForm')).toHaveLength(1);
+    // The wrappers around the provider re-read their sets.
+    expect(shell.handle.sync).toHaveBeenCalled();
+    // ...and back.
+    go(site(modules, 3), { sameProps: true });
+    holds('barModulesmodules');
+    expect(bwp.handle.unmount).not.toHaveBeenCalled();
+    expect(named('BrandForm')).toHaveLength(0);
+  });
+
+  it('a refresh that changes the kept provider\'s props and the shape of its children', () => {
+    const [bwp] = named('BotWorkspaceProvider');
+    const [list] = named('ModulesList');
+    go(site(`${modules}${srv('SaveBar', {}, '<button>save</button>')}`, 2, 1));
+    holds('barModulesmodulessave');
+    for (const r of [...named('Providers'), ...named('ShellFrame'), bwp]) expect(r.handle.sync).toHaveBeenCalled();
+    const [props, pool] = bwp.handle.update.mock.calls[0];
+    expect(props).toEqual({ value: 'genesis-test@1', __krateChildren: { __krateSlotRef: 'b2' } });
+    expect(Object.keys(pool!)).toEqual(['b2']);
+    expect(list.handle.unmount).toHaveBeenCalled();
+    expect(bwp.handle.unmount).not.toHaveBeenCalled();
+  });
+
+  it('list -> detail -> list under the kept provider, both ways', () => {
+    const list = `<header>Module list</header>${srv('ModuleRows', {}, '<ol>rows</ol>')}<a href="/m/base">base</a>`;
+    const detail = `<nav><a href="/m">all</a></nav><section><header>Module detail</header>${srv('ModuleDetail', { name: 'base' }, '<article>base</article>')}</section>`;
+    const [bwp] = named('BotWorkspaceProvider');
+    go(site(list, 2), { sameProps: true });
+    holds('Module listrowsbase');
+    const [rows] = named('ModuleRows');
+    go(site(detail, 3), { sameProps: true });
+    holds('allModule detailbase');
+    expect(rows.handle.unmount).toHaveBeenCalled();
+    const [one] = named('ModuleDetail');
+    go(site(list, 4), { sameProps: true });
+    holds('Module listrowsbase');
+    expect(one.handle.unmount).toHaveBeenCalled();
+    go(site(detail, 5), { sameProps: true });
+    holds('allModule detailbase');
+    expect(bwp.handle.unmount).not.toHaveBeenCalled();
+    expect(named('ShellFrame')[0].handle.sync).toHaveBeenCalledTimes(4);
+  });
+
+  it('leaving the provider unmounts the islands now inside it, not the ones it held first', () => {
+    go(site(brand, 2), { sameProps: true });
+    const [form] = named('BrandForm');
+    const [shell] = named('ShellFrame');
+    // A page of the shell without the provider: ShellFrame's children change shape.
+    go(
+      wrapper('Providers', {}, 'p3', srv('ShellFrame', { __krateChildren: { __krateSlotRef: 's3' } }, `<div class="frame"><nav>nav</nav><main id="main">${srvSlot('s3', '<p>settings</p><p>more</p>')}</main></div>`)),
+      { sameProps: true },
+    );
+    expect(form.handle.unmount).toHaveBeenCalled();
+    expect(form.connectedAtUnmount).toBe(true);
+    expect(shell.handle.sync).toHaveBeenCalled();
+    expect(named('BotWorkspaceProvider')).toHaveLength(0);
+    expect(shell.handle.unmount).not.toHaveBeenCalled();
+    expect(document.getElementById('main')!.textContent).toBe('settingsmore');
+  });
+});
+
+describe('wrappers in wrappers, and several slots', () => {
+  let recs: FakeIsland[] = [];
+  const named = (name: string) => recs.filter((r) => r.name === name && !r.gone);
+  const go = (html: string, opts = {}) => {
+    swapPreservingIslands(root, null, null, fragment(html), opts);
+    recs.push(...mountIslands(root));
+    expect(checkIslands(recs)).toEqual([]);
+  };
+  const outer = (n: number, label: string, inner: string) => wrapper('Outer', {}, 'o' + n, `<div class="static">${label}</div>${inner}`);
+  const inner = (n: number, page: string) => wrapper('Inner', {}, 'i' + n, page);
+
+  it('an inner wrapper renders new children while the outer one updates in place', () => {
+    root.innerHTML = outer(1, 'one', inner(1, `<p>a</p>${srv('A', {}, '<b>a</b>')}`));
+    recs = mountIslands(root);
+    const [o] = named('Outer');
+    const [i] = named('Inner');
+    const [a] = named('A');
+    go(outer(2, 'two', inner(2, `<section>${srv('B', {}, '<i>b</i>')}</section><p>b</p>`)));
+    expect(root.textContent).toBe('twobb');
+    expect(a.handle.unmount).toHaveBeenCalled();
+    expect(i.handle.update.mock.calls[0][1]).toBeDefined();
+    expect(o.handle.update).not.toHaveBeenCalled();
+    expect(o.handle.sync).toHaveBeenCalled();
+    expect(named('B')).toHaveLength(1);
+  });
+
+  it('an outer wrapper renders new children: the inner one in the old children unmounts', () => {
+    root.innerHTML = outer(1, 'one', inner(1, `<p>a</p>${srv('A', {}, '<b>a</b>')}`));
+    recs = mountIslands(root);
+    const [o] = named('Outer');
+    const [i] = named('Inner');
+    const [a] = named('A');
+    go(wrapper('Outer', {}, 'o2', `<header>h</header><div>new</div>${inner(2, '<p>a</p>')}`));
+    expect(a.handle.unmount).toHaveBeenCalled();
+    expect(i.handle.unmount).toHaveBeenCalled();
+    expect(i.connectedAtUnmount).toBe(true);
+    expect(root.textContent).toBe('hnewa');
+    expect(named('Inner')).toHaveLength(1);
+    expect(o.handle.sync).toHaveBeenCalled();
+  });
+
+  it('a wrapper with two slots renders one anew and keeps the other', () => {
+    const tabs = (n: number, a: string, b: string) =>
+      srv('Tabs', { head: { __krateSlotRef: 'h' + n }, body: { __krateSlotRef: 'd' + n } }, `<nav>${srvSlot('h' + n, a)}</nav><section>${srvSlot('d' + n, b)}</section>`);
+    root.innerHTML = tabs(1, '<span>title</span>', `<p>one</p>${srv('One', {}, '<b>1</b>')}`);
+    recs = mountIslands(root);
+    const [t] = named('Tabs');
+    const [one] = named('One');
+    const span = root.querySelector('span');
+    go(tabs(2, '<span>title</span>', `${srv('Two', {}, '<i>2</i>')}<p>two</p><p>more</p>`));
+    expect(root.querySelector('span')).toBe(span);
+    const [props, pool] = t.handle.update.mock.calls[0];
+    expect(props).toEqual({ head: { __krateSlotRef: 'h1' }, body: { __krateSlotRef: 'd2' } });
+    expect(Object.keys(pool!)).toEqual(['d2']);
+    expect(one.handle.unmount).toHaveBeenCalled();
+    expect(t.handle.sync).toHaveBeenCalled();
+    expect(root.querySelector('section')!.textContent).toBe('2twomore');
+  });
+});
+
+describe('real-React wrapper islands', () => {
+  // Their server children travel in the props as a tree React renders, so a
+  // swap only re-renders them with the new props: there is no slot to take.
+  it('a kept real-React wrapper re-renders with the new children', () => {
+    const real = (kids: unknown) =>
+      `<script type="application/json" data-krate-props>${JSON.stringify({ __krateTree: kids })}</script><krate-island style="display:contents" data-module="rmod" data-export="Panel" data-src="/chunks/p.js"></krate-island>`;
+    root.innerHTML = `<main>${real([{ $: 'e', t: 'p', p: {}, c: ['list'] }])}</main>`;
+    const recs = mountIslands(root);
+    const [panel] = recs;
+    panel.el!.innerHTML = '<p>list</p>';
+    const p = panel.el!.firstChild;
+    swapPreservingIslands(root, null, null, fragment(`<main>${real([{ $: 'e', t: 'article', p: {}, c: ['detail'] }])}</main>`), { sameProps: false });
+    expect(panel.handle.unmount).not.toHaveBeenCalled();
+    expect(panel.handle.update).toHaveBeenCalledWith({ __krateTree: [{ $: 'e', t: 'article', p: {}, c: ['detail'] }] });
+    expect(panel.el!.firstChild).toBe(p);
+    expect(checkIslands(recs)).toEqual([]);
+  });
+});
+
+describe('unmountIslandsIn and a slot set out of date', () => {
+  it('unmounts the islands now inside a nested island, whatever the set lists', () => {
+    root.innerHTML = `<div>${srv('Wrap', {}, `<p>${srv('Old', {}, 'x')}</p>`)}</div>`;
+    const recs = mountIslands(root);
+    const [wrap, old] = recs;
+    // The nested island replaced its nodes since the set was taken.
+    const set = [wrap.start!, ...Array.from(wrap.start!.parentNode!.childNodes).slice(1, -1), wrap.end!];
+    const p = root.querySelector('p')!;
+    p.innerHTML = srv('Now', {}, 'y');
+    const [now] = mountIslands(root);
+    set.splice(1, set.length - 2, document.createElement('p'));
+    unmountIslandsIn(set);
+    expect(now.handle.unmount).toHaveBeenCalled();
+    expect(wrap.handle.unmount).toHaveBeenCalled();
+    expect(old.handle.unmount).not.toHaveBeenCalled();
   });
 });

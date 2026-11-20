@@ -157,9 +157,20 @@ export function __krateScopeSubscribe(s) {
 // <!--krate-island:...--> and <!--/krate-island--> comments. __krateRangeRoot
 // is the parent Preact renders it into: it reads and inserts between the two
 // comments of the real parent, so Preact never touches the parent's other
-// children. A nested island among a slot's nodes can add or drop nodes of its
-// own between its comments, so a slot refreshes those runs from the document
-// when it lets go of its nodes (__krateSlotRefresh).
+// children.
+//
+// A nested island among a slot's top-level nodes adds, drops and replaces the
+// nodes between its comments (a router swap renders its server children
+// anew), so a slot's set goes stale. A stale set was the bug behind kept
+// wrappers showing the old page: on the next render of the outer island
+// Preact put the nested island's old nodes back (Preact 10.24 places every
+// child again on each render, in its order), and a teardown through the set
+// missed the nested island's current nodes. So the slot reads those runs from
+// the document again on every render (__krateSlotSync) and keys each node's
+// vnode by the node itself: Preact keeps the vnodes of nodes still there,
+// drops those of nodes the nested island removed (already out of the
+// document) and places new ones. Letting go of its nodes, the slot also
+// removes what the nested islands added (__krateSlotRefresh).
 const preactSlotJS = `
 import { useContext as __krateUseContext } from "preact/hooks";
 import { Fragment as __KrateFragment, options as __krateOptions } from "preact";
@@ -239,10 +250,15 @@ function __krateSlotTake(p) {
   }
   return sets.length ? sets[0].map(function (n) { return n.cloneNode(true); }) : [];
 }
-function __krateSlotRefresh(set) {
+// __krateSlotSync makes the runs of a set's nested islands the nodes now
+// between their comments, in place. Rendering, it reads only runs in the
+// document: a set let go of keeps its runs (in the detached parent a hide
+// removed). Letting go (drop), it also takes out the nodes a nested island
+// added since (Preact removes only those it placed).
+function __krateSlotSync(set, drop) {
   for (var i = 0; i < set.length; i++) {
     var s = set[i];
-    if (!__krateIslandOpen(s) || !s.parentNode) continue;
+    if (!__krateIslandOpen(s) || !(drop ? s.parentNode : s.isConnected)) continue;
     var cur = [], d = 0, n = s.nextSibling;
     for (; n; n = n.nextSibling) {
       if (__krateIslandOpen(n)) d++;
@@ -252,12 +268,15 @@ function __krateSlotRefresh(set) {
     var j = n ? set.indexOf(n, i + 1) : -1;
     if (j < 0) continue;
     var old = set.slice(i + 1, j);
-    // Preact removes the nodes it placed; the island's own additions go too.
-    cur.forEach(function (x) { if (old.indexOf(x) < 0) x.parentNode.removeChild(x); });
+    if (drop) cur.forEach(function (x) { if (old.indexOf(x) < 0) x.parentNode.removeChild(x); });
     set.splice.apply(set, [i + 1, j - i - 1].concat(cur));
     i += cur.length + 1;
   }
+  return set;
 }
+function __krateSlotRefresh(set) { __krateSlotSync(set, true); }
+var __krateKeySeq = 0;
+function __krateNodeKey(n) { return n.__krateKey || (n.__krateKey = "k" + (++__krateKeySeq)); }
 function __krateSlotRelease(c) {
   if (c.__krateSet) {
     __krateSlotRefresh(c.__krateSet);
@@ -269,13 +288,22 @@ function __krateSlotPlace(c) {
   var set = c.__krateSet, v = c.__v, frag = v && v.__k && v.__k[0], kids = frag && frag.__k, moved = false;
   if (!set || !kids) return;
   for (var i = 0; i < set.length; i++) {
-    var t = kids[i], old = t && t.__e;
+    // Each node has a keyed fragment holding one text vnode.
+    var k = kids[i], t = k && k.__k && k.__k[0], old = t && t.__e;
     if (!old || old === set[i] || !old.parentNode) continue;
     old.parentNode.replaceChild(set[i], old);
     t.__e = set[i];
+    k.__e = set[i];
     moved = true;
   }
-  set.forEach(function (n) { n.__krateScope = c.__krateSlotScope; });
+  // The slot's scope goes on its own nodes; those of a nested island carry
+  // the scope of the nested island's slots.
+  for (var d = 0, j = 0; j < set.length; j++) {
+    var n = set[j];
+    if (__krateIslandClose(n)) d--;
+    if (!d) n.__krateScope = c.__krateSlotScope;
+    if (__krateIslandOpen(n)) d++;
+  }
   for (v = frag; moved && v && typeof v.type === "function"; v = v.__) {
     var first = null;
     for (i = 0; v.__k && i < v.__k.length && !first; i++) first = v.__k[i] && v.__k[i].__e;
@@ -288,10 +316,20 @@ function __krateSlotPlace(c) {
 // layout effect: a hook import would make every island chunk look stateful
 // to the build (statefulHookRe).
 var __krateSlotHooked = false;
+var __krateRenderSeq = 0;
 function __krateSlotHooks() {
   if (__krateSlotHooked) return;
   __krateSlotHooked = true;
-  var diffed = __krateOptions.diffed, unmount = __krateOptions.unmount;
+  var diffed = __krateOptions.diffed, unmount = __krateOptions.unmount, diff = __krateOptions.__b;
+  // A slot renders whenever the island around it does: Preact skips a vnode
+  // it rendered before (the slot comes from the island's props, so every
+  // render passes the same one) and places its old children again, which put
+  // a nested island's dropped nodes back. A new _original (mangled __v)
+  // makes it render, so it syncs its set first.
+  __krateOptions.__b = function (v) {
+    if (v.type === __KrateSlot) v.__v = --__krateRenderSeq;
+    if (diff) diff(v);
+  };
   __krateOptions.diffed = function (v) {
     if (v.type === __KrateSlot && v.__c) __krateSlotPlace(v.__c);
     if (diffed) diffed(v);
@@ -319,7 +357,10 @@ function __KrateSlot(p, map) {
     c.__krateGen = (c.__krateGen || 0) + 1;
   }
   c.__krateSlotScope = s;
-  var texts = c.__krateSet.map(function () { return ""; });
+  // The text is not empty: Preact reads empty old props as none and writes
+  // the new text into the node behind the vnode (an island's comment) on
+  // every render.
+  var texts = __krateSlotSync(c.__krateSet).map(function (n) { return h(__KrateFragment, { key: __krateNodeKey(n) }, " "); });
   return [h(__KrateFragment, { key: "n" + c.__krateGen }, texts)].concat(f.map(function (e) { return h(__KrateWatch, { key: e.k, k: e.k, c: e.c, s: s }); }));
 }
 function __KrateWatch(p) {

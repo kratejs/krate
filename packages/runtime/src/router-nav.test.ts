@@ -6,6 +6,7 @@ import {
 } from './router';
 import { callServerAction } from './actions';
 import { swapPreservingIslands, unmountIslandsIn } from './island-swap';
+import { mountIslands as mountFakes, checkIslands, island as srv, wrapper, type FakeIsland as SlotFake } from './island-fakes.test.helpers';
 
 // A fetch mock serving documents by path. Each route is either a page body or
 // a full response description.
@@ -512,6 +513,118 @@ describe('pending navigation', () => {
     await krateRouter.prefetch('/styled');
     const hints = Array.from(document.querySelectorAll('link[rel="prefetch"]')).map((l) => [new URL((l as HTMLLinkElement).href).pathname, l.getAttribute('as')]);
     expect(hints).toEqual([['/styled.css', 'style']]);
+  });
+});
+
+describe('a kept provider island whose server children change', () => {
+  // A layout renders a "use client" provider around {children} with the same
+  // props on every page of the section; each page puts other islands in it.
+  beforeEach(() => {
+    (globalThis as any).__krateIslandSwap = { swap: swapPreservingIslands, unmount: unmountIslandsIn };
+  });
+  afterEach(() => {
+    delete (globalThis as any).__krateIslandSwap;
+  });
+  let seq = 0;
+  const section = (title: string, body: string, v = 0) => {
+    seq++;
+    return page(
+      title,
+      wrapper(
+        'ShellFrame',
+        {},
+        's' + seq,
+        `<nav>${link('/ws/modules', 'Modules')}${link('/ws/brand', 'Brand')}${link('/ws/m', 'List')}</nav><main id="main">${wrapper('BotWorkspaceProvider', { value: 'bot@' + v }, 'b' + seq, body)}</main>`,
+      ),
+    );
+  };
+  const pages: Record<string, (v?: number) => string> = {
+    '/ws/modules': (v) => section('Modules', `<div>bar</div><header>Modules</header>${srv('ModulesList', {}, '<ul>modules</ul>')}`, v),
+    '/ws/brand': (v) => section('Brand', `<div>bar</div><header>Brand kit</header>${srv('BrandForm', {}, '<form>brand</form>')}`, v),
+    '/ws/m': (v) => section('List', `<header>Module list</header>${srv('ModuleRows', {}, '<ol>rows</ol>')}${link('/ws/m/base', 'base', 'id="to-detail"')}`, v),
+    '/ws/m/base': (v) => section('Detail', `<nav>${link('/ws/m', 'all', 'id="to-list"')}</nav><section><header>Module detail</header>${srv('ModuleDetail', {}, '<article>base</article>')}</section>`, v),
+  };
+  let recs: SlotFake[] = [];
+  const live = (name: string) => recs.filter((r) => r.name === name && !r.gone);
+  // After a swap the loader mounts the new islands; the invariants hold and
+  // the provider's range holds exactly the page.
+  const after = (text: string) => {
+    recs.push(...mountFakes(document.body));
+    expect(checkIslands(recs)).toEqual([]);
+    const [p] = live('BotWorkspaceProvider');
+    let inside = '';
+    for (let n = p.start!.nextSibling; n && n !== p.end; n = n.nextSibling) inside += n.nodeType === 8 ? '' : n.textContent;
+    let rest = '';
+    for (let n = p.end!.nextSibling; n; n = n.nextSibling) rest += n.textContent;
+    expect(inside).toBe(text);
+    expect(rest).toBe('');
+  };
+  const pop = async (dir: 'back' | 'forward') => {
+    if (dir === 'back') history.back();
+    else history.forward();
+    await new Promise((r) => setTimeout(r, 20));
+    await settle();
+  };
+  const start = async (path: string) => {
+    for (const p in pages) routes[p] = { body: pages[p]() };
+    await krateRouter.push(path);
+    await settle();
+    recs = mountFakes(document.body);
+  };
+
+  it('a link, back and forward render each page in the kept provider and unmount the islands of the page left', async () => {
+    await start('/ws/modules');
+    const [shell] = live('ShellFrame');
+    const [bwp] = live('BotWorkspaceProvider');
+    const [list] = live('ModulesList');
+    click(document.querySelector('a[href="/ws/brand"]')!);
+    await settle();
+    after('barBrand kitbrand');
+    expect(list.handle.unmount).toHaveBeenCalledTimes(1);
+    expect(list.connectedAtUnmount).toBe(true);
+    expect(shell.handle.sync).toHaveBeenCalled();
+    const [form] = live('BrandForm');
+    await pop('back');
+    after('barModulesmodules');
+    expect(form.handle.unmount).toHaveBeenCalledTimes(1);
+    await pop('forward');
+    after('barBrand kitbrand');
+    expect(live('ModulesList')).toHaveLength(0);
+    expect(bwp.handle.unmount).not.toHaveBeenCalled();
+    expect(shell.handle.unmount).not.toHaveBeenCalled();
+  });
+
+  it('list -> detail -> list with in-page links, and back', async () => {
+    await start('/ws/m');
+    const [bwp] = live('BotWorkspaceProvider');
+    const [rows] = live('ModuleRows');
+    click(document.getElementById('to-detail')!);
+    await settle();
+    after('allModule detailbase');
+    expect(rows.handle.unmount).toHaveBeenCalled();
+    const [detail] = live('ModuleDetail');
+    click(document.getElementById('to-list')!);
+    await settle();
+    after('Module listrowsbase');
+    expect(detail.handle.unmount).toHaveBeenCalled();
+    await pop('back');
+    after('allModule detailbase');
+    expect(bwp.handle.unmount).not.toHaveBeenCalled();
+    expect(live('ShellFrame')[0].handle.sync).toHaveBeenCalledTimes(3);
+  });
+
+  it('a refresh that changes the provider\'s props and the shape of its children', async () => {
+    await start('/ws/brand');
+    const [bwp] = live('BotWorkspaceProvider');
+    const [form] = live('BrandForm');
+    routes['/ws/brand'] = { body: section('Brand', `<div>bar</div><header>Brand kit</header>${srv('BrandForm', {}, '<form>brand</form>')}${srv('SaveBar', {}, '<button>save</button>')}`, 1) };
+    await krateRouter.refresh();
+    await settle();
+    after('barBrand kitbrandsave');
+    expect(bwp.handle.update.mock.calls[0][0]).toEqual({ value: 'bot@1', __krateChildren: { __krateSlotRef: 'b' + seq } });
+    expect(form.handle.unmount).toHaveBeenCalled();
+    expect(bwp.handle.unmount).not.toHaveBeenCalled();
+    expect(live('ShellFrame')[0].handle.sync).toHaveBeenCalled();
   });
 });
 
