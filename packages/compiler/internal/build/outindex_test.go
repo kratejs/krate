@@ -131,13 +131,16 @@ func TestIndexedDirHardeningMatchesHardenedDir(t *testing.T) {
 		"/%2e/env", "/missing", "//a.txt", "/sub\\.hidden", "/.krate", "/a.txt/",
 	}
 	for _, n := range names {
-		_, e1 := hd.Open(n)
+		f1, e1 := hd.Open(n)
 		f2, e2 := id.Open(n)
 		if (e1 == nil) != (e2 == nil) {
 			t.Errorf("Open(%q): hardenedDir err=%v, indexedDir err=%v", n, e1, e2)
 		}
-		if f2 != nil {
-			f2.Close()
+		// Windows cannot remove the temp dir while a file in it is open.
+		for _, f := range []http.File{f1, f2} {
+			if f != nil {
+				f.Close()
+			}
 		}
 	}
 }

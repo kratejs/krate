@@ -1,6 +1,7 @@
 package runtimes
 
 import (
+	"encoding/json"
 	"errors"
 	"os/exec"
 	"path/filepath"
@@ -23,12 +24,18 @@ func stubScriptc(t *testing.T, out string, runErr error) *[][]string {
 	return &calls
 }
 
-const coverageBlocked = `{"schema":"scriptc-diagnostics","schemaVersion":1,"command":"coverage","success":false,"phase":"complete",
-"diagnostics":[{"code":"SC2020","severity":"error","scope":"reached","file":"/p/src/api/a.ts","line":3,"column":7,"message":"nope","hint":"use X"}]}`
+// coverageBlocked is a blocked coverage report for a file under root. The root
+// must be an absolute path on the host OS (a bare /p is not one on Windows).
+func coverageBlocked(root string) string {
+	file, _ := json.Marshal(filepath.Join(root, "src", "api", "a.ts"))
+	return `{"schema":"scriptc-diagnostics","schemaVersion":1,"command":"coverage","success":false,"phase":"complete",
+"diagnostics":[{"code":"SC2020","severity":"error","scope":"reached","file":` + string(file) + `,"line":3,"column":7,"message":"nope","hint":"use X"}]}`
+}
 
 func TestScriptcCoverageReportBlocked(t *testing.T) {
-	stubScriptc(t, "progress\n"+coverageBlocked, errors.New("exit status 1"))
-	rep, ds, err := ScriptcCoverageReport("/p", "/p/.krate/api-scriptc/main.ts", "blockers", Origin{Root: "/p"})
+	root := t.TempDir()
+	stubScriptc(t, "progress\n"+coverageBlocked(root), errors.New("exit status 1"))
+	rep, ds, err := ScriptcCoverageReport(root, filepath.Join(root, ".krate", "api-scriptc", "main.ts"), "blockers", Origin{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}

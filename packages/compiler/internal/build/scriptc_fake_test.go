@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -132,9 +134,48 @@ func fakeScriptcServer() int {
 	return 0
 }
 
+// fakeScriptcCopy is a copy of this test binary that stand-ins link to on
+// Windows, made once per test process (see linkSource).
+var fakeScriptcCopy struct {
+	once      sync.Once
+	dir, path string
+	err       error
+}
+
+// linkSource returns the file stand-ins are linked to. Windows cannot delete
+// any link of a running executable, so a link to the running test binary
+// would make every t.TempDir cleanup fail; there a copy is linked instead,
+// removed by cleanupFakeScriptcCopy after the tests.
+func linkSource() (string, error) {
+	self, err := os.Executable()
+	if err != nil || runtime.GOOS != "windows" {
+		return self, err
+	}
+	c := &fakeScriptcCopy
+	c.once.Do(func() {
+		if c.dir, c.err = os.MkdirTemp("", "krate-fake-scriptc-"); c.err != nil {
+			return
+		}
+		var data []byte
+		if data, c.err = os.ReadFile(self); c.err != nil {
+			return
+		}
+		c.path = filepath.Join(c.dir, "testbin.exe")
+		c.err = os.WriteFile(c.path, data, 0o755)
+	})
+	return c.path, c.err
+}
+
+// cleanupFakeScriptcCopy removes the Windows copy made by linkSource.
+func cleanupFakeScriptcCopy() {
+	if fakeScriptcCopy.dir != "" {
+		_ = os.RemoveAll(fakeScriptcCopy.dir)
+	}
+}
+
 // linkTestBinary makes path run this test binary: a hard link, else a copy.
 func linkTestBinary(path string) error {
-	self, err := os.Executable()
+	self, err := linkSource()
 	if err != nil {
 		return err
 	}

@@ -26,6 +26,7 @@ func TestMain(m *testing.M) {
 	precompressByDefault = false
 	code := m.Run()
 	cleanupAuditSite()
+	cleanupFakeScriptcCopy()
 	os.Exit(code)
 }
 
