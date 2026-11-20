@@ -60,6 +60,13 @@ const api = table(
   [...data.api].sort(byRps).map((r) => [r.name, num(r.rps), `${r.p50} ms`, `${r.p99} ms`, String(r.errors)]),
 );
 
+// Present only in a run that had scriptc installed (the target is optional).
+const scriptcNote = data.api.some((r) => r.id === "krate-ts-scriptc")
+  ? `- **Krate - TS API route (scriptc, experimental)** sets \`ssr.apiRuntime: "scriptc"\`: the same
+  route compiled to a native executable that \`krate serve\` runs as a sidecar.
+`
+  : "";
+
 const levels = data.ssrMeta?.connectionsList?.length ? data.ssrMeta.connectionsList : [...new Set(data.ssr.map((r) => r.connections))];
 const ssrIds = [...new Set(data.ssr.map((r) => r.id))];
 const ssr = table(
@@ -118,7 +125,7 @@ ${api}
   so it does not scale with connections.
 - **Krate - TS API route (node)** sets \`ssr.apiRuntime: "node"\`: the same route
   on clustered Node workers behind \`krate serve\`.
-- Node \`http\` and Go \`net/http\` are bare servers with no framework, as upper
+${scriptcNote}- Node \`http\` and Go \`net/http\` are bare servers with no framework, as upper
   bounds.
 
 ## Runtime component SSR

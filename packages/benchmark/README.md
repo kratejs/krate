@@ -75,7 +75,7 @@ results meta records the commit and whether `packages/compiler`, `runtime` or
 
 | Flag | Description |
 |------|-------------|
-| `--filter <id>` | Run one target: `krate`, `nextjs`, `vite`, `astro`, `sveltekit`, `remix`, `krate-go`, `krate-ts`, `node-http`, `go-nethttp`, `krate-ssr-tsx-node`, `krate-ssr-tsx-bun`, `krate-ssr-go` |
+| `--filter <id>` | Run one target: `krate`, `nextjs`, `vite`, `astro`, `sveltekit`, `remix`, `krate-go`, `krate-ts`, `krate-ts-node`, `krate-ts-scriptc` (experimental, needs scriptc and clang; skipped with a warning without them), `node-http`, `go-nethttp`, `krate-ssr-tsx-node`, `krate-ssr-tsx-bun`, `krate-ssr-go` |
 | `--runs N` | Build timing runs (default `3`) |
 | `--duration ms` | Load-test duration (default `5000`) |
 | `--connections N` | Load-test concurrency; a comma list sweeps the SSR test (e.g. `16,64,256`) |
