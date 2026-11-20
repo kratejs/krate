@@ -1,20 +1,144 @@
 name: Release
 
+# A release does not re-run the test suites. CI already ran them, in full, on
+# the tagged commit (the push to dev or main that landed it); the ci-gate job
+# requires that run to have passed, dispatches CI on the tag when the commit
+# has none, and fails the release when it failed. What runs here is only what
+# depends on the release version: the platform packages (one job each, in
+# parallel), the version and package checks, the docs site build and the
+# install smoke test of the exact tarballs that get published.
+
 on:
   push:
     tags:
       - "v*"
 
 permissions:
-  contents: write
-  # npm trusted publishing: publishing exchanges the job's OIDC token for a
-  # short-lived npm token. Each package trusts kratejs/krate release.yml on
-  # npmjs.com (scripts/npm-trust.mjs; RELEASE.md, "Trusted publishing").
-  id-token: write
+  contents: read
 
 jobs:
-  release:
+  # Fails here, before any build, for a version npm cannot tag (1.0.0-1), keeps
+  # latest from moving backwards for a patch on an older line, and fails for a
+  # package that is not on npm yet (trusted publishing cannot create one) with
+  # the command that creates it.
+  preflight:
+    name: Preflight
     runs-on: ubuntu-latest
+    outputs:
+      dist_tag: ${{ steps.tag.outputs.dist_tag }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Determine npm dist-tag
+        id: tag
+        shell: bash
+        run: node scripts/release-tag.mjs "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check every package is on npm
+        run: node scripts/publish-packages.mjs --check-registered
+
+  # The compiler, native, browser and JS suites: a full CI run of this commit
+  # must have passed (scripts/release-ci-gate.mjs).
+  ci-gate:
+    name: CI passed for this commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 160
+    permissions:
+      contents: read
+      # Dispatches CI on the tag when the commit has no full run yet.
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for a green full CI run of this commit
+        run: node scripts/release-ci-gate.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  # One job per platform package, so the seven cross-compiles run side by side
+  # instead of one after another. The packages are tarred so the executable
+  # bits survive the artifact upload.
+  platforms:
+    name: Platform package (${{ matrix.pkg }})
+    runs-on: ubuntu-latest
+    env:
+      npm_config_frozen_lockfile: "false"
+    strategy:
+      fail-fast: true
+      matrix:
+        pkg:
+          - core-win32-x64
+          - core-win32-arm64
+          - core-linux-x64
+          - core-linux-x64-musl
+          - core-linux-arm64
+          - core-darwin-x64
+          - core-darwin-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Sync package versions
+        run: node scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
+
+      # set-version.mjs above rewrites the workspace versions, so the lockfile
+      # no longer matches by design.
+      - name: Install JS dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build JS packages
+        run: pnpm -r --filter "!@krate/web" --filter "!@krate/benchmark" build
+
+      - name: Sync framework docs
+        run: pnpm sync:docs
+
+      - name: Generate the platform package
+        run: node scripts/build-platform-packages.mjs
+        env:
+          KRATE_ONLY_PLATFORM: ${{ matrix.pkg }}
+
+      - name: Pack the platform package
+        run: tar -C dist-platform -czf "${{ matrix.pkg }}.tgz" "${{ matrix.pkg }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-${{ matrix.pkg }}
+          path: ${{ matrix.pkg }}.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish
+    needs: [preflight, ci-gate, platforms]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # npm trusted publishing: publishing exchanges the job's OIDC token for a
+      # short-lived npm token. Each package trusts kratejs/krate release.yml on
+      # npmjs.com (scripts/npm-trust.mjs; RELEASE.md, "Trusted publishing").
+      id-token: write
     env:
       npm_config_frozen_lockfile: "false"
     steps:
@@ -26,13 +150,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
-
-      # TestNativeDebugGoHostRestart drives a real dlv session; under
-      # KRATE_REQUIRE_E2E (Verify compiler) a missing dlv is a failure.
-      - name: Install Delve
-        run: |
-          go install github.com/go-delve/delve/cmd/dlv@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -46,81 +163,24 @@ jobs:
           version: 11.9.0
           run_install: false
 
-      # Fails here, before any build, for a version npm cannot tag (1.0.0-1),
-      # and keeps latest from moving backwards for a patch on an older line.
-      - name: Determine npm dist-tag
-        id: tag
-        shell: bash
-        run: node scripts/release-tag.mjs "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      # Trusted publishing cannot create a package, so a package that is not on
-      # npm yet fails here, before any build, with the command that creates it.
-      - name: Check every package is on npm
-        run: node scripts/publish-packages.mjs --check-registered
-
       - name: Sync package versions
         run: node scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
 
+      # set-version.mjs above rewrites the workspace versions, so the lockfile
+      # no longer matches by design.
       - name: Install JS dependencies
         run: pnpm install --no-frozen-lockfile
 
       - name: Build JS packages
         run: pnpm -r --filter "!@krate/web" --filter "!@krate/benchmark" build
 
-      - name: TypeScript type-check
-        run: pnpm run typecheck
-
-      - name: JS unit tests
-        run: pnpm run test:js
-
+      # CI builds the site on pull requests through Cloudflare Pages, not in
+      # this repository's checks, so the release keeps building it.
       - name: Build docs site
         run: pnpm --filter @krate/web build
 
       - name: Sync framework docs
         run: pnpm sync:docs
-
-      # Gate the release on a green compiler so a broken build or stale embedded
-      # docs can never be published.
-      - name: Verify compiler
-        working-directory: packages/compiler
-        run: |
-          go build ./...
-          go vet ./...
-          go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m ./...
-        env:
-          KRATE_REQUIRE_E2E: "1"
-
-      - name: Verify native module
-        working-directory: packages/native
-        run: |
-          go build ./...
-          go vet ./...
-          go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m ./...
-        env:
-          KRATE_REQUIRE_E2E: "1"
-
-      - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Browser conformance
-        working-directory: packages/compiler
-        run: go test -run "TestBrowserConformance|TestTrimmedRuntimeBrowser" -count=1 -v ./internal/build
-        env:
-          KRATE_BROWSER: chromium
-          KRATE_REQUIRE_E2E: "1"
-          KRATE_HYDRATION_BUDGET_MS: "2500"
-
-      - name: Check embedded docs are in sync
-        run: node scripts/sync-krate-docs.mjs --check
-
-      - name: Check compatibility matrix
-        run: pnpm run check:matrix
-
-      - name: Check benchmarks page is in sync
-        run: node scripts/sync-benchmarks.mjs --check
-
-      - name: Check roadmap and v1 gates
-        run: pnpm run check:roadmap
 
       - name: Check package versions
         run: pnpm run check:version
@@ -128,8 +188,20 @@ jobs:
       - name: Check release readiness
         run: pnpm run check:release
 
-      - name: Generate platform packages
-        run: node scripts/build-platform-packages.mjs
+      - name: Download the platform packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: platform-*
+          merge-multiple: true
+          path: platform-tarballs
+
+      - name: Unpack the platform packages
+        run: |
+          mkdir -p dist-platform
+          for f in platform-tarballs/*.tgz; do
+            tar -C dist-platform -xzf "$f"
+          done
+          ls dist-platform
 
       # Re-run now that dist-platform/ exists, so the generated manifests are
       # checked too (no platform package may declare bin, and each holds
@@ -138,12 +210,12 @@ jobs:
         run: pnpm run check:release
 
       # Every package carries the compiler and the Krate Native shell
-      # (cross-compiled with CGO_ENABLED=0 from this Linux runner).
+      # (cross-compiled with CGO_ENABLED=0 on Linux runners).
       - name: Report platform package sizes
         run: node scripts/report-platform-sizes.mjs
 
-      # The step above leaves a dev binary in packages/core/bin. Publishing it
-      # would make the wrapper run a non-executable, single-platform file.
+      # A dev binary in packages/core/bin would make the wrapper run a
+      # non-executable, single-platform file.
       - name: Check @krate/core ships no compiler binary
         working-directory: packages/core
         run: |
@@ -162,7 +234,7 @@ jobs:
       # workflow yet. npm stops accepting token publishes in January 2027.
       - name: Publish platform packages
         run: >-
-          node scripts/publish-packages.mjs "${{ steps.tag.outputs.dist_tag }}"
+          node scripts/publish-packages.mjs "${{ needs.preflight.outputs.dist_tag }}"
           dist-platform/core-win32-x64 dist-platform/core-win32-arm64
           dist-platform/core-linux-x64 dist-platform/core-linux-x64-musl
           dist-platform/core-linux-arm64 dist-platform/core-darwin-x64
@@ -174,7 +246,7 @@ jobs:
       # already exist when it is installable.
       - name: Publish npm packages
         run: >-
-          node scripts/publish-packages.mjs "${{ steps.tag.outputs.dist_tag }}"
+          node scripts/publish-packages.mjs "${{ needs.preflight.outputs.dist_tag }}"
           packages/runtime packages/components packages/plugin packages/ts-plugin
           packages/base-docs-theme packages/simple-docs-theme packages/auth packages/three packages/konva
           packages/app packages/create-krate-app packages/create-krate-docs packages/core
@@ -316,5 +388,5 @@ jobs:
             --jq .body >> "${NOTES}"
           gh release create "${GITHUB_REF_NAME}" \
             --title "Krate ${GITHUB_REF_NAME}" \
-            --prerelease=${{ steps.tag.outputs.prerelease }} \
+            --prerelease=${{ needs.preflight.outputs.prerelease }} \
             --notes-file "${NOTES}"

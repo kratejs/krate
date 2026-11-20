@@ -199,6 +199,11 @@ if (!/pnpm publish/.test(read("scripts/publish-packages.mjs"))) fail("scripts/pu
 if (/pnpm publish/.test(release)) fail("release workflow publishes with pnpm publish directly; use scripts/publish-packages.mjs so a re-run skips published versions");
 if ((release.match(/scripts\/publish-packages\.mjs/g) ?? []).length < 2) fail("release workflow must publish the platform and npm packages with scripts/publish-packages.mjs");
 if (!ci.includes("release-scripts.test.mjs")) fail("CI does not run the release script tests");
+// The release does not re-run the suites, so it must be gated on CI's full run
+// of the tagged commit, and publishing must wait for that gate.
+if (!release.includes("scripts/release-ci-gate.mjs")) fail("release workflow is not gated on a passed CI run (scripts/release-ci-gate.mjs)");
+if (!/needs:\s*\[[^\]]*\bci-gate\b[^\]]*\]/.test(release.slice(release.indexOf("  publish:")))) fail("the release publish job does not need ci-gate");
+if (!ci.includes("release-ci-gate.test.mjs")) fail("CI does not run the release CI gate tests");
 
 // 9. Every package that is not private is released, by one list. A package left
 // out of it was never versioned or published (@krate/app), or shipped a peer

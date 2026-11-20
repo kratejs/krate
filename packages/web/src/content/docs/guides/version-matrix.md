@@ -57,5 +57,6 @@ examples define complete performance budgets and CI enforces the hydration
 budget; every diagnostic code has a generated reference entry; the safe codemod
 tests and guides are present; every partial compatibility row has a documented
 divergence; and the three-reference-app migration verification plus rollback
-APIs still exist. CI and the release workflow run it with the other version,
-matrix, roadmap, and docs checks.
+APIs still exist. CI runs it with the other version, matrix, roadmap, and docs
+checks, and the release workflow publishes only a commit whose full CI run
+passed.
