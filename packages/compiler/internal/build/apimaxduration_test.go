@@ -170,3 +170,24 @@ func TestAPIMaxDurationE2E(t *testing.T) {
 		})
 	}
 }
+
+// One build prints a bad maxDuration once: the route compile and the server
+// bundle that follows it share the builder's warnings.
+func TestServerBundleDoesNotRepeatMaxDurationWarnings(t *testing.T) {
+	t.Parallel()
+	root, cfg := apiTimeoutProject(t, "")
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	b := New(root, cfg)
+	logs := builderStderr(b)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	if _, err := b.BuildServerBundle("node"); err != nil {
+		t.Fatalf("BuildServerBundle: %v", err)
+	}
+	if n := strings.Count(logs(), "src/api/bad.ts:1:"); n != 1 {
+		t.Errorf("the maxDuration warning printed %d times, want once:\n%s", n, logs())
+	}
+}
