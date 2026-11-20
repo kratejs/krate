@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
@@ -52,7 +53,7 @@ func TestScriptcRouteFindings(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			f := scriptcRouteFinding(root, filepath.Join(root, "src/api/r.ts"))
+			f := scriptcRouteFinding(root, filepath.Join(root, "src/api/r.ts"), nil)
 			if f == nil {
 				t.Fatal("no finding")
 			}
@@ -79,12 +80,12 @@ func TestScriptcRouteFindingCleanRoute(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if f := scriptcRouteFinding(root, filepath.Join(root, "src/api/r.ts")); f != nil {
+	if f := scriptcRouteFinding(root, filepath.Join(root, "src/api/r.ts"), nil); f != nil {
 		t.Errorf("a clean route has a finding: %+v", f)
 	}
 	// An import cycle ends.
 	_ = os.WriteFile(filepath.Join(root, "src/lib/greet.ts"), []byte("import './greet';\nexport const g = 1;"), 0o644)
-	if f := scriptcRouteFinding(root, filepath.Join(root, "src/api/r.ts")); f != nil {
+	if f := scriptcRouteFinding(root, filepath.Join(root, "src/api/r.ts"), nil); f != nil {
 		t.Errorf("cycle: %+v", f)
 	}
 }
@@ -142,5 +143,34 @@ func TestScriptcFindingsAreErrorsWhenStrict(t *testing.T) {
 		if !strings.Contains(text, frag) {
 			t.Errorf("error lacks %q:\n%s", frag, text)
 		}
+	}
+}
+
+// TestScriptcRouteFindingFollowsPathAliases checks that the scan reaches a
+// capability imported through a tsconfig path alias.
+func TestScriptcRouteFindingFollowsPathAliases(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"src/api/r.ts":       "import { who } from '@/lib/session';\nexport function GET() { return Response.json({ who: who() }); }",
+		"src/lib/session.ts": "export function who() { return cookies().get('u'); }",
+	}
+	for rel, src := range files {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	route := filepath.Join(root, "src/api/r.ts")
+	if f := scriptcRouteFinding(root, route, nil); f != nil {
+		t.Fatalf("without aliases the alias import is not followed, got %+v", f)
+	}
+	aliases := bundler.NewImportResolver([]string{"@/*"}, [][]string{{"./src/*"}}, root)
+	f := scriptcRouteFinding(root, route, aliases)
+	if f == nil {
+		t.Fatal("the cookies() call behind @/lib/session was not found")
+	}
+	if !strings.HasSuffix(filepath.ToSlash(f.file), "src/lib/session.ts") || f.line != 1 {
+		t.Errorf("finding at %s:%d, want src/lib/session.ts:1", f.file, f.line)
 	}
 }

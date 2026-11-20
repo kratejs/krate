@@ -53,9 +53,10 @@ func scriptcUnsupportedImport(spec string) bool {
 }
 
 // scriptcRouteFinding scans a route module and the local modules it imports,
-// transitively under root, for what the scriptc server lacks. It returns nil
-// for a route that uses none of it.
-func scriptcRouteFinding(root, file string) *scriptcFinding {
+// transitively under root, for what the scriptc server lacks. aliases (may be
+// nil) follows the project's tsconfig path aliases. It returns nil for a route
+// that uses none of it.
+func scriptcRouteFinding(root, file string, aliases *bundler.ImportResolver) *scriptcFinding {
 	seen := map[string]bool{}
 	var scan func(file string) *scriptcFinding
 	scan = func(file string) *scriptcFinding {
@@ -85,6 +86,10 @@ func scriptcRouteFinding(root, file string) *scriptcFinding {
 				set(pos, "it imports "+spec+", which needs the request store the scriptc server lacks")
 			case strings.HasPrefix(spec, "."):
 				if p := resolveLocalModule(filepath.Dir(file), spec); p != "" && scriptcUnderRoot(root, p) {
+					local = append(local, p)
+				}
+			default:
+				if p := aliases.ResolveAlias(spec); p != "" && scriptcUnderRoot(root, p) {
 					local = append(local, p)
 				}
 			}

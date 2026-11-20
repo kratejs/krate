@@ -344,6 +344,7 @@ func (b *Builder) buildScriptcAPI() error {
 		}
 		fallbacks = append(fallbacks, *d)
 	}
+	aliases := b.importResolver()
 	for _, src := range sources {
 		rel, err := filepath.Rel(apiSrcDir, src)
 		if err != nil {
@@ -364,7 +365,7 @@ func (b *Builder) buildScriptcAPI() error {
 			fallback(src, file, scriptcRouteQuickJS, reason, nil)
 			continue
 		}
-		if f := scriptcRouteFinding(b.Root, src); f != nil {
+		if f := scriptcRouteFinding(b.Root, src, aliases); f != nil {
 			rel := b.relToRoot(f.file)
 			msg := "API route " + file + " runs on QuickJS, not scriptc: " + f.what
 			if f.file != src {
