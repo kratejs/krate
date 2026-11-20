@@ -124,6 +124,7 @@ func manifestID(t *testing.T, appDir, suffix string) string {
 }
 
 func TestNativeDevSession(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("starts a shell and several builds")
 	}

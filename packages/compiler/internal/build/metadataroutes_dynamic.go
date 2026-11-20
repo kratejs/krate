@@ -239,7 +239,7 @@ func (b *Builder) dynamicMetaRoute(f metaRouteFile) (bool, int) {
 	}
 	dynamic, revalidate := metaRouteSchedule(string(src))
 	if dynamic && strings.Contains(f.URLDir, "[") {
-		printWarningsOnce(os.Stderr, []diag.Diagnostic{{
+		b.printWarningsOnce([]diag.Diagnostic{{
 			File: b.display(f.Path), Severity: diag.SeverityWarning, Code: diag.CodeMetadataRouteDynamic,
 			Message: filepath.Base(f.Path) + " exports dynamic or revalidate, but it is in a dynamic segment (" + f.URLDir + "), so it still runs once at build time",
 			Hint:    "move it to a static directory, or remove the export",

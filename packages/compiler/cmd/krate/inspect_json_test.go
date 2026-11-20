@@ -12,6 +12,7 @@ import (
 // `krate inspect --json` must print only the JSON document on stdout; build
 // progress belongs on stderr or nowhere.
 func TestInspectJSONStdoutIsPureJSON(t *testing.T) {
+	t.Parallel()
 	bin := filepath.Join(t.TempDir(), "krate")
 	if runtime.GOOS == "windows" {
 		bin += ".exe"

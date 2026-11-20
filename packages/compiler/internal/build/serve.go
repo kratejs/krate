@@ -1380,15 +1380,27 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 
 // ServeDev starts an HTTP server with live reload SSE + request logging.
 func ServeDev(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
-	return serve(root, cfg, hub, startTime)
+	return serve(context.Background(), root, cfg, hub, startTime)
+}
+
+// ServeDevContext is ServeDev that also shuts down, as on SIGTERM, once ctx is
+// done.
+func ServeDevContext(ctx context.Context, root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
+	return serve(ctx, root, cfg, hub, startTime)
 }
 
 // Serve starts an HTTP server with request logging (production preview).
 func Serve(root string, cfg *config.Config, startTime time.Time) error {
-	return serve(root, cfg, nil, startTime)
+	return serve(context.Background(), root, cfg, nil, startTime)
 }
 
-func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
+// ServeContext is Serve that also shuts down, as on SIGTERM, once ctx is done.
+// It lets one process run and stop several servers independently.
+func ServeContext(ctx context.Context, root string, cfg *config.Config, startTime time.Time) error {
+	return serve(ctx, root, cfg, nil, startTime)
+}
+
+func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
 	absOutDir, err := filepath.Abs(cfg.OutDir)
 	if err != nil {
 		return fmt.Errorf("resolving out dir: %w", err)
@@ -2648,10 +2660,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if hub != nil {
 		devMux = devErrorShell(hub, root, absOut, mux)
 	}
-	proxyTrust.Store(cfg.Server.TrustProxy)
-	flashSecret.Store(flashSecretFor(revalHost.secret))
-	proxyHops.Store(int32(cfg.Server.TrustedProxies))
-	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, frontRedirects(slashMode, insideRedirects, devMux))))))))
+	var rootHandler http.Handler = requestIDMiddleware(withFlashSecret(flashSecretFor(revalHost.secret), forwardedHeadersMiddleware(cfg.Server.TrustProxy, cfg.Server.TrustedProxies, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, frontRedirects(slashMode, insideRedirects, devMux)))))))))
 
 	listenerOwned = true
 	addr := listener.Addr().(*net.TCPAddr)
@@ -2818,11 +2827,18 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		stopSidecars()
 		return ErrDevRestart
 	case <-sigCh:
+	case <-stopCtx.Done():
 	}
 
 	printf("\n%sShutting down...%s\n", cGray, cReset)
+	shutDown := make(chan struct{})
+	defer close(shutDown)
 	go func() {
-		<-sigCh
+		select {
+		case <-sigCh:
+		case <-shutDown:
+			return
+		}
 		fmt.Fprintf(os.Stderr, "  %s! second signal, exiting immediately%s\n", cYellow, cReset)
 		os.Exit(130)
 	}()

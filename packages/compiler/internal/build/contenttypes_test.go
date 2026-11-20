@@ -12,6 +12,7 @@ import (
 // TestContentTypesInBuild drives a full BuildAll with a content collection and
 // asserts both content.d.ts and the krate-env.d.ts bridge are emitted.
 func TestContentTypesInBuild(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writePage(t, root, "index.tsx", "export default function App() { return <h1>Hi</h1>; }")
 	writeContent(t, root, "content/blog/hello.md", "---\ntitle: Hello\norder: 1\n---\nbody")

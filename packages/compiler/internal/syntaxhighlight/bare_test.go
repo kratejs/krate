@@ -6,6 +6,7 @@ import (
 )
 
 func TestHighlightOmitsLineWrappersWithoutMarkedLines(t *testing.T) {
+	t.Parallel()
 	code := "const a = 1;\nconst b = 2;\n"
 	plain := HighlightTheme(code, "ts", DefaultTheme)
 	if strings.Contains(plain, `class="line"`) || strings.Contains(plain, `class="cl"`) {

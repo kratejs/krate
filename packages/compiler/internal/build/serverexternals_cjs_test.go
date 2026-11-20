@@ -50,6 +50,7 @@ export async function register() {
 }`
 
 func TestNodeImportTarget(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
 		// Conditions are matched in key order: "import" before "require".

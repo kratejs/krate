@@ -2,7 +2,6 @@ package build
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
@@ -100,7 +99,7 @@ func (b *Builder) buildIslandStyles(sink *islandCSSSink) (*islandStyles, error) 
 		out.Deps = append(out.Deps, file)
 		out.Deps = append(out.Deps, res.Deps...)
 		for _, d := range res.Warnings {
-			fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n", cYellow, cReset, d.Error())
+			fmt.Fprintf(b.stderr(), "  %sWarning:%s %s\n", cYellow, cReset, d.Error())
 		}
 	}
 	out.CSS = sb.String()

@@ -98,7 +98,7 @@ func (b *Builder) planAPIRoutes(routes []string, apiSrcDir string, fam *apiRoute
 		nodeBundles(items)
 		return plans
 	}
-	if legacyNodeOnlyDetection {
+	if b.legacyNodeOnly {
 		return plans
 	}
 	batches(items, func(part []*item, entries []fileBatchEntry) {

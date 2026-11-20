@@ -14,6 +14,7 @@ import (
 // The Node API sidecar only answers the Krate host: a direct connection to its
 // loopback port must not skip middleware, CSRF and the body limits.
 func TestAPISidecarRequiresHostSecret(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node not available: %v", err)
 		return

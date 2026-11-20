@@ -119,6 +119,7 @@ customElements.define("my-el", MyEl);
 // TestReact19Browser builds react19BrowserFiles for production and drives it
 // in a real browser (KRATE_BROWSER=chromium|firefox|webkit).
 func TestReact19Browser(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")

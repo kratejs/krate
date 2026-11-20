@@ -9,31 +9,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/deploy"
 )
 
 func TestBuildTestProject(t *testing.T) {
-	// Find the examples project root relative to this package
-	pkgDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// from packages/compiler/internal/build/ -> packages/compiler/ -> examples
-	projectRoot := filepath.Clean(filepath.Join(pkgDir, "..", "..", "..", "..", "examples"))
-	if _, err := os.Stat(projectRoot); os.IsNotExist(err) {
-		requireE2E(t, "examples not found at %s", projectRoot)
-	}
-
-	cfg, err := config.Load(projectRoot)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-
-	b := New(projectRoot, cfg)
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
-	}
+	t.Parallel()
+	// The examples project builds in place, so it is built once for every test
+	// that reads it (see buildTestProject).
+	buildTestProject(t)
+	cfg := e2eBuildCfg
 
 	// Verify output directory exists
 	outDir := cfg.OutDir

@@ -11,6 +11,7 @@ import (
 // middleware, and a user headers rule beats the static file server's
 // Cache-Control.
 func TestServeRouteRulesOrderAndHeaders(t *testing.T) {
+	t.Parallel()
 	root, cfg := secProject(t)
 	writeTree(t, root, map[string]string{
 		// A maintenance gate that refuses every page and API request, except / and /ok-rw.
@@ -80,6 +81,7 @@ func TestServeRouteRulesOrderAndHeaders(t *testing.T) {
 // A hashed asset the build emitted keeps its immutable Cache-Control even when
 // a catch-all headers rule sets one.
 func TestServeHashedAssetKeepsImmutableUnderHeadersRule(t *testing.T) {
+	t.Parallel()
 	root, cfg := secProject(t)
 	cfg.Redirects = nil
 	cfg.Headers = []config.HeaderRule{{Source: "/:path*", Headers: map[string]string{"Cache-Control": "public, max-age=60"}}}

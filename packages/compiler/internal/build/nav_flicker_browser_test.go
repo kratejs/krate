@@ -151,6 +151,7 @@ type navFlickerResult struct {
 // navigations, the new page is interactive as it appears, and back/forward to
 // a visited entry renders without a network request.
 func TestNavFlickerBrowser(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the navigation flicker browser test")

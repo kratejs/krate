@@ -110,6 +110,7 @@ func skipOrFail(t *testing.T, reason string) {
 }
 
 func TestHydrationRunsHeadless(t *testing.T) {
+	t.Parallel()
 	page := `
 		import { createSignal, createMemo } from '@krate/runtime';
 		import { forwardRef, useRef, useImperativeHandle } from 'react';

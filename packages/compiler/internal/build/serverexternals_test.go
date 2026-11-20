@@ -112,6 +112,7 @@ module.exports = { name: "canvas", native: !!native, util: require("@fake/util")
 }
 
 func TestNativeAddonRouteBuildsAndRunsOnNode(t *testing.T) {
+	t.Parallel()
 	root, _ := externalsProject(t, nativeFixture(), nil)
 	data, err := os.ReadFile(filepath.Join(root, ".krate", "api-routes.json"))
 	if err != nil {
@@ -143,6 +144,7 @@ func TestNativeAddonRouteBuildsAndRunsOnNode(t *testing.T) {
 }
 
 func TestNodeTargetTracesExternalPackagesAndIncludes(t *testing.T) {
+	t.Parallel()
 	root, cfg := externalsProject(t, nativeFixture(), func(c *config.Config) {
 		c.ServerExternalPackages = []string{"@fake/canvas"}
 		c.OutputFileTracingIncludes = map[string][]string{
@@ -185,6 +187,7 @@ func TestNodeTargetTracesExternalPackagesAndIncludes(t *testing.T) {
 }
 
 func TestServerlessTargetNamesNativeAddon(t *testing.T) {
+	t.Parallel()
 	_, cfg := externalsProject(t, nativeFixture(), nil)
 	root := filepath.Dir(cfg.OutDir)
 	_, err := BuildServerBundle(root, cfg, "vercel")
@@ -194,6 +197,7 @@ func TestServerlessTargetNamesNativeAddon(t *testing.T) {
 }
 
 func TestOutputFileTracingIncludesStayInRoot(t *testing.T) {
+	t.Parallel()
 	for _, g := range []string{"../secret/**", "/etc/passwd", "a/../../b"} {
 		cfg := config.Default()
 		cfg.OutputFileTracingIncludes = map[string][]string{"*": {g}}
@@ -212,6 +216,7 @@ func TestOutputFileTracingIncludesStayInRoot(t *testing.T) {
 // source. Pages and API routes bundle it, and the node target runs without
 // the workspace package being installed anywhere.
 func TestWorkspacePackageSourceBundlesAndDeploys(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{
 		"packages/ui/package.json": `{"name":"@acme/ui","version":"0.0.0","main":"src/index.ts"}`,
 		"packages/ui/src/index.ts": `export interface Greeting { text: string }

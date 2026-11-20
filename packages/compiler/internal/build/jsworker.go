@@ -34,8 +34,15 @@ func (b *Builder) jsWorker() *jsworker.Pool {
 		if b.Cfg != nil {
 			prefs = []string{b.Cfg.Runtime, b.Cfg.SSR.SSRRuntime, b.Cfg.SSR.APIRuntime}
 		}
-		if name, path := jsworker.Select(prefs...); name != "" {
+		engine := os.Getenv(jsworker.EnvVar)
+		if b.jsEngine != "" {
+			engine = b.jsEngine
+		}
+		if name, path := jsworker.SelectEngine(engine, prefs...); name != "" {
 			p := jsworker.New(name, path, 0)
+			if b.warnOut != nil {
+				p.Stderr = b.warnOut
+			}
 			p.Observe = func(label string, d time.Duration) {
 				b.Prof.Add("js:"+name+"-"+label, d)
 			}
@@ -61,7 +68,7 @@ func (b *Builder) closeJSWorker() {
 	b.js.mu.Unlock()
 	if p != nil {
 		if err := p.Broken(); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sWarning: the build-time %s worker failed; the embedded engine ran the rest:%s %v\n", cYellow, p.Name, cReset, err)
+			fmt.Fprintf(b.stderr(), "  %sWarning: the build-time %s worker failed; the embedded engine ran the rest:%s %v\n", cYellow, p.Name, cReset, err)
 		}
 		p.Close()
 	}

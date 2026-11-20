@@ -381,6 +381,7 @@ func clip(b []byte) string {
 // requires identical responses on the parts each spec selects. Cases with a
 // documented divergence assert the recorded QuickJS output instead.
 func TestAPIRuntimeConformance(t *testing.T) {
+	t.Parallel()
 	cases := loadCorpus(t)
 	esmDir, iifeDir := buildCorpus(t, cases)
 
@@ -403,7 +404,6 @@ func TestAPIRuntimeConformance(t *testing.T) {
 		serveQuickJSAPI(w, r, eagerRT, false)
 	}))
 	t.Cleanup(eager.Close)
-	t.Setenv("KRATE_CORPUS_VAR", "corpus-value")
 
 	// The embedded runtime's answer does not depend on the reference runtime,
 	// so each request runs in QuickJS once and is reused for Bun.
@@ -435,7 +435,7 @@ func TestAPIRuntimeConformance(t *testing.T) {
 
 	for _, runtime := range []string{"node", "bun"} {
 		t.Run(runtime, func(t *testing.T) {
-			ref := startSidecarConformance(t, runtime, esmDir, "")
+			ref := startSidecarConformanceEnv(t, runtime, esmDir, "", "KRATE_CORPUS_VAR=corpus-value")
 			for _, c := range cases {
 				t.Run(c.name, func(t *testing.T) {
 					t.Parallel()

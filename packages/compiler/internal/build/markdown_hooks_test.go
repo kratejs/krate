@@ -14,6 +14,7 @@ import (
 // bundler synthesizes an MDX-style TSX bundle), so the hook previously never ran -
 // regression for the "AfterMarkdownParse wiring" report item.
 func TestMarkdownPageRouting(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	pagesDir := filepath.Join(root, "src", "pages")
 	if err := os.MkdirAll(pagesDir, 0755); err != nil {

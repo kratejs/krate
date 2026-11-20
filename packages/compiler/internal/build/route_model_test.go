@@ -6,6 +6,7 @@ import (
 )
 
 func TestRouteSpecificityOrder(t *testing.T) {
+	t.Parallel()
 	patterns := []string{
 		"[[...all]]",
 		"docs/[...slug]",

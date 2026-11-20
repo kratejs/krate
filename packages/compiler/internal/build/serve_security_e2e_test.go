@@ -2,6 +2,7 @@ package build
 
 import (
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -60,6 +61,7 @@ func secProject(t *testing.T) (root string, cfg *config.Config) {
 }
 
 func TestServerOnlyOutputStaysOutOfPublicRoot(t *testing.T) {
+	t.Parallel()
 	root, cfg := secProject(t)
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
@@ -132,9 +134,11 @@ func gunzipBody(t *testing.T, b []byte) string {
 }
 
 func TestServeStaticHardeningEndToEnd(t *testing.T) {
-	defaultPrecompression(t)
+	t.Parallel()
 	root, cfg := secProject(t)
-	if err := New(root, cfg).BuildAll(); err != nil {
+	b := New(root, cfg)
+	defaultPrecompression(b)
+	if err := b.BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(cfg.OutDir, "admin", "index.html.gz")); err != nil {
@@ -306,6 +310,7 @@ func TestServeStaticHardeningEndToEnd(t *testing.T) {
 }
 
 func TestDevServerBindsLoopbackAndGuardsEndpoints(t *testing.T) {
+	t.Parallel()
 	root, cfg := secProject(t)
 	cfg.Compress = config.CompressOff()
 	cfg.Redirects = nil
@@ -316,8 +321,7 @@ func TestDevServerBindsLoopbackAndGuardsEndpoints(t *testing.T) {
 	port := freePort(t)
 	cfg.Server.Port = port
 	hub := NewDevHub()
-	errCh := make(chan error, 1)
-	go func() { errCh <- ServeDev(root, cfg, hub, time.Now()) }()
+	errCh := serveInProcess(t, func(ctx context.Context) error { return ServeDevContext(ctx, root, cfg, hub, time.Now()) })
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	deadline := time.Now().Add(30 * time.Second)
 	for {
@@ -331,7 +335,6 @@ func TestDevServerBindsLoopbackAndGuardsEndpoints(t *testing.T) {
 		}
 		if resp, err := http.Get(base + "/"); err == nil {
 			_ = resp.Body.Close()
-			registerServerStop(t, errCh)
 			break
 		}
 		time.Sleep(100 * time.Millisecond)

@@ -13,6 +13,7 @@ import (
 )
 
 func TestSidecarReadyWaitsThenReleases(t *testing.T) {
+	t.Parallel()
 	s := newSidecarReady(5 * time.Second)
 	gen := s.begin()
 	done := make(chan bool, 1)
@@ -42,6 +43,7 @@ func TestSidecarReadyWaitsThenReleases(t *testing.T) {
 }
 
 func TestSidecarReadyWrapAnswers503WithRetryAfter(t *testing.T) {
+	t.Parallel()
 	s := newSidecarReady(50 * time.Millisecond)
 	s.begin()
 	called := false
@@ -56,6 +58,7 @@ func TestSidecarReadyWrapAnswers503WithRetryAfter(t *testing.T) {
 }
 
 func TestMiddlewareGateWaitsForSidecar(t *testing.T) {
+	t.Parallel()
 	s := newSidecarReady(50 * time.Millisecond)
 	s.begin()
 	g := &middlewareGate{sidecarURL: "http://127.0.0.1:1/__krate/middleware", required: true, sidecarReady: s}
@@ -125,6 +128,7 @@ func TestSidecarNeverReadyAnswers503AndStaticDoesNotWait(t *testing.T) {
 // requests are released at once and later ones do not wait, until a start
 // listens. A sidecar that crashes after it listened is waited for as before.
 func TestSidecarReadyKnownFailureFailsFast(t *testing.T) {
+	t.Parallel()
 	s := newSidecarReady(30 * time.Second)
 	s.begin()
 	done := make(chan bool, 1)
@@ -179,6 +183,7 @@ func TestSidecarReadyKnownFailureFailsFast(t *testing.T) {
 // instrumentation register() still running or failed) must not count as the
 // sidecar: only a listener answering this start's token does.
 func TestSidecarReadyWatchIgnoresAnotherListener(t *testing.T) {
+	t.Parallel()
 	var answer atomic.Value
 	answer.Store("someone else")
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

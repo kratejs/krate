@@ -10,6 +10,7 @@ import (
 // The key that seals inline-action values is a secret: a deploy bundle never
 // contains it, and the plan tells the user to provide KRATE_ACTION_SECRET.
 func TestServerBundleOmitsInlineActionKey(t *testing.T) {
+	t.Parallel()
 	proj, cfg := serverlessProject(t, "serverless")
 	page := `export default async function Inline({ params }: any) {
   const { id } = await params;

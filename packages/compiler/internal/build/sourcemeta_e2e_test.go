@@ -208,6 +208,7 @@ func TestSourceMetaServeInPlace(t *testing.T) {
 // The built tree can move as a whole (a Docker image copies the repository to
 // /app): the locations follow the bundle.
 func TestSourceMetaBuildTreeMoves(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	top, root, _ := metaProject(t, "apps/web", true)
 	realRoot, err := filepath.EvalSymlinks(root)
@@ -238,6 +239,7 @@ func TestSourceMetaBuildTreeMoves(t *testing.T) {
 // The node deploy output carries the files the bundle reads through its
 // source location, and the locations follow it when it moves.
 func TestSourceMetaNodeDeployMoves(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, app string
 		tracing   bool
@@ -313,6 +315,7 @@ func copyTreeSkippingLinks(src, dst string) error {
 // The targets that bundle the output again get the page and action bundles
 // without the node banner, and helpers that need no file layout.
 func TestSourceMetaStubTargets(t *testing.T) {
+	t.Parallel()
 	for _, target := range []string{"vercel", "netlify"} {
 		t.Run(target, func(t *testing.T) {
 			_, root, cfg := metaProject(t, "apps/web", true)

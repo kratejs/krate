@@ -69,3 +69,34 @@ func childStderr() io.Writer {
 	defer errOutput.mu.Unlock()
 	return errOutput.w
 }
+
+// stderr is where a build writes its warnings: os.Stderr unless SetStderr
+// gave the build a writer of its own.
+func (b *Builder) stderr() io.Writer {
+	if b != nil && b.warnOut != nil {
+		return b.warnOut
+	}
+	return os.Stderr
+}
+
+// SetStderr sends the warnings of this builder's builds to w instead of
+// os.Stderr, so callers (tests, long-lived hosts) can collect them without
+// swapping the process-wide os.Stderr. Writes are serialized.
+func (b *Builder) SetStderr(w io.Writer) {
+	if w == nil {
+		b.warnOut = nil
+		return
+	}
+	b.warnOut = &syncWriter{w: w}
+}
+
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *syncWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}

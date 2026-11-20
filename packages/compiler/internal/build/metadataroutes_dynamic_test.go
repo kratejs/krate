@@ -13,6 +13,7 @@ import (
 )
 
 func TestMetaRouteSchedule(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		src     string
 		dynamic bool
@@ -35,6 +36,7 @@ func TestMetaRouteSchedule(t *testing.T) {
 }
 
 func TestMetaRouteIndexMatch(t *testing.T) {
+	t.Parallel()
 	idx := metaRouteIndex{
 		{Kind: mrRobots, Path: "/robots.txt", Key: "__krate_meta/robots"},
 		{Kind: mrSitemap, Prefix: "/sitemap/", Suffix: ".xml", Key: "__krate_meta/sitemap/[id]"},
@@ -101,6 +103,7 @@ export default function sitemap({ id }: { id: string }) { return [{ url: "https:
 
 // The node deploy target serves the same routes from its portable handler.
 func TestDynamicMetadataRoutesOnNodeTarget(t *testing.T) {
+	t.Parallel()
 	root, cfg := dynamicMetaProject(t)
 	if _, err := BuildServerBundle(root, cfg, "node"); err != nil {
 		t.Fatalf("BuildServerBundle: %v", err)
@@ -132,6 +135,7 @@ func TestDynamicMetadataRoutesOnNodeTarget(t *testing.T) {
 // URL from them per request (with headers() available), caching a revalidate
 // route for its window. server-only imports work in them.
 func TestDynamicMetadataRoutesServePerRequest(t *testing.T) {
+	t.Parallel()
 	root, cfg := dynamicMetaProject(t)
 	for _, rel := range []string{"robots.txt", "sitemap.xml"} {
 		if _, err := os.Stat(filepath.Join(cfg.OutDir, rel)); err == nil {

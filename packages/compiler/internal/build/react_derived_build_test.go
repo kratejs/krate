@@ -10,6 +10,7 @@ import (
 // irtree/derived.go, irtree/moduleconsts_ir.go).
 
 func TestDerivedRenderValuesHydrateAsGetters(t *testing.T) {
+	t.Parallel()
 	html, js := buildReactPage(t, `
 		import { useState, useEffect } from 'react';
 		export default function Page() {

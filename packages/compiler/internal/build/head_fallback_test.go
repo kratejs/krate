@@ -10,6 +10,7 @@ import (
 )
 
 func TestFallbackHeadTags(t *testing.T) {
+	t.Parallel()
 	seo := config.SEOConfig{SiteName: "Acme", Icon: "icon.svg"}
 	got := fallbackHeadTags("", seo)
 	if !strings.Contains(got, "<title>Acme</title>") || !strings.Contains(got, `<link rel="icon" href="/icon.svg">`) {
@@ -29,6 +30,7 @@ func TestFallbackHeadTags(t *testing.T) {
 }
 
 func TestBuildEmitsFallbackTitleAndIcon(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeFileRel(t, root, "src/pages/index.tsx", "export default function P() { return <p>home</p>; }\n")
 	writeFileRel(t, root, "src/pages/about.tsx", "import { Head } from '@krate/runtime';\nexport default function P() { return <><Head><title>About us</title></Head><p>about</p></>; }\n")
@@ -61,6 +63,7 @@ func TestBuildEmitsFallbackTitleAndIcon(t *testing.T) {
 }
 
 func TestBuildFallbackTitleOnPageWithOtherHeadTags(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeFileRel(t, root, "src/pages/index.tsx", "import { Head } from '@krate/runtime';\nexport default function P() { return <><Head><meta name=\"robots\" content=\"all\" /></Head><p>home</p></>; }\n")
 	writeFileRel(t, root, "krate.config.json", `{"site":{"name":"Acme"}}`)

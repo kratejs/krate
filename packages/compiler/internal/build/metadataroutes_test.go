@@ -37,6 +37,7 @@ func pixel(img image.Image, x, y int) color.NRGBA {
 // The file conventions build to real files: sitemap.xml, robots.txt,
 // manifest.webmanifest and PNGs, with og:image and twitter:image in the heads.
 func TestMetadataRouteFilesBuild(t *testing.T) {
+	t.Parallel()
 	root, _ := metaRoutesProject(t, "metaroutes_app")
 	read := func(rel string) string {
 		data, err := os.ReadFile(filepath.Join(root, "dist", filepath.FromSlash(rel)))

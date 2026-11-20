@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -157,6 +158,39 @@ type PageResult struct {
 }
 
 type Builder struct {
+	// plugins holds the Go plugins whose hooks this build runs: the default
+	// registry, or a test's own.
+	plugins *plugin.Registry
+	// warnOut, when set (SetStderr), receives the warnings os.Stderr would.
+	warnOut io.Writer
+	// Switches tests flip to compare a path with its reference; the zero
+	// values are the production behaviour. noClientChunkSplit checks the
+	// batched client chunks without code splitting, noCombinedSSR builds the
+	// server render modules one by one instead of in one code-split build,
+	// noMetadataFastPath evaluates every metadata chain in full,
+	// noSharedServerWork builds every page server bundle as if it were alone,
+	// and legacyNodeOnly finds Node-only API routes from their full QuickJS
+	// bundle.
+	noClientChunkSplit bool
+	noCombinedSSR      bool
+	noMetadataFastPath bool
+	noSharedServerWork bool
+	legacyNodeOnly     bool
+	// precompressDefault, when set, overrides precompressByDefault.
+	precompressDefault *bool
+	// jsEngine, when set, picks the build-time JavaScript engine in place of
+	// KRATE_BUILD_JS (tests compare the engines side by side).
+	jsEngine string
+	// metaRuns counts the metadata evaluations of this builder.
+	metaRuns metadataRunCounts
+	// metadataCache holds evaluated metadata results (metadataKey ->
+	// metadataResult).
+	metadataCache sync.Map
+	// warned holds the warnings this builder printed in its current build.
+	warned warningSet
+	// hintsSt is the real-React resource hints state (see hints).
+	hintsSt   *realHintsState
+	hintsOnce sync.Once
 	// shareAllScopes makes page-local components hydrate from shared chunks
 	// too, so tests can run every scope through the shared path.
 	shareAllScopes bool
@@ -479,8 +513,6 @@ func (b *Builder) devBootstrapJSON() string {
 }
 
 func New(root string, cfg *config.Config) *Builder {
-	// Set KrateRoot so the bundler can resolve krate/* virtual packages
-	bundler.KrateRoot = findKrateRoot(root)
 	// Normalise the project root into the config once, at construction. Builds
 	// derive this lazily; doing it here keeps the config stable across builds so
 	// the disk-cache config hash (and any other consumer) doesn't churn.
@@ -498,6 +530,7 @@ func New(root string, cfg *config.Config) *Builder {
 	return &Builder{
 		Root:        root,
 		Cfg:         cfg,
+		plugins:     plugin.DefaultRegistry,
 		depGraph:    make(map[string][]string),
 		pageDeps:    make(map[string][]string),
 		Prof:        NewProfiler(false),
@@ -581,7 +614,7 @@ func (b *Builder) ensureTransformed(prog *ast.Program, file string) error {
 			b.progImageDiags.Store(prog, ds)
 			for _, d := range ds {
 				if d.warn {
-					fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, imageDiagError(b.relPath(file), d).Error(), d.hint)
+					fmt.Fprintf(b.stderr(), "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, imageDiagError(b.relPath(file), d).Error(), d.hint)
 				}
 			}
 		}
@@ -739,14 +772,14 @@ func recoverPage(fn func() (*PageResult, string, error)) (result *PageResult, ra
 func (b *Builder) runPageHook(name, page string, ctx any, native func() error) {
 	if native != nil {
 		if err := safe.Run(native); err != nil {
-			fmt.Fprintf(os.Stderr, "  %s%s plugin error (%s):%s %v\n", cYellow, name, page, cReset, err)
+			fmt.Fprintf(b.stderr(), "  %s%s plugin error (%s):%s %v\n", cYellow, name, page, cReset, err)
 			b.pluginFailed(fmt.Errorf("%s (%s): %v", name, page, err))
 		}
 	}
 	if err := safe.Run(func() error {
 		return plugin.RunCommunityPlugins(name, b.Cfg.Plugins, b.Root, b.Cfg.OutDir, ctx, b.communityEnv())
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error %s (%s):%s %v\n", cYellow, name, page, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sCommunity plugin error %s (%s):%s %v\n", cYellow, name, page, cReset, err)
 		b.pluginFailed(fmt.Errorf("%s (%s): %v", name, page, err))
 	}
 }
@@ -787,7 +820,7 @@ func (b *Builder) printReactiveDiags(diags []reactive.Diagnostic) {
 		return
 	}
 	for _, d := range diags {
-		fmt.Fprintf(os.Stderr, "  %s! %s%s\n", cYellow, d.Message, cReset)
+		fmt.Fprintf(b.stderr(), "  %s! %s%s\n", cYellow, d.Message, cReset)
 	}
 }
 
@@ -813,7 +846,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	// pointing at stale HTML while the [id] template itself is refreshed.
 	concrete, gspErr := b.resolveStaticParamsPages(pages)
 	if gspErr != nil {
-		fmt.Fprintf(os.Stderr, "  %sx Error:%s %v\n", cRed, cReset, gspErr)
+		fmt.Fprintf(b.stderr(), "  %sx Error:%s %v\n", cRed, cReset, gspErr)
 		pageErrs = append(pageErrs, gspErr)
 	}
 
@@ -867,7 +900,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 
 	for res := range resultsCh {
 		if res.err != nil {
-			fmt.Fprintf(os.Stderr, "\n  %sx Error:%s %v\n", cRed, cReset, res.err)
+			fmt.Fprintf(b.stderr(), "\n  %sx Error:%s %v\n", cRed, cReset, res.err)
 			pageErrs = append(pageErrs, res.err)
 			continue
 		}
@@ -884,12 +917,12 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			HeadHTML: pageHeadHTML,
 			HasJS:    result.HasJS,
 		}
-		if err := plugin.RunAfterPage(afterPageCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sPlugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
+		if err := b.plugins.RunAfterPage(afterPageCtx); err != nil {
+			fmt.Fprintf(b.stderr(), "  %sPlugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
 			b.pluginFailed(err)
 		}
 		if err := plugin.RunCommunityPlugins("AfterPage", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterPageCtx, b.communityEnv()); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
+			fmt.Fprintf(b.stderr(), "  %sCommunity plugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
 			b.pluginFailed(err)
 		}
 		// Apply plugin modifications back
@@ -921,7 +954,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	// refreshes the shared files its siblings import.
 	if b.takeIslandDirty() {
 		if err := b.writeIslandBundles(); err != nil {
-			fmt.Fprintf(os.Stderr, "\n  %sx Error:%s %v\n", cRed, cReset, err)
+			fmt.Fprintf(b.stderr(), "\n  %sx Error:%s %v\n", cRed, cReset, err)
 			pageErrs = append(pageErrs, err)
 		}
 	}
@@ -1047,7 +1080,7 @@ func (b *Builder) BuildAll() error {
 	}
 
 	if err := writeConfigSchema(b.Root); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write .krate/config.schema.json:%s %v\n", cYellow, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sWarning: failed to write .krate/config.schema.json:%s %v\n", cYellow, cReset, err)
 	}
 
 	pages, err := findPages(b.Cfg.PagesDir)
@@ -1083,12 +1116,12 @@ func (b *Builder) BuildAll() error {
 		GeneratedPages: &genPages,
 		DevMode:        b.DevMode,
 	}
-	if err := plugin.RunBeforeBuild(beforeBuildCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sPlugin error (BeforeBuild):%s %v\n", cYellow, cReset, err)
+	if err := b.plugins.RunBeforeBuild(beforeBuildCtx); err != nil {
+		fmt.Fprintf(b.stderr(), "  %sPlugin error (BeforeBuild):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
 	if err := plugin.RunCommunityPlugins("BeforeBuild", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, beforeBuildCtx, b.communityEnv()); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (BeforeBuild):%s %v\n", cYellow, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sCommunity plugin error (BeforeBuild):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
 
@@ -1106,13 +1139,13 @@ func (b *Builder) BuildAll() error {
 		GeneratedPages: &genPages,
 		DevMode:        b.DevMode,
 	}
-	routes, err := plugin.RunGenerateRoutes(routeCtx)
+	routes, err := b.plugins.RunGenerateRoutes(routeCtx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  %sPlugin error (GenerateRoutes):%s %v\n", cYellow, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sPlugin error (GenerateRoutes):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
 	if err := plugin.RunCommunityPlugins("GenerateRoutes", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, routeCtx, b.communityEnv()); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (GenerateRoutes):%s %v\n", cYellow, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sCommunity plugin error (GenerateRoutes):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
 	bl.Lap("plugins-before")
@@ -1170,14 +1203,14 @@ func (b *Builder) BuildAll() error {
 		b.diskCache.setEnvHash(b.envFingerprint())
 	}
 	for _, w := range cres.Warnings {
-		fmt.Fprintf(os.Stderr, "  %sWarning: content:%s %v\n", cYellow, cReset, w)
+		fmt.Fprintf(b.stderr(), "  %sWarning: content:%s %v\n", cYellow, cReset, w)
 	}
 	if len(cres.Validation) > 0 {
 		// Schema violations are content bugs: fail the build (and `krate
 		// check`, which builds first) instead of emitting pages built from
 		// invalid entries. The error also reaches the dev overlay.
 		for _, ve := range cres.Validation {
-			fmt.Fprintf(os.Stderr, "  %sContent error:%s %v\n", cRed, cReset, ve)
+			fmt.Fprintf(b.stderr(), "  %sContent error:%s %v\n", cRed, cReset, ve)
 		}
 		return early.finish(&ContentValidationError{Errors: cres.Validation})
 	}
@@ -1259,7 +1292,7 @@ func (b *Builder) BuildAll() error {
 	}
 	// failOutput records a shipped file that could not be written.
 	failOutput := func(err error) {
-		fmt.Fprintf(os.Stderr, "\n  %sx Error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(b.stderr(), "\n  %sx Error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
@@ -1267,7 +1300,7 @@ func (b *Builder) BuildAll() error {
 	for res := range resultsCh {
 		if res.err != nil {
 			detail := errWithHint(res.err)
-			fmt.Fprintf(os.Stderr, "\n  %sx Error (%s):%s %s\n", cRed, res.page, cReset, detail)
+			fmt.Fprintf(b.stderr(), "\n  %sx Error (%s):%s %s\n", cRed, res.page, cReset, detail)
 			failureMessages = append(failureMessages, fmt.Sprintf("  %s: %s", res.page, detail))
 			failureErrs = append(failureErrs, res.err)
 			continue
@@ -1286,12 +1319,12 @@ func (b *Builder) BuildAll() error {
 			HeadHTML: pageHeadHTML,
 			HasJS:    result.HasJS,
 		}
-		if err := plugin.RunAfterPage(afterPageCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sPlugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
+		if err := b.plugins.RunAfterPage(afterPageCtx); err != nil {
+			fmt.Fprintf(b.stderr(), "  %sPlugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
 			b.pluginFailed(err)
 		}
 		if err := plugin.RunCommunityPlugins("AfterPage", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterPageCtx, b.communityEnv()); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
+			fmt.Fprintf(b.stderr(), "  %sCommunity plugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
 			b.pluginFailed(err)
 		}
 		// Apply plugin modifications back to result
@@ -1302,7 +1335,7 @@ func (b *Builder) BuildAll() error {
 
 	staticParamPages, gspErr := b.resolveStaticParamsPages(pages)
 	if gspErr != nil {
-		fmt.Fprintf(os.Stderr, "  %sx Error:%s %v\n", cRed, cReset, gspErr)
+		fmt.Fprintf(b.stderr(), "  %sx Error:%s %v\n", cRed, cReset, gspErr)
 		failureMessages = append(failureMessages, "  "+gspErr.Error())
 		failureErrs = append(failureErrs, gspErr)
 	}
@@ -1312,7 +1345,7 @@ func (b *Builder) BuildAll() error {
 			result, _, err := b.buildStaticParamsPage(spp)
 			if err != nil {
 				msg := fmt.Sprintf("generateStaticParams page %s: %v", spp.OutPath, err)
-				fmt.Fprintf(os.Stderr, "  %sx Error:%s %v\n", cRed, cReset, msg)
+				fmt.Fprintf(b.stderr(), "  %sx Error:%s %v\n", cRed, cReset, msg)
 				failureMessages = append(failureMessages, "  "+msg)
 				failureErrs = append(failureErrs, fmt.Errorf("generateStaticParams page %s: %w", spp.OutPath, err))
 				continue
@@ -1326,12 +1359,12 @@ func (b *Builder) BuildAll() error {
 				HeadHTML: result.HeadHTML,
 				HasJS:    result.HasJS,
 			}
-			if err := plugin.RunAfterPage(afterPageCtx); err != nil {
-				fmt.Fprintf(os.Stderr, "  %sPlugin error (AfterPage: %s):%s %v\n", cYellow, result.Page, cReset, err)
+			if err := b.plugins.RunAfterPage(afterPageCtx); err != nil {
+				fmt.Fprintf(b.stderr(), "  %sPlugin error (AfterPage: %s):%s %v\n", cYellow, result.Page, cReset, err)
 				b.pluginFailed(err)
 			}
 			if err := plugin.RunCommunityPlugins("AfterPage", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterPageCtx, b.communityEnv()); err != nil {
-				fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (AfterPage: %s):%s %v\n", cYellow, result.Page, cReset, err)
+				fmt.Fprintf(b.stderr(), "  %sCommunity plugin error (AfterPage: %s):%s %v\n", cYellow, result.Page, cReset, err)
 				b.pluginFailed(err)
 			}
 			result.HTML = afterPageCtx.HTML
@@ -1377,6 +1410,7 @@ func (b *Builder) BuildAll() error {
 	var serverBundleErrs []error
 	actionMods, basePath := b.actionModules(), b.Cfg.BaseURLPath()
 	impls := newClientSSRImpls(b.importResolver(), results, b.Root, b.Cfg.OutDir, actionMods, basePath)
+	impls.separate, impls.shareless = b.noCombinedSSR, b.noSharedServerWork
 	implsDone := make(chan struct{})
 	go pprof.Do(context.Background(), pprof.Labels("phase", "server-bundles"), func(context.Context) {
 		defer close(implsDone)
@@ -1437,7 +1471,7 @@ func (b *Builder) BuildAll() error {
 	// Bundle the island chunks of every page together so modules the pages
 	// share (stores, query clients) are shared files.
 	if err := b.writeIslandBundles(); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sIsland bundle error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sIsland bundle error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  islands: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
@@ -1458,7 +1492,7 @@ func (b *Builder) BuildAll() error {
 	// Runs against the final HTML so rules see exactly what ships.
 	if !b.SkipQualityChecks {
 		if err := b.runQualityChecks(results, runtimeJS); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sx Checks:%s %v\n", cRed, cReset, err)
+			fmt.Fprintf(b.stderr(), "  %sx Checks:%s %v\n", cRed, cReset, err)
 			failureMessages = append(failureMessages, "  checks: "+err.Error())
 			failureErrs = append(failureErrs, err)
 		}
@@ -1467,7 +1501,7 @@ func (b *Builder) BuildAll() error {
 
 	// Compile and emit any registered web workers to /workers/.
 	if err := b.writeWorkerBundles(); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sWorker bundle error:%s %v\n", cYellow, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sWorker bundle error:%s %v\n", cYellow, cReset, err)
 		failureMessages = append(failureMessages, "  workers: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
@@ -1475,7 +1509,7 @@ func (b *Builder) BuildAll() error {
 
 	// Compile and emit any registered dynamic-import chunks to /chunks/.
 	if err := b.writeDynamicChunkBundles(); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sDynamic import chunk error:%s %v\n", cYellow, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sDynamic import chunk error:%s %v\n", cYellow, cReset, err)
 		failureMessages = append(failureMessages, "  chunks: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
@@ -1491,7 +1525,7 @@ func (b *Builder) BuildAll() error {
 				publicFiles[rel] = true
 			}
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  %sPublic copy error:%s %v\n", cYellow, cReset, err)
+				fmt.Fprintf(b.stderr(), "  %sPublic copy error:%s %v\n", cYellow, cReset, err)
 				failureMessages = append(failureMessages, "  public: "+err.Error())
 				failureErrs = append(failureErrs, err)
 			}
@@ -1519,9 +1553,9 @@ func (b *Builder) BuildAll() error {
 
 	tl := b.Prof.Laps("tools:")
 	strays := findPagesStrays(b.Cfg.PagesDir)
-	printWarningsOnce(os.Stderr, b.strayAPIWarnings(strays.apiFiles))
+	b.printWarningsOnce(b.strayAPIWarnings(strays.apiFiles))
 	for _, err := range b.buildPagesEndpoints(strays.endpoints) {
-		fmt.Fprintf(os.Stderr, "  %sEndpoint error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{err}), "\n", "\n    "))
+		fmt.Fprintf(b.stderr(), "  %sEndpoint error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{err}), "\n", "\n    "))
 		failureMessages = append(failureMessages, "  endpoint: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
@@ -1535,20 +1569,20 @@ func (b *Builder) BuildAll() error {
 		apiErr = b.buildScriptcAPI()
 	}
 	if err := apiErr; err != nil {
-		fmt.Fprintf(os.Stderr, "  %sAPI Build error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sAPI Build error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  API: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
 	tl.Lap("api")
 
 	if err := b.BuildMiddleware(); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sMiddleware error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  middleware: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
 	tl.Lap("middleware")
 	if err := b.BuildInstrumentation(); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sInstrumentation error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sInstrumentation error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  instrumentation: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
@@ -1565,7 +1599,7 @@ func (b *Builder) BuildAll() error {
 	b.addSegmentsToManifest(manifest, results)
 
 	// revalidatePath("/x") calls whose target page is static cannot refresh it.
-	printWarningsOnce(os.Stderr, staticRevalidateTargetWarnings(filepath.Dir(b.Cfg.PagesDir), b.Root, manifest.Pages))
+	b.printWarningsOnce(staticRevalidateTargetWarnings(filepath.Dir(b.Cfg.PagesDir), b.Root, manifest.Pages))
 	tl.Lap("manifest")
 
 	// Compile server bundles for SSR/ISR/streaming pages
@@ -1585,7 +1619,7 @@ func (b *Builder) BuildAll() error {
 		if staged := stageServerRenderer(b.Root, b.Cfg.OutDir); staged != "" {
 			printf("  %s*%s Staged SSR renderer driver\n", cCyan, cReset)
 		} else {
-			fmt.Fprintf(os.Stderr, "  %sWarning: SSR renderer driver not staged - server-renderer source not found under %s (ensure @krate/runtime is installed)%s\n", cYellow, b.Root, cReset)
+			fmt.Fprintf(b.stderr(), "  %sWarning: SSR renderer driver not staged - server-renderer source not found under %s (ensure @krate/runtime is installed)%s\n", cYellow, b.Root, cReset)
 		}
 	}
 	tl.Lap("server-bundles")
@@ -1607,7 +1641,7 @@ func (b *Builder) BuildAll() error {
 	// Generate typed route declarations (.krate/types/routes.d.ts + bridge).
 	// Warnings only - type generation must never fail a build.
 	if err := b.writeRouteTypes(results); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sWarning: failed to generate route types:%s %v\n", cYellow, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sWarning: failed to generate route types:%s %v\n", cYellow, cReset, err)
 	}
 	bl.Lap("manifest")
 
@@ -1665,12 +1699,12 @@ func (b *Builder) BuildAll() error {
 		CSS:     mergedPageCSS.String(),
 		DevMode: b.DevMode,
 	}
-	if err := plugin.RunAfterBuild(afterBuildCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sPlugin error (AfterBuild):%s %v\n", cYellow, cReset, err)
+	if err := b.plugins.RunAfterBuild(afterBuildCtx); err != nil {
+		fmt.Fprintf(b.stderr(), "  %sPlugin error (AfterBuild):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
 	if err := plugin.RunCommunityPlugins("AfterBuild", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterBuildCtx, b.communityEnv()); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (AfterBuild):%s %v\n", cYellow, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sCommunity plugin error (AfterBuild):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
 
@@ -1691,18 +1725,18 @@ func (b *Builder) BuildAll() error {
 		err := b.checkChunkRefs()
 		stopCR()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sx Chunk error:%s %v\n", cRed, cReset, err)
+			fmt.Fprintf(b.stderr(), "  %sx Chunk error:%s %v\n", cRed, cReset, err)
 			failureMessages = append(failureMessages, "  chunks: "+err.Error())
 			failureErrs = append(failureErrs, err)
 		}
 	}
 	if b.diskCache != nil && b.diskCache.enabled && (b.Prof.Enabled() || b.Verbose) {
-		fmt.Fprintf(os.Stderr, "  build cache: %s\n", b.diskCache.string())
+		fmt.Fprintf(b.stderr(), "  build cache: %s\n", b.diskCache.string())
 	}
 	if b.Prof.Enabled() {
 		b.Prof.setEsbuild(esbuildStatsSince(esbuild0))
-		b.Prof.Report(os.Stderr)
-		reportMemory(os.Stderr)
+		b.Prof.Report(b.stderr())
+		reportMemory(b.stderr())
 	}
 
 	if len(failureErrs) > 0 {
@@ -1720,7 +1754,7 @@ func (b *Builder) BuildAll() error {
 		n, err := PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.BrotliOn(), b.Cfg.Compress.GzipOn())
 		stopPC()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sWarning: precompression failed:%s %v\n", cYellow, cReset, err)
+			fmt.Fprintf(b.stderr(), "  %sWarning: precompression failed:%s %v\n", cYellow, cReset, err)
 		} else if n > 0 {
 			printf("  %s*%s Precompressed %d assets\n", cCyan, cReset, n)
 		}
@@ -1927,7 +1961,7 @@ func (b *Builder) warnOnce(msg string) {
 	b.twWarned[msg] = true
 	b.twMu.Unlock()
 	if !seen {
-		fmt.Fprintf(os.Stderr, "  %s%s%s\n", cYellow, msg, cReset)
+		fmt.Fprintf(b.stderr(), "  %s%s%s\n", cYellow, msg, cReset)
 	}
 }
 
@@ -1964,7 +1998,7 @@ func (b *Builder) tailwindCSS() string {
 	d.MergeFrom(css.ScanTailwindDirectives(b.Root, opts))
 	res, err := css.GenerateTailwindDirectives(b.Root, twCfg, opts, d)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  %sTailwind error:%s %v\n", cYellow, cReset, err)
+		fmt.Fprintf(b.stderr(), "  %sTailwind error:%s %v\n", cYellow, cReset, err)
 		return ""
 	}
 	for _, w := range res.Warnings {
@@ -2047,7 +2081,7 @@ func (b *Builder) codeTheme() syntaxhighlight.Theme {
 		})
 	}
 	if len(ds) > 0 {
-		printWarningsOnce(os.Stderr, ds)
+		b.printWarningsOnce(ds)
 	}
 	return th
 }
@@ -2483,7 +2517,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	// or a static page, which a server page's tree does not (see
 	// releaseEnvWarnings).
 	envPending := holdEnvWarnings(bundle)
-	printModuleWarnings(os.Stderr, bundle.Modules)
+	b.printModuleWarnings(bundle.Modules)
 	var pageWarnings []diag.Diagnostic
 	for _, m := range bundle.Modules {
 		pageWarnings = append(pageWarnings, m.Diagnostics...)
@@ -2548,7 +2582,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		Page:    page,
 		Program: entryModule.Program,
 	}
-	b.runPageHook("AfterParse", page, parseCtx, func() error { return plugin.RunAfterParse(parseCtx) })
+	b.runPageHook("AfterParse", page, parseCtx, func() error { return b.plugins.RunAfterParse(parseCtx) })
 	// Plugins may hand back a replacement AST (JS plugins decode the astjson doc
 	// they return; Go-style plugins swap ctx.Program directly). Point the entry
 	// module at the final program so all downstream stages render the edited tree.
@@ -2565,7 +2599,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 
 	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense>
 	// usage, falling back to the page's data-cache reads (tagged/timed fetch).
-	renderMode, revalidate, dataUsage := resolvePageRenderMode(page, entryModule, bundle.Modules, bnd.Resolve)
+	renderMode, revalidate, dataUsage := b.resolvePageRenderMode(page, entryModule, bundle.Modules, bnd.Resolve)
 	explicitStatic := renderMode == RenderSSG
 	declaredMode := renderMode
 	pageLang := detectPageLang(entryModule.Program)
@@ -2577,7 +2611,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		for _, mod := range bundle.Modules {
 			if mod.ComponentClass == bundler.ComponentClassRuntime {
 				renderMode = RenderStreaming
-				fmt.Fprintf(os.Stderr, "  %s*%s %s imports runtime component -> streaming\n", cCyan, cReset, filepath.Base(page))
+				fmt.Fprintf(b.stderr(), "  %s*%s %s imports runtime component -> streaming\n", cCyan, cReset, filepath.Base(page))
 				break
 			}
 		}
@@ -2598,7 +2632,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	// defeat a page author's per-page config.
 	if b.Cfg.SSR.Streaming && renderMode == RenderSSG {
 		renderMode = RenderStreaming
-		fmt.Fprintf(os.Stderr, "  %s*%s %s -> streaming (global override)\n", cCyan, cReset, filepath.Base(page))
+		fmt.Fprintf(b.stderr(), "  %s*%s %s -> streaming (global override)\n", cCyan, cReset, filepath.Base(page))
 	}
 
 	// Static output mode disables request-time rendering entirely: a page that
@@ -2608,14 +2642,14 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	staticMode := strings.EqualFold(b.Cfg.Output, "static")
 	staticWhy := "the page pins itself static"
 	if staticMode && renderMode != RenderSSG {
-		fmt.Fprintf(os.Stderr, "  %s*%s %s -> ssg (static output mode)\n", cCyan, cReset, filepath.Base(page))
+		fmt.Fprintf(b.stderr(), "  %s*%s %s -> ssg (static output mode)\n", cCyan, cReset, filepath.Base(page))
 		renderMode = RenderSSG
 		staticWhy = "output: \"static\""
 		explicitStatic = true
 	}
 	if renderMode == RenderSSG && explicitStatic {
 		if d, ok := staticDataCacheWarning(page, entryModule.SourceCode, dataUsage, staticWhy); ok {
-			printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
+			b.printWarningsOnce([]diag.Diagnostic{d})
 			pageWarnings = append(pageWarnings, d)
 		}
 	}
@@ -2639,7 +2673,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 				d := diag.New(page, 1, 1, filepath.Base(page)+" is an error page and is always prerendered; its "+renderMode.String()+" rendering mode is ignored",
 					"read request data in client code; only 404, 401 and 403 pages can render per request", "").WithCode(diag.CodeSegmentRequestMode)
 				d.Severity = diag.SeverityWarning
-				printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
+				b.printWarningsOnce([]diag.Diagnostic{d})
 				pageWarnings = append(pageWarnings, d)
 			}
 			renderMode = RenderSSG
@@ -2679,7 +2713,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 				continue
 			}
 			if d := warnStaticAccessDenied(mod.Path, mod.Program, mod.SourceCode, "page"); d != nil {
-				printAccessDeniedWarning(d)
+				b.printAccessDeniedWarning(d)
 				pageWarnings = append(pageWarnings, *d)
 				break
 			}
@@ -2768,7 +2802,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		if len(tree.Errors) > 0 {
 			return nil, "", renderErrors(page, tree.Errors)
 		}
-		printTreeWarnings(os.Stderr, tree.Warnings)
+		printTreeWarnings(b.stderr(), tree.Warnings)
 		pageWarnings = append(pageWarnings, tree.Warnings...)
 		// CSS stylesheets are generated during IR construction (one shared,
 		// instance-agnostic stylesheet per scope). Append them to the page's own CSS
@@ -2808,7 +2842,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		if isDynRoute {
 			warnings = withoutTemplateSlotWarnings(warnings)
 		}
-		printTreeWarnings(os.Stderr, warnings)
+		printTreeWarnings(b.stderr(), warnings)
 		pageWarnings = append(pageWarnings, warnings...)
 		// Render imported Go components (server tier, slot path + SSREval'd) via the
 		// Go host in one batch, then inline their HTML at the emitted markers.
@@ -2878,7 +2912,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		HasJS:    len(emitResult.Signatures) > 0,
 		RawCSS:   bundle.CSS,
 	}
-	b.runPageHook("AfterRender", page, renderCtx, func() error { return plugin.RunAfterRender(renderCtx) })
+	b.runPageHook("AfterRender", page, renderCtx, func() error { return b.plugins.RunAfterRender(renderCtx) })
 	// Apply plugin modifications back
 	emitResult.HTML = renderCtx.HTML
 	emitResult.HeadHTML = renderCtx.HeadHTML
@@ -2906,7 +2940,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 			HTML:  emitResult.HTML,
 			Route: outName,
 		}
-		b.runPageHook("AfterMarkdownParse", page, mdCtx, func() error { return plugin.RunAfterMarkdownParse(mdCtx) })
+		b.runPageHook("AfterMarkdownParse", page, mdCtx, func() error { return b.plugins.RunAfterMarkdownParse(mdCtx) })
 		emitResult.HTML = mdCtx.HTML
 	}
 
@@ -3314,7 +3348,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 	b.recordDeps(page, e.Deps)
 	c.markHit()
 	// A replayed page reports the warnings its cold build did (once per build).
-	printWarningsOnce(os.Stderr, e.Warnings)
+	b.printWarningsOnce(e.Warnings)
 
 	return &PageResult{
 		Page:          page,
@@ -3585,7 +3619,7 @@ func (b *Builder) resetBuildCaches() {
 	// Runtime/dev bundle disk lookups are memoized per build.
 	resetRuntimeBundleMemo()
 	// Module warnings are printed once per build.
-	resetModuleWarnings()
+	b.warned.reset()
 	// Baked collection-chain folds are per-build (a content edit changes the key).
 	resetContentFoldCache()
 }
@@ -3699,7 +3733,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 			}
 			// Said now: when the wrapper then fails to compile as part of the
 			// layout, this is the explanation that matters.
-			printWarningsOnce(os.Stderr, notes)
+			b.printWarningsOnce(notes)
 		}
 	}
 	layoutProviderCache.Store(layoutPath, lifted)
@@ -3716,7 +3750,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		hostedImports = layoutIslandImports(layoutBundle.Modules, nil, bnd.Resolve)
 	}
 	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle))
-	printModuleWarnings(os.Stderr, layoutBundle.Modules)
+	b.printModuleWarnings(layoutBundle.Modules)
 
 	b.modCSS.store(layoutPath, layoutBundle.CSSModules)
 	layoutModule := findEntryModule(layoutBundle.Modules)
@@ -3770,7 +3804,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if err := asyncLayoutError(layoutPath, ann, layoutModule.SourceCode); err != nil {
 		return nil, "", nil, false, err
 	}
-	printAccessDeniedWarning(warnStaticAccessDenied(layoutPath, layoutModule.Program, layoutModule.SourceCode, "layout"))
+	b.printAccessDeniedWarning(warnStaticAccessDenied(layoutPath, layoutModule.Program, layoutModule.SourceCode, "layout"))
 	opts := b.irBuildOptions()
 	opts.IDPrefix = b.layoutIDPrefix(layoutPath)
 	applyModuleBindings(&opts, layoutModule.Path, layoutModule.Program, extraLayoutPrograms)
@@ -4062,7 +4096,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	tree := b.buildTree(entryModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		for _, e := range tree.Errors {
-			fmt.Fprintf(os.Stderr, "  %sx Error (loading %s):%s %v\n", cRed, loadingPath, cReset, e)
+			fmt.Fprintf(b.stderr(), "  %sx Error (loading %s):%s %v\n", cRed, loadingPath, cReset, e)
 		}
 		return ""
 	}
@@ -4348,9 +4382,9 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult,
 
 // printRouteWarning prints a non-fatal routing diagnostic.
 func (b *Builder) printRouteWarning(d diag.Diagnostic) {
-	fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n", cYellow, cReset, d.Error())
+	fmt.Fprintf(b.stderr(), "  %sWarning:%s %s\n", cYellow, cReset, d.Error())
 	if d.Hint != "" {
-		fmt.Fprintf(os.Stderr, "      hint: %s\n", d.Hint)
+		fmt.Fprintf(b.stderr(), "      hint: %s\n", d.Hint)
 	}
 }
 
@@ -4554,7 +4588,7 @@ func (b *Builder) BuildMiddleware() error {
 
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
-			fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %s\n", cRed, cReset, nativeAddonHint(e.Text))
+			fmt.Fprintf(b.stderr(), "  %sMiddleware error:%s %s\n", cRed, cReset, nativeAddonHint(e.Text))
 		}
 		return fmt.Errorf("middleware build failed: %s", nativeAddonHint(result.Errors[0].Text))
 	}
@@ -5447,7 +5481,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 				return
 			}()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  %sx API Error:%s %s: %v\n", cRed, cReset, r, err)
+				fmt.Fprintf(b.stderr(), "  %sx API Error:%s %s: %v\n", cRed, cReset, r, err)
 				errCh <- err
 				return
 			}
@@ -5581,7 +5615,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRout
 	meta := apiRouteMeta{File: filepath.ToSlash(outName)}
 	var durWarnings []diag.Diagnostic
 	meta.MaxDuration, durWarnings = readAPIMaxDuration(file)
-	printWarningsOnce(os.Stderr, durWarnings)
+	b.printWarningsOnce(durWarnings)
 
 	if !embedded {
 		removeStaleArtifact(quickjsPath)
@@ -5603,7 +5637,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRout
 		return meta, b.finishNodeOnlyRoute(file, quickjsPath, meta.File, buildNode)
 	}
 	proven := plan.nodeOnly
-	if !plan.detected && !legacyNodeOnlyDetection {
+	if !plan.detected && !b.legacyNodeOnly {
 		proven = provablyNodeOnly(quickjsOpts, b.Cfg.ServerExternalPackages, fam)
 	}
 	if proven {
@@ -5637,7 +5671,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRout
 	// Node-only routes are served by the sidecar, so only embedded-runtime
 	// routes are checked against the embedded runtime's API surface.
 	if meta.NodeOnly {
-		if legacyNodeOnlyDetection {
+		if b.legacyNodeOnly {
 			b.recordDeps(file, metafileDeps(b.Root, quickjsResult.Metafile))
 			if _, err := buildNode(); err != nil {
 				return apiRouteMeta{}, err
@@ -5670,7 +5704,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRout
 	removeStaleArtifact(nodePath)
 	b.setRuntimeCompatWarnings(file, dec.warnings)
 	if len(dec.warnings) > 0 {
-		printWarningsOnce(os.Stderr, dec.warnings)
+		b.printWarningsOnce(dec.warnings)
 	}
 	meta.Features = dec.features
 	return meta, nil
@@ -5821,7 +5855,11 @@ var precompressByDefault = true
 // shouldPrecompress reports whether this build writes compressed siblings.
 func (b *Builder) shouldPrecompress() bool {
 	c := b.Cfg.Compress
-	if c.Brotli == nil && c.Gzip == nil && !precompressByDefault {
+	def := precompressByDefault
+	if b.precompressDefault != nil {
+		def = *b.precompressDefault
+	}
+	if c.Brotli == nil && c.Gzip == nil && !def {
 		return false
 	}
 	return b.Cfg.ShouldPrecompress()

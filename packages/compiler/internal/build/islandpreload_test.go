@@ -16,6 +16,7 @@ func islandExt(id, hydrate string) irtree.ExternalComponent {
 }
 
 func TestIslandGraphFromMetafile(t *testing.T) {
+	t.Parallel()
 	meta := `{"outputs":{
 		"dist/chunks/island_aaa.js":{"imports":[
 			{"path":"dist/chunks/isl-ABC.js","kind":"import-statement"},
@@ -42,6 +43,7 @@ func TestIslandGraphFromMetafile(t *testing.T) {
 }
 
 func TestIslandPreloadClosure(t *testing.T) {
+	t.Parallel()
 	g := islandModuleGraph{
 		"/chunks/island_a.js":    {"/chunks/isl-shared.js", "preact/compat"},
 		"/chunks/island_b.js":    {"/chunks/isl-shared.js", "/chunks/isl-b.js"},
@@ -74,6 +76,7 @@ func TestIslandPreloadClosure(t *testing.T) {
 }
 
 func TestIslandBootLineStrategies(t *testing.T) {
+	t.Parallel()
 	url := "/base/chunks/island_abc.js"
 	for _, tc := range []struct {
 		hydrate, want string
@@ -104,6 +107,7 @@ var modulePreloadRe = regexp.MustCompile(`<link rel="modulepreload" href="([^"]+
 // statically (the Preact chunks through the import map), but nothing only a
 // client:visible or client:idle island or a lazy import() loads.
 func TestIslandPagePreloadsGraph(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	lib := func(name, src string) {
@@ -151,7 +155,7 @@ func TestIslandPagePreloadsGraph(t *testing.T) {
 			);
 		}
 	`)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	entries := islandEntryFiles(cfg.OutDir)

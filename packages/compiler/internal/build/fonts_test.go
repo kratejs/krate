@@ -19,6 +19,7 @@ const fontTestCSS = `
 `
 
 func TestCollectFontFacesMarksMono(t *testing.T) {
+	t.Parallel()
 	got := collectFontFaces(fontTestCSS, 0)
 	want := map[string]bool{"/fonts/body.woff2": false, "/fonts/fira.woff2": true, "/fonts/jb.woff2": true}
 	if len(got) != len(want) {
@@ -32,6 +33,7 @@ func TestCollectFontFacesMarksMono(t *testing.T) {
 }
 
 func TestPageUsesCode(t *testing.T) {
+	t.Parallel()
 	for html, want := range map[string]bool{
 		`<p>hi</p>`:                     false,
 		`<pre class="x">a</pre>`:        true,
@@ -59,6 +61,7 @@ func fontBuilder(t *testing.T, publicFiles ...string) *Builder {
 }
 
 func TestPageFontPreloadsMonoOnlyWithCode(t *testing.T) {
+	t.Parallel()
 	b := fontBuilder(t, "fonts/body.woff2", "fonts/fira.woff2", "fonts/jb.woff2")
 	plain := b.pageFontPreloads(`<main><p>text</p></main>`, nil)
 	if !strings.Contains(plain, "/fonts/body.woff2") || strings.Contains(plain, "fira") || strings.Contains(plain, "jb.woff2") {
@@ -73,6 +76,7 @@ func TestPageFontPreloadsMonoOnlyWithCode(t *testing.T) {
 }
 
 func TestPageFontPreloadsSkipsUnservedFile(t *testing.T) {
+	t.Parallel()
 	b := fontBuilder(t, "fonts/body.woff2")
 	out := b.pageFontPreloads(`<pre>x</pre>`, nil)
 	if strings.Contains(out, "fira") || strings.Contains(out, "jb.woff2") || !strings.Contains(out, "body.woff2") {
@@ -84,6 +88,7 @@ func TestPageFontPreloadsSkipsUnservedFile(t *testing.T) {
 }
 
 func TestThemeFontsHashedAndPreloaded(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	pkg := "node_modules/fontpkg"
 	writeFileRel(t, root, pkg+"/package.json", `{"name":"fontpkg","exports":{"./theme.css":"./src/theme.css"}}`)

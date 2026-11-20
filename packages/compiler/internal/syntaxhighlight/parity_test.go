@@ -219,11 +219,81 @@ func countTokens(html string) int {
 // truncated, CRLF and newline-less copies and line-highlight specs. Any
 // difference fails the test, including one that appears when chroma is
 // upgraded.
+//
+// The languages are split over several top-level tests so test shards can
+// spread them; TestParityCorpusCoversEveryLanguage keeps the split complete.
 func TestParityCorpus(t *testing.T) {
+	t.Parallel()
+	runParityCorpus(t, parityGroups["TestParityCorpus"])
+}
+
+func TestParityCorpusScripts(t *testing.T) {
+	t.Parallel()
+	runParityCorpus(t, parityGroups["TestParityCorpusScripts"])
+}
+
+func TestParityCorpusJSX(t *testing.T) {
+	t.Parallel()
+	runParityCorpus(t, parityGroups["TestParityCorpusJSX"])
+}
+
+func TestParityCorpusData(t *testing.T) {
+	t.Parallel()
+	runParityCorpus(t, parityGroups["TestParityCorpusData"])
+}
+
+func TestParityCorpusSystems(t *testing.T) {
+	t.Parallel()
+	runParityCorpus(t, parityGroups["TestParityCorpusSystems"])
+}
+
+// parityGroups are the languages each parity test runs.
+var parityGroups = map[string][]string{
+	"TestParityCorpus":        {"css", "html", "xml", "text"},
+	"TestParityCorpusScripts": {"ts", "js", "bash", "python"},
+	"TestParityCorpusJSX":     {"tsx", "jsx", "toml"},
+	"TestParityCorpusData":    {"markdown", "json", "yaml"},
+	"TestParityCorpusSystems": {"go", "rust", "c"},
+}
+
+// Every language of corpusSpecs is in exactly one parity group.
+func TestParityCorpusCoversEveryLanguage(t *testing.T) {
+	t.Parallel()
+	seen := map[string]string{}
+	for name, langs := range parityGroups {
+		for _, l := range langs {
+			if prev, ok := seen[l]; ok {
+				t.Errorf("%s is in %s and %s", l, prev, name)
+			}
+			seen[l] = name
+		}
+	}
+	for _, spec := range corpusSpecs {
+		for _, l := range spec.langs {
+			if _, ok := seen[l]; !ok {
+				t.Errorf("%s is in no parity group", l)
+			}
+			delete(seen, l)
+		}
+	}
+	for l, name := range seen {
+		t.Errorf("%s names %s, which corpusSpecs does not list", name, l)
+	}
+}
+
+func runParityCorpus(t *testing.T, langs []string) {
+	t.Helper()
 	root := repoRoot(t)
 	needNode(t, root)
+	want := map[string]bool{}
+	for _, l := range langs {
+		want[l] = true
+	}
 	for _, spec := range corpusSpecs {
 		for _, lang := range spec.langs {
+			if !want[lang] {
+				continue
+			}
 			spec, lang := spec, lang
 			t.Run(lang, func(t *testing.T) {
 				t.Parallel()

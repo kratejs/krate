@@ -12,6 +12,7 @@ import (
 )
 
 func TestRewriteSourceMeta(t *testing.T) {
+	t.Parallel()
 	const rel = "packages/lib/src/a.ts"
 	u := `__krateMetaURL("` + rel + `")`
 	f := `__krateMetaFile("` + rel + `")`
@@ -67,6 +68,7 @@ func TestRewriteSourceMeta(t *testing.T) {
 }
 
 func TestRewriteSourceMetaTypeof(t *testing.T) {
+	t.Parallel()
 	in := "type T = typeof __dirname; const x: typeof __filename = 1; if (typeof __dirname === 'string') {}"
 	got, _ := rewriteSourceMeta(in, "a.ts", true)
 	want := "type T = typeof __dirname; const x: typeof __filename = 1; if (typeof __krateMetaDir(\"a.ts\") === 'string') {}"
@@ -76,6 +78,7 @@ func TestRewriteSourceMetaTypeof(t *testing.T) {
 }
 
 func TestSourceMetaRelEscaping(t *testing.T) {
+	t.Parallel()
 	sm := newSourceMeta(t.TempDir(), "")
 	got, ok := sm.relPath(sm.srcRoot + "/pkg/a b/[id]/x%y#z?.ts")
 	if !ok || got != "pkg/a%20b/%5Bid%5D/x%25y%23z%3F.ts" {
@@ -92,6 +95,7 @@ func TestSourceMetaRelEscaping(t *testing.T) {
 }
 
 func TestMetaStaticTargets(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	sm := newSourceMeta(root, "")
 	sm.collectTargets()
@@ -115,6 +119,7 @@ const f = new URL("https://x.test/a", __krateMetaURL("a.ts"));
 }
 
 func TestSourceMetaBannerStrippedOnRebundle(t *testing.T) {
+	t.Parallel()
 	src := "export const a = 1;\n" + metaBanner + "\nconsole.log(__krateMetaURL(\"x.ts\"));\n"
 	sm := newSourceMeta(t.TempDir(), "")
 	out, ok := sm.rewrite(sm.srcRoot+"/b.mjs", src)
@@ -130,6 +135,7 @@ func TestSourceMetaBannerStrippedOnRebundle(t *testing.T) {
 }
 
 func TestSourceMetaPatchesOutputs(t *testing.T) {
+	t.Parallel()
 	for _, write := range []bool{true, false} {
 		for _, existing := range []bool{false, true} {
 			dir := t.TempDir()
@@ -193,6 +199,7 @@ func TestSourceMetaPatchesOutputs(t *testing.T) {
 }
 
 func TestSourceMetaSkipsOtherBuilds(t *testing.T) {
+	t.Parallel()
 	for _, o := range []api.BuildOptions{
 		{Format: api.FormatIIFE, Platform: api.PlatformNode},
 		{Format: api.FormatESModule, Platform: api.PlatformBrowser},

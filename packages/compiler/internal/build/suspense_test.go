@@ -11,6 +11,7 @@ import (
 )
 
 func TestSuspenseUseRendersFallbackAndTemplatesContent(t *testing.T) {
+	t.Parallel()
 	html, js, err := buildKrateProject(t, map[string]string{"src/pages/index.tsx": `
 		import { Suspense, use, useEffect } from 'react';
 		const userPromise = new Promise((r) => setTimeout(() => r({ name: 'Ada' }), 10));
@@ -48,6 +49,7 @@ func TestSuspenseUseRendersFallbackAndTemplatesContent(t *testing.T) {
 }
 
 func TestLazyNamedExportLoaders(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for rel, src := range map[string]string{
 		"src/components/Chart.tsx":  `export function Chart() { return <p id="chart">chart body</p>; }`,

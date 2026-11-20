@@ -113,6 +113,7 @@ func checkHandlerResults(t *testing.T, out string) {
 }
 
 func TestVercelServerOutput(t *testing.T) {
+	t.Parallel()
 	root, cfg := serverlessProject(t, "serverless")
 	plan, files := emitServerTarget(t, root, cfg, "vercel")
 	out := filepath.Join(root, ".vercel", "output")
@@ -212,6 +213,7 @@ console.log(JSON.stringify({ admin: [r.status, r.headers.get('location')], home:
 }
 
 func TestCloudflareServerOutput(t *testing.T) {
+	t.Parallel()
 	root, cfg := serverlessProject(t, "serverless")
 	_, _ = emitServerTarget(t, root, cfg, "cloudflare")
 	worker := filepath.Join(root, ".krate", "deploy", "cloudflare", "worker.mjs")
@@ -267,6 +269,7 @@ const call = (request) => worker.fetch(request, env, { waitUntil() {} });`+handl
 }
 
 func TestServerBundleHasNoSecrets(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	_ = root
 	proj, cfg := serverlessProject(t, "serverless")
@@ -301,6 +304,7 @@ func TestServerBundleHasNoSecrets(t *testing.T) {
 // Platform deploys rewrite dist/: segment pages and their hydration dirs must
 // survive, and unmatched URLs must reach the function (not a CDN 404).
 func TestPlatformDeploysKeepSegmentPages(t *testing.T) {
+	t.Parallel()
 	for _, target := range []string{"vercel", "netlify", "cloudflare"} {
 		t.Run(target, func(t *testing.T) {
 			root, cfg := serverlessProject(t, "serverless")
@@ -343,6 +347,7 @@ func TestPlatformDeploysKeepSegmentPages(t *testing.T) {
 }
 
 func TestServerlessMaxDurationPlatformConfig(t *testing.T) {
+	t.Parallel()
 	root, cfg := serverlessProject(t, "serverless")
 	if err := os.WriteFile(filepath.Join(root, "src", "api", "export.ts"), []byte("export const maxDuration = 45;\nexport function GET() { return Response.json({ ok: true }); }\n"), 0o644); err != nil {
 		t.Fatal(err)

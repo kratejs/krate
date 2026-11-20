@@ -11,6 +11,7 @@ import (
 )
 
 func TestParseActionExportsAcceptsWrappersAndRejectsLiterals(t *testing.T) {
+	t.Parallel()
 	good := `"use server";
 import { helper } from "./h";
 import { createAction } from "./create";
@@ -54,6 +55,7 @@ export { other, other2 as second } from "./other";
 // turns out not to be a function fails when it is called and does not break
 // its neighbours.
 func TestWrapperBuiltActionsRunInSidecar(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
 		t.Skip("node is not installed")

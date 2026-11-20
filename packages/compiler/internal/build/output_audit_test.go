@@ -451,6 +451,7 @@ type routeBudget struct {
 // TestSummaryCountsTransitiveChunks pins the size table's JS column to the
 // scripts a page loads through imports, not just the ones its HTML names.
 func TestSummaryCountsTransitiveChunks(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{
 		"/p/index.js":          `import{a}from"./dep.js";import"/chunks/shared.js";import x from"preact";import("/chunks/island_aa.js");import("/chunks/lazy.js");a(x)`,
 		"/p/dep.js":            `export const a=1;import"../chunks/deep.js"`,
@@ -471,6 +472,7 @@ func TestSummaryCountsTransitiveChunks(t *testing.T) {
 }
 
 func TestSummaryTableTransitiveFootnote(t *testing.T) {
+	t.Parallel()
 	s := &BuildSummary{Routes: []RouteSize{
 		{Route: "/", Mode: "static", GzipHTML: 1000, GzipJS: 5000, GzipOwnJS: 800, GzipCSS: 200},
 		{Route: "/docs/x", Mode: "static", GzipHTML: 1000, GzipJS: 5000, GzipCSS: 200, ThirdParty: true},

@@ -61,6 +61,7 @@ export default function Err() { return <h1>oops</h1>; }`,
 // TestSegmentPageRendersPerRequest: a 404 page with `ssr` is rendered for every
 // request that misses, with the 404 status, and reads request data.
 func TestSegmentPageRendersPerRequest(t *testing.T) {
+	t.Parallel()
 	b, root := segmentSSRProject(t)
 	if err := b.BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
@@ -109,6 +110,7 @@ func TestSegmentPageRendersPerRequest(t *testing.T) {
 // TestSegmentPageRendersPerRequestOnNodeTarget: the node target answers a
 // missed URL with the 404 page rendered for that request, like the Go host.
 func TestSegmentPageRendersPerRequestOnNodeTarget(t *testing.T) {
+	t.Parallel()
 	if !canStopInProcessServer {
 		t.Skip("in-process Go server needs a unix host")
 	}
@@ -141,6 +143,7 @@ func TestSegmentPageRendersPerRequestOnNodeTarget(t *testing.T) {
 // unauthorized pages render per request. An error page answers while the app is
 // failing, so its rendering mode is ignored with KR9003.
 func TestSegmentErrorPageStaysPrerendered(t *testing.T) {
+	t.Parallel()
 	b, root := segmentSSRProject(t)
 	if err := b.BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
@@ -161,7 +164,6 @@ func runtimeScriptProject(t *testing.T, files map[string]string) string {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(root)
 	if err := b.BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
@@ -182,6 +184,7 @@ func readDistPage(t *testing.T, root, name string) string {
 // hydration script, and server-only code in it never reaches the browser. A
 // page with state still hydrates.
 func TestRequestTimePagesShipNoRuntime(t *testing.T) {
+	t.Parallel()
 	root := runtimeScriptProject(t, map[string]string{
 		"src/lib/env.ts": `export function readEnv() { const env = { A: process.env.A }; return env; }`,
 		"src/pages/index.tsx": `import { createSignal } from "@krate/runtime";
@@ -213,6 +216,7 @@ export default function NotFound() { const e = readEnv(); return <main><h1>404 {
 // TestComponentLocalConstShipsNoRuntime: a local constant with a build-time
 // value is baked into the HTML like a module-scope one.
 func TestComponentLocalConstShipsNoRuntime(t *testing.T) {
+	t.Parallel()
 	root := runtimeScriptProject(t, map[string]string{
 		"src/pages/index.tsx": `export default function Page() {
   const label = 'x' + 'y';
@@ -234,6 +238,7 @@ func TestComponentLocalConstShipsNoRuntime(t *testing.T) {
 // layout is prerendered without that layout, so a failing layout still gets the
 // 500 page, filled with the error and its digest (never a render with no error).
 func TestSegmentErrorPageUnderAsyncLayout(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	b, root := scProject(t, map[string]string{
 		"src/pages/_layout.tsx": `import { headers } from "@krate/runtime/server";
@@ -257,7 +262,7 @@ export default function Error({ error, retry }: { error: Error & { digest?: stri
 		t.Fatal(err)
 	}
 	withPreact(t, root)
-	logs := captureStderrFile(t)
+	logs := builderStderr(b)
 	if err := b.BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}

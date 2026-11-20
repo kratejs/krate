@@ -59,6 +59,7 @@ func postSCRegions(t *testing.T, base string, body map[string]any) []scFrame {
 // error and a nested async child) plus a synchronous page with an async child
 // under <Suspense>, boots the real SSR sidecar, and checks every frame.
 func TestAsyncServerComponentSidecarE2E(t *testing.T) {
+	t.Parallel()
 	ensureRuntimeDist(t)
 	node, err := exec.LookPath("node")
 	if err != nil {

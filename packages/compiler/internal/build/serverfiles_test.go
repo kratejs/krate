@@ -20,6 +20,7 @@ import (
 // package that is bundled, a client boundary, and an async layout with an
 // inline action.
 func TestServerBundlesSharedMatchAlone(t *testing.T) {
+	t.Parallel()
 	page := func(rel, imports, jsx string) string {
 		return imports + `import { tag } from "fake-lib";
 import * as lib from "fake-lib";
@@ -71,9 +72,11 @@ export function Alt() { return <i>{util()}</i>; }`,
 			t.Fatal(err)
 		}
 	}
-	bundles := func() map[string][]byte {
+	bundles := func(share bool) map[string][]byte {
 		t.Helper()
-		if err := New(root, b.Cfg).BuildAll(); err != nil {
+		nb := New(root, b.Cfg)
+		nb.noSharedServerWork = !share
+		if err := nb.BuildAll(); err != nil {
 			t.Fatalf("BuildAll: %v", err)
 		}
 		dir := filepath.Join(b.Cfg.OutDir, ".krate", "server-bundles")
@@ -85,10 +88,8 @@ export function Alt() { return <i>{util()}</i>; }`,
 		}
 		return out
 	}
-	shared := bundles()
-	shareServerBundleWork = false
-	alone := bundles()
-	shareServerBundleWork = true
+	shared := bundles(true)
+	alone := bundles(false)
 
 	names := slices.Sorted(maps.Keys(shared))
 	if len(names) != 4 {
@@ -116,6 +117,7 @@ export function Alt() { return <i>{util()}</i>; }`,
 // also when the builds ask for it at the same time, and keeps imports from
 // different directories, kinds and attributes apart.
 func TestNativeResolveMemoSharesByDirectory(t *testing.T) {
+	t.Parallel()
 	memo := newNativeResolveMemo()
 	var calls atomic.Int64
 	resolve := func(args api.OnResolveArgs) resolveMemoValue {
@@ -172,6 +174,7 @@ func TestNativeResolveMemoSharesByDirectory(t *testing.T) {
 
 // The cached file identity and sources are the ones read without the cache.
 func TestServerBundleFilesMatchUncached(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeProjectFile(t, root, "src/a.tsx", "export function A() { return <Head><title>x</title></Head>; }\n")
 	writeProjectFile(t, root, "src/client.tsx", "\"use client\";\nexport default function C() { return null; }\nexport const n = 1;\n")

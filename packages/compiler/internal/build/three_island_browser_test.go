@@ -17,6 +17,7 @@ import (
 // emitted. In a browser with WebGL the model loads, picking, orbiting,
 // zooming and pausing work, and a scene error reaches the error boundary.
 func TestBrowserThreeIsland(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -72,8 +73,7 @@ func TestBrowserThreeIsland(t *testing.T) {
 			t.Skipf("cannot link %s: %v", target, err)
 		}
 	}
-	t.Chdir(root)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 

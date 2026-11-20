@@ -12,6 +12,7 @@ import (
 // directory (orders/[id]/download.js) is served by the Node and Bun sidecars,
 // next to orders/[id].js and a dynamic sibling.
 func TestAPISidecarStaticLeafUnderDynamicDir(t *testing.T) {
+	t.Parallel()
 	for _, runtime := range []string{"node", "bun"} {
 		t.Run(runtime, func(t *testing.T) {
 			dir := t.TempDir()

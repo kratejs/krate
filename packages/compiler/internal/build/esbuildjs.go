@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"path/filepath"
 	"runtime"
 	"runtime/pprof"
 	"strings"
@@ -32,6 +33,9 @@ func esbuildBuildFrom(opts api.BuildOptions, skip int, prefix string) api.BuildR
 		res = api.Build(opts)
 	})
 	recordEsbuild(site, time.Since(t0))
+	if esbuildDirStatsOn.Load() {
+		recordEsbuildDir(esbuildDirOf(opts), site)
+	}
 	return res
 }
 
@@ -74,6 +78,69 @@ func recordEsbuild(site string, d time.Duration) {
 	s.d += d
 	esbuildStats.m[site] = s
 	esbuildStats.Unlock()
+}
+
+// esbuildDirStatsOn makes every esbuild call also count under the directory
+// it builds in (esbuildDirOf), so tests running side by side can count the
+// calls of their own project. Off outside tests.
+var esbuildDirStatsOn atomic.Bool
+
+var esbuildDirStats = struct {
+	sync.Mutex
+	m map[[2]string]int // {dir, site} -> calls
+}{m: map[[2]string]int{}}
+
+func recordEsbuildDir(dir, site string) {
+	esbuildDirStats.Lock()
+	esbuildDirStats.m[[2]string{dir, site}]++
+	esbuildDirStats.Unlock()
+}
+
+// esbuildDirOf is the directory a build works in: its working directory, the
+// directory of its stdin entry, its output, or its first entry point.
+func esbuildDirOf(opts api.BuildOptions) string {
+	switch {
+	case opts.AbsWorkingDir != "":
+		return opts.AbsWorkingDir
+	case opts.Stdin != nil && opts.Stdin.ResolveDir != "":
+		return opts.Stdin.ResolveDir
+	case opts.Outdir != "":
+		return opts.Outdir
+	case opts.Outfile != "":
+		return filepath.Dir(opts.Outfile)
+	case len(opts.EntryPoints) > 0:
+		return filepath.Dir(opts.EntryPoints[0])
+	case len(opts.EntryPointsAdvanced) > 0:
+		return filepath.Dir(opts.EntryPointsAdvanced[0].InputPath)
+	}
+	return ""
+}
+
+// esbuildCallsUnder returns the calls per site counted under root so far
+// (esbuildDirStatsOn must be set).
+func esbuildCallsUnder(root string) map[string]int {
+	root = filepath.Clean(root)
+	esbuildDirStats.Lock()
+	defer esbuildDirStats.Unlock()
+	out := map[string]int{}
+	for k, n := range esbuildDirStats.m {
+		if d := filepath.Clean(k[0]); d == root || strings.HasPrefix(d, root+string(filepath.Separator)) {
+			out[k[1]] += n
+		}
+	}
+	return out
+}
+
+// esbuildCallsSince returns the calls per site counted under root since
+// before (an esbuildCallsUnder result).
+func esbuildCallsSince(root string, before map[string]int) map[string]int {
+	out := map[string]int{}
+	for site, n := range esbuildCallsUnder(root) {
+		if n > before[site] {
+			out[site] = n - before[site]
+		}
+	}
+	return out
 }
 
 // esbuildStatsSnapshot copies the per-site counters.

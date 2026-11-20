@@ -56,6 +56,7 @@ func manifestPage(m Manifest, route string) (PageMeta, bool) {
 }
 
 func TestAsyncPageIsServerRendered(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/post.tsx": `export default async function Post({ params }: any) {
   const { slug } = await params;
@@ -94,6 +95,7 @@ func TestAsyncPageIsServerRendered(t *testing.T) {
 }
 
 func TestAsyncLayoutBelowTemplateDiagnostic(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/app/_layout.tsx":  `export default async function Layout({ children }: any) { await Promise.resolve(); return <div>{children}</div>; }`,
 		"src/pages/app/template.tsx": `export default function Tpl({ children }: any) { return <section>{children}</section>; }`,
@@ -116,6 +118,7 @@ func TestAsyncLayoutBelowTemplateDiagnostic(t *testing.T) {
 // for `react`: useEffect (called in a server page and in a "use client" child)
 // is a no-op while rendering, and cache() memoizes per request.
 func TestServerBundleReactShimEffectsAndCache(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/Redirector.tsx": `"use client";
 import { useEffect, useLayoutEffect } from "react";
@@ -173,6 +176,7 @@ export default async function Show({ params }: { params: Promise<{ id: string }>
 // against the diagnostics the aggregate lists: a page with two diagnostics
 // counts twice.
 func TestBuildErrorCountMatchesListedErrors(t *testing.T) {
+	t.Parallel()
 	bad := func(n int) string {
 		src := "import { lazy } from 'react';\nexport default function P() {\n"
 		for i := 0; i < n; i++ {

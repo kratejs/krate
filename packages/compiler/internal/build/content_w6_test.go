@@ -18,6 +18,7 @@ func contentConfigFor(root string, schema map[string]any) *config.Config {
 }
 
 func TestUnfoldableCollectionChainDoesNotShipDrafts(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeFileRel(t, root, "src/pages/index.tsx", `import { getCollection } from "krate/content";
 import { createSignal } from "@krate/runtime";
@@ -36,7 +37,7 @@ export default function Home() {
 	writeFileRel(t, root, "content/blog/hello.md", "---\ntitle: Hello\ntag: a\n---\nPUBLICBODYMARK\n")
 	writeFileRel(t, root, "content/blog/secret.md", "---\ntitle: Secret\ntag: b\ndraft: true\n---\nDRAFTSECRETMARK\n")
 	cfg := contentConfigFor(root, map[string]any{"title": "string", "tag": "string?", "draft": "boolean?"})
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}

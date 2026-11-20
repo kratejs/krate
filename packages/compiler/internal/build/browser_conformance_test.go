@@ -15,6 +15,7 @@ import (
 // it explicitly; the normal cross-platform suite skips when it is unset so
 // installing browsers remains optional for local development.
 func TestBrowserConformance(t *testing.T) {
+	t.Parallel()
 	runBrowserConformance(t, false)
 }
 
@@ -23,6 +24,7 @@ func TestBrowserConformance(t *testing.T) {
 // without the sourcemaps that keep scopes in the page script), so the shared
 // path sees the whole corpus. Chromium only: the path is browser-neutral.
 func TestBrowserConformanceSharedScopes(t *testing.T) {
+	t.Parallel()
 	if strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER"))) != "chromium" {
 		t.Skip("set KRATE_BROWSER=chromium to run shared-scope browser conformance")
 	}

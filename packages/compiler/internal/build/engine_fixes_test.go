@@ -13,6 +13,7 @@ import (
 // the runtime's delegated event system (which bubbles through every ancestor and
 // honours stopPropagation) and no per-page delegation code is emitted.
 func TestEventDelegationBubbles(t *testing.T) {
+	t.Parallel()
 	page := `
 		import { createSignal } from '@krate/runtime';
 		export default function Page() {
@@ -32,6 +33,7 @@ func TestEventDelegationBubbles(t *testing.T) {
 // TestDurableStateScriptEscaped verifies a krate.state.json containing a
 // </script> sequence cannot break out of the injected script.
 func TestDurableStateScriptEscaped(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeFileRel(t, root, "src/pages/index.tsx", `export default function Page() { return <h1>Hi</h1>; }`)
 	writeFileRel(t, root, "krate.state.json", `{"note":"</script><script>alert(1)</script>"}`)

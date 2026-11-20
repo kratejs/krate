@@ -10,6 +10,7 @@ import (
 )
 
 func TestPrepareActionsBuildsManifestAndBundle(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeActionTestFile(t, filepath.Join(root, "src", "actions", "todo.ts"), `"use server";
 

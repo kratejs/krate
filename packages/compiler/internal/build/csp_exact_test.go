@@ -17,6 +17,7 @@ func rawHash(s string) string {
 }
 
 func TestCSPHashesExactBytes(t *testing.T) {
+	t.Parallel()
 	script := "\n  var a = 1;\n"
 	style := " .a { color: red } "
 	doc := "<script>" + script + "</script><style>" + style + "</style>"
@@ -34,6 +35,7 @@ func TestCSPHashesExactBytes(t *testing.T) {
 }
 
 func TestCSPAllowsJsDelivrOnlyForLoaders(t *testing.T) {
+	t.Parallel()
 	loader := `<script>import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/m.mjs')</script>`
 	with := generateCSPMeta(loader, "", "", "")
 	for _, d := range []string{"script-src 'self' https://cdn.jsdelivr.net", "style-src 'self' https://cdn.jsdelivr.net", "font-src 'self' https://cdn.jsdelivr.net"} {
@@ -48,6 +50,7 @@ func TestCSPAllowsJsDelivrOnlyForLoaders(t *testing.T) {
 }
 
 func TestInsertCSPMetaAfterCharset(t *testing.T) {
+	t.Parallel()
 	doc := `<!DOCTYPE html><html><head><meta charset=UTF-8><script>x()</script></head><body></body></html>`
 	got := insertCSPMeta(doc, "<meta http-equiv=\"Content-Security-Policy\" content=\"a\">")
 	csp := strings.Index(got, "Content-Security-Policy")
@@ -57,6 +60,7 @@ func TestInsertCSPMetaAfterCharset(t *testing.T) {
 }
 
 func TestBuiltPageCSPPrecedesInlineAssetsAndMatchesBytes(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeFileRel(t, root, "src/pages/index.tsx", "export default function P() {\n"+
 		" return <div><style>{`.a  {  color : blue ;  }`}</style><p>x</p></div>;\n}\n")

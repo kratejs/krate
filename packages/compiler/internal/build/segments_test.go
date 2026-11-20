@@ -14,6 +14,7 @@ import (
 // and each route's source directory in the manifest, and keeps segment pages
 // out of the route list.
 func TestBuildWritesSegmentPagesAndManifest(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
 		"src/pages/_layout.tsx":           `export default function L({ children }: any) { return <div id="root-layout">{children}</div>; }`,

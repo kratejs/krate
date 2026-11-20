@@ -44,6 +44,7 @@ func artifactExists(t *testing.T, dir, name string) bool {
 // runtime's for every route plus Node's for a Node-only route by default, and
 // Node's alone with apiRuntime node. Switching drops the other runtime's.
 func TestAPIRouteArtifactsFollowRuntime(t *testing.T) {
+	t.Parallel()
 	_, root := compatProject(t, apiArtifactFiles(), nil)
 	type want struct{ quickjs, node bool }
 	cases := []struct {

@@ -21,7 +21,7 @@ func envPrefixProject(t *testing.T, env map[string]string, prefixes []string, pa
 	cfg.EnvPrefix = prefixes
 	b := New(root, cfg)
 	b.Env = env
-	out, err := captureOutput(func() error { return b.BuildAll() })
+	out, err := captureBuild(b)
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -50,6 +50,7 @@ func envReadPageFor(name string) string {
 }
 
 func TestEnvPrefixInlinesConfiguredPrefixes(t *testing.T) {
+	t.Parallel()
 	html, js, out := envPrefixProject(t,
 		map[string]string{"NEXT_PUBLIC_SITE": "https://site.example.test", "SECRET": "nope-1234"},
 		[]string{"KRATE_PUBLIC_", "NEXT_PUBLIC_"}, envReadPageFor("NEXT_PUBLIC_SITE"))
@@ -65,6 +66,7 @@ func TestEnvPrefixInlinesConfiguredPrefixes(t *testing.T) {
 }
 
 func TestEnvPrefixDefaultLeavesNextPublicAlone(t *testing.T) {
+	t.Parallel()
 	html, _, out := envPrefixProject(t, map[string]string{"NEXT_PUBLIC_SITE": "https://site.example.test"},
 		nil, envReadPageFor("NEXT_PUBLIC_SITE"))
 	if strings.Contains(html, "site.example.test") {
@@ -77,6 +79,7 @@ func TestEnvPrefixDefaultLeavesNextPublicAlone(t *testing.T) {
 }
 
 func TestEnvNotExposedHintPrefixedButUnset(t *testing.T) {
+	t.Parallel()
 	_, _, out := envPrefixProject(t, map[string]string{}, nil, envReadPageFor("KRATE_PUBLIC_UMAMI_URL"))
 	want := "KRATE_PUBLIC_UMAMI_URL is not set when krate build runs. Define it in .env (Krate loads .env, .env.production, .env.local, .env.production.local from .) or export it in the build environment"
 	if !strings.Contains(out, want) {
@@ -85,6 +88,7 @@ func TestEnvNotExposedHintPrefixedButUnset(t *testing.T) {
 }
 
 func TestEnvNotExposedHintTwinUnderAnotherPrefix(t *testing.T) {
+	t.Parallel()
 	_, _, out := envPrefixProject(t, map[string]string{"NEXT_PUBLIC_UMAMI_URL": "https://u.example.test"},
 		nil, envReadPageFor("KRATE_PUBLIC_UMAMI_URL"))
 	want := `NEXT_PUBLIC_UMAMI_URL is set but the code reads KRATE_PUBLIC_UMAMI_URL. Rename one of them, or add "NEXT_PUBLIC_" to envPrefix in krate.config.ts.`
@@ -105,6 +109,7 @@ func TestEnvNotExposedHintUnprefixed(t *testing.T) {
 }
 
 func TestEnvPrefixRejectsUnsafeEntries(t *testing.T) {
+	t.Parallel()
 	for _, bad := range []string{`""`, `"NEXT_PUBLIC"`, `["KRATE_PUBLIC_", ""]`} {
 		root := t.TempDir()
 		writeFileRel(t, root, "krate.config.json", `{"envPrefix": `+bad+`}`)

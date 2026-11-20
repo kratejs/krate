@@ -30,6 +30,7 @@ export async function GET(request) {
 `
 
 func TestAPISidecarAfterRunsAfterResponse(t *testing.T) {
+	t.Parallel()
 	for _, runtime := range []string{"node", "bun"} {
 		t.Run(runtime, func(t *testing.T) {
 			if _, err := exec.LookPath(runtime); err != nil {

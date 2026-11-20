@@ -10,6 +10,7 @@ import (
 )
 
 func TestUnresolvedKratePackages(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	rep := &migrate.Report{
 		Root: root,
@@ -41,6 +42,7 @@ func TestUnresolvedKratePackages(t *testing.T) {
 }
 
 func TestMigrateVerifyStopsBeforeWritingWhenPackagesAreMissing(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"dependencies":{"next":"16.0.0"}}`), 0644); err != nil {
 		t.Fatal(err)

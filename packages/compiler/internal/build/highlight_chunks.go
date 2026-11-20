@@ -250,7 +250,7 @@ func (b *Builder) warnHighlightLanguage(lang string) {
 		return
 	}
 	b.hl.warned[lang] = true
-	printWarningsOnce(os.Stderr, []diag.Diagnostic{{
+	b.printWarningsOnce([]diag.Diagnostic{{
 		Severity: diag.SeverityWarning,
 		Code:     diag.CodeHighlightLanguageUnavailable,
 		Message:  fmt.Sprintf("code in %q cannot be highlighted in the browser: the runtime tokenizer does not ship that language, so it is shown as plain text", lang),
@@ -259,7 +259,7 @@ func (b *Builder) warnHighlightLanguage(lang string) {
 }
 
 func (b *Builder) warnHighlightChunk(lang string, err error) {
-	printWarningsOnce(os.Stderr, []diag.Diagnostic{{
+	b.printWarningsOnce([]diag.Diagnostic{{
 		Severity: diag.SeverityWarning,
 		Code:     diag.CodeHighlightLanguageUnavailable,
 		Message:  fmt.Sprintf("code in %q cannot be highlighted in the browser: %v", lang, err),

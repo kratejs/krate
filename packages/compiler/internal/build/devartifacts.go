@@ -97,7 +97,7 @@ func (b *Builder) refreshRuntimeComponents(results []*PageResult) []RuntimeCompo
 			}
 			bundle, err := compileSingleRuntimeComponent(b.Root, b.Cfg.OutDir, b.Cfg.BaseURLPath(), abs)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  %sRuntime component error (%s):%s %v\n", cRed, filepath.Base(abs), cReset, err)
+				fmt.Fprintf(b.stderr(), "  %sRuntime component error (%s):%s %v\n", cRed, filepath.Base(abs), cReset, err)
 				continue
 			}
 			bundles = append(bundles, *bundle)

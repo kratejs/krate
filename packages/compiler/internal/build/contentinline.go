@@ -910,7 +910,7 @@ func (b *Builder) warnShippedCollections(page string, prog *ast.Program, js stri
 	if _, dup := b.shippedWarned.LoadOrStore(d.Error(), true); dup {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, d.Error(), d.Hint)
+	fmt.Fprintf(b.stderr(), "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, d.Error(), d.Hint)
 }
 
 func plural(n int, one, many string) string {

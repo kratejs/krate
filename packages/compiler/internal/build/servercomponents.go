@@ -86,7 +86,7 @@ func (b *Builder) applyServerComponentMode(page string, entry *bundler.Module, a
 	}
 	if *mode == RenderSSG {
 		*mode = RenderStreaming
-		fmt.Fprintf(os.Stderr, "  %s*%s %s: [%s] renders server component %s per request -> streaming\n", cCyan, cReset, filepath.Base(page), diag.CodeServerComponentStreaming, children[0])
+		fmt.Fprintf(b.stderr(), "  %s*%s %s: [%s] renders server component %s per request -> streaming\n", cCyan, cReset, filepath.Base(page), diag.CodeServerComponentStreaming, children[0])
 	}
 	return false, nil
 }

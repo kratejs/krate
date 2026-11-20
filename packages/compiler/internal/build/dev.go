@@ -370,7 +370,7 @@ func (b *Builder) syncPublic(publicDir string, paths []string) bool {
 				continue
 			}
 			if wrErr := os.WriteFile(dst, data, 0644); wrErr != nil {
-				fmt.Fprintf(os.Stderr, "  %sWarning: copying public/%s:%s %v\n", cYellow, filepath.ToSlash(rel), cReset, wrErr)
+				fmt.Fprintf(b.stderr(), "  %sWarning: copying public/%s:%s %v\n", cYellow, filepath.ToSlash(rel), cReset, wrErr)
 				continue
 			}
 			applied = true
@@ -450,7 +450,7 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 	// it and keep watching.
 	defer func() {
 		if rec := recover(); rec != nil {
-			fmt.Fprintf(os.Stderr, "  %sDev rebuild error:%s %v\n", cRed, cReset, safe.Recover(rec))
+			fmt.Fprintf(b.stderr(), "  %sDev rebuild error:%s %v\n", cRed, cReset, safe.Recover(rec))
 		}
 	}()
 
@@ -516,11 +516,11 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 	if structural {
 		printf("  %sFiles or directories were added, removed or renamed; rebuilding all...%s\n", cYellow, cReset)
 		if err := b.BuildAll(); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sError: %v%s\n", cRed, err, cReset)
+			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
 			addDiags("", err)
 		}
 		if err := b.BuildAllAPI(); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sError: %v%s\n", cRed, err, cReset)
+			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
 			addDiags("", err)
 		}
 		if hub != nil {
@@ -548,7 +548,7 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 		}
 		printf("  %sAffected pages:%s %v\n", cBlue, cReset, routes)
 		if _, err := b.BuildPages(pagesToBuild); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sUI Compilation Error: %v%s\n", cRed, err, cReset)
+			fmt.Fprintf(b.stderr(), "  %sUI Compilation Error: %v%s\n", cRed, err, cReset)
 			addDiags("UI: ", err)
 		}
 	}
@@ -556,7 +556,7 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 	if len(apiToBuild) > 0 {
 		printf("  %sCompiling changed API endpoints...%s\n", cCyan, cReset)
 		if err := b.CompileAPIRoutes(apiToBuild); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sAPI Compilation Error: %v%s\n", cRed, err, cReset)
+			fmt.Fprintf(b.stderr(), "  %sAPI Compilation Error: %v%s\n", cRed, err, cReset)
 			addDiags("API: ", err)
 		}
 	}
@@ -564,7 +564,7 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 	if goAPIChanged {
 		printf("  %sCompiling changed Go API routes...%s\n", cCyan, cReset)
 		if err := b.BuildAllGoAPI(); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sGo API Compilation Error: %v%s\n", cRed, err, cReset)
+			fmt.Fprintf(b.stderr(), "  %sGo API Compilation Error: %v%s\n", cRed, err, cReset)
 			addDiags("Go API: ", err)
 		}
 	}
@@ -572,11 +572,11 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 	if len(pagesToBuild) == 0 && len(apiToBuild) == 0 && !goAPIChanged {
 		printf("  %sNo dependency tracking matches; rebuilding all...%s\n", cYellow, cReset)
 		if err := b.BuildAll(); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sError: %v%s\n", cRed, err, cReset)
+			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
 			addDiags("", err)
 		}
 		if err := b.BuildAllAPI(); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sError: %v%s\n", cRed, err, cReset)
+			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
 			addDiags("", err)
 		}
 	}

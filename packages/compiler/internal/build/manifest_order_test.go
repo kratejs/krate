@@ -4,6 +4,7 @@ import "testing"
 
 // Segment pages finish in any order; the manifest lists them by route.
 func TestManifestSegmentPagesSorted(t *testing.T) {
+	t.Parallel()
 	seg := func(out string) *PageResult {
 		return &PageResult{OutName: out, SourcePath: out + ".tsx", IsErrorPage: true, Mode: RenderSSR}
 	}

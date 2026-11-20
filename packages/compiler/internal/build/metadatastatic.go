@@ -29,11 +29,9 @@ import (
 // makes the layout or page take the full per-page evaluation instead. So does
 // any run that reports an error, so warnings come from the same run as before.
 
-// metadataFastPath enables the paths above; tests turn it off to compare.
-var metadataFastPath = true
-
-// metadataRuns counts metadata evaluations by kind, for tests.
-var metadataRuns struct {
+// metadataRunCounts counts a builder's metadata evaluations by kind, for
+// tests.
+type metadataRunCounts struct {
 	// Layout counts evaluations of one static layout's metadata.
 	Layout atomic.Int64
 	// Page counts runs of one page's module with pre-evaluated layouts.
@@ -97,7 +95,7 @@ func (b *Builder) resetMetadataStatic() {
 // resolveMetadataChain is evalMetadata through the faster paths when they
 // apply and succeed without errors.
 func (b *Builder) resolveMetadataChain(page string, segs []metaSegment, pageFiles string, sets []map[string]string, bnd *bundler.Bundler) ([]metadataResult, error) {
-	if metadataFastPath {
+	if !b.noMetadataFastPath {
 		if out, ok := b.fastMetadata(page, segs, pageFiles, sets, bnd); ok {
 			return out, nil
 		}
@@ -120,7 +118,7 @@ func (b *Builder) fastMetadata(page string, segs []metaSegment, pageFiles string
 				return []metadataResult{r}, true
 			}
 		}
-		metadataRuns.Data.Add(1)
+		b.metaRuns.Data.Add(1)
 		src := func(print bool) string {
 			return metadataBatchSource([][]chainItem{chainItems(abs, segs, pre, pageEnc, pageFiles, b.Root)}, [][]map[string]string{sets}, print)
 		}
@@ -180,7 +178,7 @@ func (b *Builder) evalStaticLayout(abs string, bnd *bundler.Bundler) (string, bo
 	if _, fn := moduleMetadataExports(string(data)); fn {
 		return "", false
 	}
-	metadataRuns.Layout.Add(1)
+	b.metaRuns.Layout.Add(1)
 	imp := abs
 	var virtual map[string]string
 	if sl, ok := sliceModule(abs, metadataSliceExports); ok {
@@ -204,7 +202,7 @@ func (b *Builder) evalStaticLayout(abs string, bnd *bundler.Bundler) (string, bo
 
 // pageWithStaticLayouts runs the page's module with its layouts as data.
 func (b *Builder) pageWithStaticLayouts(abs string, segs []metaSegment, pre []string, pageFiles string, sets []map[string]string, bnd *bundler.Bundler) ([]metadataResult, bool) {
-	metadataRuns.Page.Add(1)
+	b.metaRuns.Page.Add(1)
 	imp := abs
 	var virtual map[string]string
 	if sl, ok := sliceModule(abs, metadataSliceExports); ok {
@@ -334,7 +332,7 @@ func (b *Builder) runMetadataBatch(key string, bnd *bundler.Bundler) map[string]
 	if len(entries) == 0 {
 		return nil
 	}
-	metadataRuns.Batch.Add(1)
+	b.metaRuns.Batch.Add(1)
 	chains := make([][]chainItem, len(entries))
 	sets := make([][]map[string]string, len(entries))
 	for i, e := range entries {

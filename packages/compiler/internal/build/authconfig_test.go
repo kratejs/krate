@@ -26,6 +26,7 @@ func activeAuth(c *config.Config) {
 }
 
 func TestAuthBanner(t *testing.T) {
+	t.Parallel()
 	if authBanner(nil) != "" || authBanner(config.Default()) != "" {
 		t.Fatal("inactive auth must add no banner")
 	}
@@ -38,6 +39,7 @@ func TestAuthBanner(t *testing.T) {
 }
 
 func TestAuthBannerKeepsExistingBanner(t *testing.T) {
+	t.Parallel()
 	cfg := config.Default()
 	activeAuth(cfg)
 	opts := apiBuildOptionsForTest("const keep = 1;")
@@ -49,6 +51,7 @@ func TestAuthBannerKeepsExistingBanner(t *testing.T) {
 }
 
 func TestAuthConfigReachesBothAPIArtifacts(t *testing.T) {
+	t.Parallel()
 	// A build writes the artifact of the runtime that serves the route.
 	for label, runtime := range map[string]string{"quickjs": "", "node": "node"} {
 		b, root := compatProject(t, map[string]string{"src/api/probe.ts": authProbe}, func(c *config.Config) {
@@ -74,6 +77,7 @@ func TestAuthConfigReachesBothAPIArtifacts(t *testing.T) {
 }
 
 func TestAuthConfigAbsentWhenInactive(t *testing.T) {
+	t.Parallel()
 	b, root := compatProject(t, map[string]string{"src/api/probe.ts": authProbe}, nil)
 	if err := b.CompileAPIRoutes([]string{filepath.Join(root, "src", "api", "probe.ts")}); err != nil {
 		t.Fatal(err)
@@ -88,6 +92,7 @@ func TestAuthConfigAbsentWhenInactive(t *testing.T) {
 }
 
 func TestAuthConfigReachesMiddleware(t *testing.T) {
+	t.Parallel()
 	b, root := compatProject(t, map[string]string{
 		"middleware.ts": `export function middleware() {
   return new Response(JSON.stringify((globalThis as { __KRATE_AUTH_CONFIG__?: unknown }).__KRATE_AUTH_CONFIG__));

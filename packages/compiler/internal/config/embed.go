@@ -116,6 +116,8 @@ try {
 // not exist on disk: the migrator uses this to check a config it has not
 // written yet.
 func EvaluateSource(root, src string, env map[string]string) (*Config, error) {
+	warningsMu.Lock()
+	defer warningsMu.Unlock()
 	path, err := filepath.Abs(filepath.Join(root, "krate.config.ts"))
 	if err != nil {
 		return nil, err

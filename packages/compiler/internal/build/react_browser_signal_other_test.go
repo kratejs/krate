@@ -2,10 +2,6 @@
 
 package build
 
-import "testing"
-
-// Without SIGTERM the in-process server cannot be stopped cleanly, so server
-// fixtures are skipped on this platform.
+// The server fixtures behind e2eEnv need a unix host (the Node sidecars they
+// start are stopped by process group), so they are skipped on this platform.
 const canStopInProcessServer = false
-
-func registerServerStop(t *testing.T, errCh <-chan error) {}

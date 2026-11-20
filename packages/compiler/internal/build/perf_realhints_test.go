@@ -66,23 +66,18 @@ export default function Page() { return <main><h1>page %d</h1><Scene color="red"
 // build cost.
 func hintsBuild(t *testing.T, pages, bad int, merged bool) metaBuild {
 	t.Helper()
-	if !merged {
-		t.Setenv("KRATE_NO_HINTS_MERGE", "1")
-	}
 	root, cfg := hintsFixture(t, pages, bad)
-	t.Chdir(root)
-	realHintsCache.Clear()
 	b := New(root, cfg)
-	runs, nanos := realHintsRuns.Load(), realHintsNanos.Load()
+	b.hints().mergeOff = !merged
 	cpu := processCPU()
 	start := time.Now()
-	out, err := captureOutput(b.BuildAll)
+	out, err := captureBuild(b)
 	m := metaBuild{
 		out:  out,
 		wall: time.Since(start),
 		cpu:  processCPU() - cpu,
-		eval: time.Duration(realHintsNanos.Load() - nanos),
-		runs: realHintsRuns.Load() - runs,
+		eval: time.Duration(b.hints().nanos.Load()),
+		runs: b.hints().runs.Load(),
 	}
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
@@ -102,6 +97,7 @@ func hintsBuild(t *testing.T, pages, bad int, merged bool) metaBuild {
 // a runtime of its own and with the renders of a batch sharing one, checks
 // the heads match, and reports what each build cost.
 func TestRealHintsMergedPerf(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("builds a 40-page fixture twice")
 	}
@@ -129,6 +125,7 @@ func TestRealHintsMergedPerf(t *testing.T) {
 // renders after it run alone, and every page gets the hints it gets when
 // each render runs alone.
 func TestRealHintsMergedFallback(t *testing.T) {
+	t.Parallel()
 	const pages = 6
 	var plain, merged metaBuild
 	t.Run("separate", func(t *testing.T) { plain = hintsBuild(t, pages, 2, false) })

@@ -16,6 +16,7 @@ import (
 // result: the page markup shows the loading fallback, and the component is a
 // separate chunk that mounts in the browser.
 func TestMigratedDynamicSSRFalseRendersFallbackThenIsland(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for rel, content := range map[string]string{
 		"package.json":       `{"name":"dyn","private":true,"dependencies":{"next":"16.0.0","react":"19.0.0"}}`,

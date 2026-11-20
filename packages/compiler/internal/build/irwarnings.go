@@ -3,7 +3,6 @@ package build
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -24,36 +23,50 @@ func printTreeWarnings(w io.Writer, warnings []diag.Diagnostic) {
 	}
 }
 
-// moduleWarningsSeen dedupes module warnings within a build: a shared module
-// is bundled once per page but its warnings should print once.
-var moduleWarningsSeen = struct {
+// warningSet dedupes warnings within a build: a shared module is bundled once
+// per page but its warnings should print once. Each Builder has its own, so
+// concurrent builds do not swallow each other's warnings.
+type warningSet struct {
 	mu   sync.Mutex
 	seen map[string]bool
-}{seen: map[string]bool{}}
-
-func resetModuleWarnings() {
-	moduleWarningsSeen.mu.Lock()
-	moduleWarningsSeen.seen = map[string]bool{}
-	moduleWarningsSeen.mu.Unlock()
 }
+
+// fresh returns the warnings of ds not seen before and records them.
+func (s *warningSet) fresh(ds []diag.Diagnostic) []diag.Diagnostic {
+	var out []diag.Diagnostic
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.seen == nil {
+		s.seen = map[string]bool{}
+	}
+	for _, d := range ds {
+		key := d.Error()
+		if s.seen[key] {
+			continue
+		}
+		s.seen[key] = true
+		out = append(out, d)
+	}
+	return out
+}
+
+func (s *warningSet) reset() {
+	s.mu.Lock()
+	s.seen = nil
+	s.mu.Unlock()
+}
+
+// sharedWarnings dedupes the warnings of callers that have no Builder.
+var sharedWarnings warningSet
 
 // printModuleWarnings prints the coded warnings attached to bundled modules
 // (React rewrite diagnostics), each once per build.
-func printModuleWarnings(w io.Writer, mods []*bundler.Module) {
-	var out []diag.Diagnostic
-	moduleWarningsSeen.mu.Lock()
+func (b *Builder) printModuleWarnings(mods []*bundler.Module) {
+	var ds []diag.Diagnostic
 	for _, m := range mods {
-		for _, d := range m.Diagnostics {
-			key := d.Error()
-			if moduleWarningsSeen.seen[key] {
-				continue
-			}
-			moduleWarningsSeen.seen[key] = true
-			out = append(out, d)
-		}
+		ds = append(ds, m.Diagnostics...)
 	}
-	moduleWarningsSeen.mu.Unlock()
-	printTreeWarnings(w, out)
+	printTreeWarnings(b.stderr(), b.warned.fresh(ds))
 }
 
 // envPending is a module's KR8310 and KR7116 warnings, held back until the
@@ -121,7 +134,7 @@ func (b *Builder) releaseEnvWarnings(held []envPending, bundle *bundler.Bundle, 
 		mods = append(mods, &bundler.Module{Path: h.path, Diagnostics: diags})
 		out = append(out, diags...)
 	}
-	printModuleWarnings(os.Stderr, mods)
+	b.printModuleWarnings(mods)
 	return out
 }
 

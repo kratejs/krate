@@ -147,6 +147,7 @@ func assertBasePathOutput(t *testing.T, cfg *config.Config, base string) {
 }
 
 func TestBasePathReachesEveryEmittedURL(t *testing.T) {
+	t.Parallel()
 	requireRuntimeDist(t)
 	_, cfg := basePathProject(t, func(c *config.Config) { c.BasePath = "/repo" })
 	assertBasePathOutput(t, cfg, "/repo")

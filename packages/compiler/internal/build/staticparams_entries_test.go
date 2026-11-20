@@ -6,6 +6,7 @@ import (
 )
 
 func TestExpandStaticParams(t *testing.T) {
+	t.Parallel()
 	sets := func(m ...map[string]string) []map[string]string { return m }
 	p := func(kv ...string) map[string]string {
 		out := map[string]string{}

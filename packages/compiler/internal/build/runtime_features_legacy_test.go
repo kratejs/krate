@@ -220,32 +220,33 @@ func checkLegacyCoverage(t *testing.T, results []*PageResult) {
 // TestRuntimeFeaturesCoverLegacyScanExamples builds examples/ for production
 // and compares the features of every page with the old scan.
 func TestRuntimeFeaturesCoverLegacyScanExamples(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("builds examples/")
 	}
-	repoRoot, err := repoRootPath()
-	if err != nil {
-		t.Fatal(err)
-	}
 	ensureRuntimeDist(t)
-	// A replayed page from an older cache has no recorded references.
-	t.Setenv("KRATE_NO_BUILD_CACHE", "1")
-	root := os.Getenv("KRATE_FEATURE_DIFF_ROOT")
-	if root == "" {
-		root = filepath.Join(repoRoot, "examples")
-	}
-	cfg, err := config.Load(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.OutDir = filepath.Join(t.TempDir(), "dist")
-	b := New(root, cfg)
 	var results []*PageResult
-	captureRuntimeResults(b, &results)
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
+	var features []string
+	if root := os.Getenv("KRATE_FEATURE_DIFF_ROOT"); root != "" {
+		cfg, err := config.Load(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.OutDir = filepath.Join(t.TempDir(), "dist")
+		b := New(root, cfg)
+		// A replayed page from an older cache has no recorded references.
+		b.diskCache.enabled = false
+		captureRuntimeResults(b, &results)
+		if err := b.BuildAll(); err != nil {
+			t.Fatalf("BuildAll: %v", err)
+		}
+		features = b.runtimeFeatures
+	} else {
+		// examples/ builds in place, so the shared build is the one read.
+		buildTestProject(t)
+		results, features = e2eBuildResults, e2eBuildFeatures
 	}
-	t.Logf("site ships runtime features %v", b.runtimeFeatures)
+	t.Logf("site ships runtime features %v", features)
 	if os.Getenv("KRATE_FEATURE_DIFF_VERBOSE") != "" {
 		_, m := loadFeatureManifest(t)
 		for _, r := range results {

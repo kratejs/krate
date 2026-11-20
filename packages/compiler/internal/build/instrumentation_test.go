@@ -67,6 +67,7 @@ func buildInstProject(t *testing.T, files map[string]string) (*Builder, string) 
 }
 
 func TestFindInstrumentationSource(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if got := findInstrumentationSource(root); got != "" {
 		t.Fatalf("empty project: %q", got)

@@ -7,6 +7,7 @@ import (
 )
 
 func TestExternalDepDirs(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	root := filepath.Join(base, "apps", "web")
 	tokens := filepath.Join(base, "packages", "tokens")

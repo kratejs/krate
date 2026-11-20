@@ -43,6 +43,7 @@ func guardProject(t *testing.T, withModule bool, record string) (root, out strin
 // Serve must refuse to start when the build recorded middleware that was not
 // deployed with dist.
 func TestServeRefusesWhenRecordedMiddlewareIsMissing(t *testing.T) {
+	t.Parallel()
 	root, out := guardProject(t, false, "true")
 	cfg := config.Default()
 	cfg.OutDir = out
@@ -61,6 +62,7 @@ func TestServeRefusesWhenRecordedMiddlewareIsMissing(t *testing.T) {
 // A middleware module that exists but fails to import must not read as "no
 // middleware" in the Node sidecar.
 func TestNodeSidecarMiddlewareLoadErrorFailsClosed(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mwPath := filepath.Join(dir, "middleware.js")
 	if err := os.WriteFile(mwPath, []byte("export function middleware( {\n"), 0o644); err != nil {
@@ -93,6 +95,7 @@ func TestNodeSidecarMiddlewareLoadErrorFailsClosed(t *testing.T) {
 // A middleware the embedded engine cannot load must stop startup, never be
 // served around (that would skip the auth and maintenance gates).
 func TestServeRefusesWhenMiddlewareCannotLoad(t *testing.T) {
+	t.Parallel()
 	root, out := guardProject(t, true, "true")
 	src := "import { randomUUID } from \"node:crypto\";\nexport function middleware() { return randomUUID(); }\n"
 	if err := os.WriteFile(filepath.Join(root, ".krate", "middleware.js"), []byte(src), 0o644); err != nil {
@@ -115,6 +118,7 @@ func TestServeRefusesWhenMiddlewareCannotLoad(t *testing.T) {
 // A middleware that imports Node built-ins is built for the Node sidecar and
 // recorded as such, instead of shipping a bundle QuickJS rejects.
 func TestBuildMiddlewareWithNodeImportsTargetsTheSidecar(t *testing.T) {
+	t.Parallel()
 	b, root := compatProject(t, map[string]string{
 		"middleware.ts": `import { randomUUID } from "node:crypto";
 export function middleware() {
@@ -141,6 +145,7 @@ export function middleware() {
 // native addon stay external, so a startup warm-up in the middleware module
 // can import them (they used to fail with "No loader is configured for .node").
 func TestNodeMiddlewareKeepsServerExternalPackagesExternal(t *testing.T) {
+	t.Parallel()
 	b, root := compatProject(t, map[string]string{
 		"middleware.ts": `import { tag } from "@fake/ext";
 import { addon } from "@fake/native";

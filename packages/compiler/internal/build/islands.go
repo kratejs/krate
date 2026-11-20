@@ -211,7 +211,7 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 			}.WithCode(diag.CodeIslandAsset)
 		}
 		if v := installedPreactVersion(b.Root); v != "" && versionLess(v, "10.20.0") {
-			fmt.Fprintf(os.Stderr, "  %sWarning:%s preact %s is older than 10.20.0; islands use hooks and compat APIs that older releases can break\n", cYellow, cReset, v)
+			fmt.Fprintf(b.stderr(), "  %sWarning:%s preact %s is older than 10.20.0; islands use hooks and compat APIs that older releases can break\n", cYellow, cReset, v)
 		}
 	}
 	var boot strings.Builder

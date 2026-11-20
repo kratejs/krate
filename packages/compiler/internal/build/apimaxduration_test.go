@@ -15,6 +15,7 @@ import (
 )
 
 func TestReadAPIMaxDuration(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, src string
 		want      int
@@ -72,6 +73,7 @@ func apiTimeoutProject(t *testing.T, runtime string) (string, *config.Config) {
 }
 
 func TestBuildRecordsAPIMaxDuration(t *testing.T) {
+	t.Parallel()
 	root, cfg := apiTimeoutProject(t, "")
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)

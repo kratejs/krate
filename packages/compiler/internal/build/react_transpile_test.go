@@ -54,6 +54,7 @@ func buildReactPage(t *testing.T, pageSrc string) (html, js string) {
 // TestReactUseReducerBuild verifies useReducer lowers to createReducer in the
 // hydration JS and the state getter renders its SSR initial.
 func TestReactUseReducerBuild(t *testing.T) {
+	t.Parallel()
 	page := `
 		import { useReducer } from 'react';
 		export default function Page() {
@@ -121,6 +122,7 @@ func buildShadcnButton(t *testing.T, pageSrc string) string {
 }
 
 func TestShadcnButtonFoldsVariantsAndSpread(t *testing.T) {
+	t.Parallel()
 	html := buildShadcnButton(t, `
 		import { Button } from '../components/ui/button';
 		export default function Page() {
@@ -149,6 +151,7 @@ func TestShadcnButtonFoldsVariantsAndSpread(t *testing.T) {
 // TestUseContextTranspile verifies React's createContext/useContext lower to
 // the Krate context API (Ctx.useContext()) end to end through the bundler.
 func TestUseContextTranspile(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	mkdir := func(rel string) string {
 		full := filepath.Join(root, filepath.FromSlash(rel))
@@ -190,6 +193,7 @@ func TestUseContextTranspile(t *testing.T) {
 // TestPortalRendersAndMounts verifies a built-in <Portal> emits its content and
 // a mount call (the client moves it to document.body).
 func TestPortalRendersAndMounts(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	pages := filepath.Join(root, "src", "pages")
 	if err := os.MkdirAll(pages, 0755); err != nil {
@@ -237,6 +241,7 @@ func TestPortalRendersAndMounts(t *testing.T) {
 // TestClassComponentLowering verifies a class component is lowered to a Krate
 // function component (state signal, render, setState).
 func TestClassComponentLowering(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	pages := filepath.Join(root, "src", "pages")
 	if err := os.MkdirAll(pages, 0755); err != nil {

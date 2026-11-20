@@ -13,6 +13,7 @@ import (
 // resolves through the package subpaths, so a page with a code block carries
 // the CSS of Code and Aside only, not of every component in the barrel.
 func TestMarkdownCodeDoesNotShipLibraryCSS(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	pagesDir := filepath.Join(root, "src", "pages")
 	if err := os.MkdirAll(pagesDir, 0o755); err != nil {

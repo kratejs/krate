@@ -8,6 +8,7 @@ import (
 )
 
 func TestHeadScriptInlineEscaped(t *testing.T) {
+	t.Parallel()
 	got := renderHeadScript(config.HeadScript{Content: "var x='</script>';"})
 	if !strings.Contains(got, `<\/script>`) {
 		t.Errorf("expected escaped terminator, got:\n%s", got)
