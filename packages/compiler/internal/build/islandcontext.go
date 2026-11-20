@@ -251,12 +251,14 @@ function __krateSlotTake(p) {
   return sets.length ? sets[0].map(function (n) { return n.cloneNode(true); }) : [];
 }
 // __krateSlotSync makes the runs of a set's nested islands the nodes now
-// between their comments, in place; with drop it removes from the document the
-// nodes a nested island added since (Preact removes only those it placed).
+// between their comments, in place. Rendering, it reads only runs in the
+// document: a set let go of keeps its runs (in the detached parent a hide
+// removed). Letting go (drop), it also takes out the nodes a nested island
+// added since (Preact removes only those it placed).
 function __krateSlotSync(set, drop) {
   for (var i = 0; i < set.length; i++) {
     var s = set[i];
-    if (!__krateIslandOpen(s) || !s.parentNode) continue;
+    if (!__krateIslandOpen(s) || !(drop ? s.parentNode : s.isConnected)) continue;
     var cur = [], d = 0, n = s.nextSibling;
     for (; n; n = n.nextSibling) {
       if (__krateIslandOpen(n)) d++;

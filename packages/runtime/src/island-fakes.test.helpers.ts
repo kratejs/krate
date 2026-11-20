@@ -43,7 +43,7 @@ export function closeOf(start: Node): Node | null {
 function syncSet(set: Node[]): void {
   for (let i = 0; i < set.length; i++) {
     const s = set[i];
-    if (!isOpen(s) || !s.parentNode) continue;
+    if (!isOpen(s) || !s.isConnected) continue;
     const end = closeOf(s);
     const j = end ? set.indexOf(end, i + 1) : -1;
     if (j < 0) continue;
