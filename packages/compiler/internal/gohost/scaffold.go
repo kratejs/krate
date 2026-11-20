@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/regionwire"
 )
 
 // Result is what Scaffold produces and Build consumes.
@@ -178,6 +179,10 @@ func scaffoldComponents(modDir, modulePath string, packages []ComponentPackage, 
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(modDir, "render", "render.go"), []byte(renderSrc), 0644); err != nil {
+		return nil, err
+	}
+
+	if err := os.WriteFile(filepath.Join(modDir, "render", "wire.go"), []byte(regionwire.HostSource("render")), 0644); err != nil {
 		return nil, err
 	}
 

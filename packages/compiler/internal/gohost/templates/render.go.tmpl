@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -105,19 +106,49 @@ type regionRequest struct {
 }
 
 // Handle serves POST /__krate/gorender: it renders each requested region and
-// streams newline-delimited frames ({type:"region",id,status,html}). The
+// streams one frame per region (type "region", id, status, html, vary). The
 // request context (params/query/headers) is forwarded to components that take a
-// krate.Request.
+// krate.Request. A client that sends "Accept: application/vnd.krate.frames"
+// gets length-prefixed binary frames (see wire.go); any other client gets
+// newline-delimited JSON.
 func Handle(w http.ResponseWriter, r *http.Request) {
 	var req regionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	flusher, _ := w.(http.Flusher)
+	if strings.Contains(r.Header.Get("Accept"), ContentType) {
+		w.Header().Set("Content-Type", ContentType)
+		var buf []byte
+		for _, reg := range req.Regions {
+			html, vary, err := RenderVary(reg.Name, reg.Props, reg.Request)
+			f := Frame{Type: "region", ID: reg.ID, Status: 200, HTML: html}
+			if err != nil {
+				f = Frame{Type: "region", ID: reg.ID, Status: 500, Error: err.Error()}
+			} else {
+				// vary is always sent: a frame without it comes from a host that
+				// does not record reads, and the server then keys on everything.
+				f.Vary = &VaryLists{Full: vary.Full, Headers: vary.Headers, Cookies: vary.Cookies, Query: vary.Query, Params: vary.Params}
+			}
+			var encErr error
+			if buf, encErr = AppendFrame(buf[:0], &f); encErr != nil {
+				f = Frame{Type: "region", ID: reg.ID, Status: 500, Error: encErr.Error()}
+				buf, _ = AppendFrame(buf[:0], &f)
+			}
+			_, _ = w.Write(buf)
+			if flusher != nil {
+				flusher.Flush()
+			}
+			if cap(buf) > 1<<20 {
+				buf = nil
+			}
+		}
+		return
+	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
-	flusher, _ := w.(http.Flusher)
 	for _, reg := range req.Regions {
 		html, vary, err := RenderVary(reg.Name, reg.Props, reg.Request)
 		if err != nil {
