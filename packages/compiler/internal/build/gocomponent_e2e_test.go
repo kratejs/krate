@@ -65,7 +65,7 @@ func TestGoComponentSSRPageE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	staged := stageServerRenderer(repoRoot, outDir)
+	staged := stageServerRenderer(os.Stderr, repoRoot, outDir)
 	if staged == "" {
 		t.Fatal("stageServerRenderer returned empty path")
 	}

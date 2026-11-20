@@ -2592,7 +2592,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 			if rr.unavailable != "" {
 				fmt.Fprintf(os.Stderr, "  %sSegment page renderer unavailable (%s):%s %s\n", cYellow, m.Route, cReset, rr.unavailable)
 			} else if rr.fatalErr != "" {
-				fmt.Fprintf(os.Stderr, "  %sSegment page render error (%s):%s %s\n", cRed, m.Route, cReset, rr.fatalErr)
+				eprintf("  %sSegment page render error (%s):%s %s\n", cRed, m.Route, cReset, rr.fatalErr)
 			}
 			return false
 		}

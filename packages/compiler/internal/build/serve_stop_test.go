@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 )
@@ -29,4 +30,15 @@ func serveInProcess(t *testing.T, run func(ctx context.Context) error) <-chan er
 		}
 	})
 	return errCh
+}
+
+// captureServeErrors collects what in-process servers print through eprintf
+// from now until the test ends. The writer is process-wide, so a test that
+// calls it must not run in parallel.
+func captureServeErrors(t *testing.T) func() string {
+	t.Helper()
+	var buf syncBuffer
+	SetErrOutput(&buf)
+	t.Cleanup(func() { SetErrOutput(os.Stderr) })
+	return buf.String
 }

@@ -238,7 +238,6 @@ func TestComponentLocalConstShipsNoRuntime(t *testing.T) {
 // layout is prerendered without that layout, so a failing layout still gets the
 // 500 page, filled with the error and its digest (never a render with no error).
 func TestSegmentErrorPageUnderAsyncLayout(t *testing.T) {
-	t.Parallel()
 	e2eEnv(t)
 	b, root := scProject(t, map[string]string{
 		"src/pages/_layout.tsx": `import { headers } from "@krate/runtime/server";
@@ -271,6 +270,7 @@ export default function Error({ error, retry }: { error: Error & { digest?: stri
 			t.Errorf("an error page must not render per request: %+v", e)
 		}
 	}
+	served := captureServeErrors(t)
 	base, err := startKrateServer(t, root, b.Cfg)
 	if err != nil {
 		t.Fatalf("serve: %v", err)
@@ -279,7 +279,8 @@ export default function Error({ error, retry }: { error: Error & { digest?: stri
 	if status != 500 || !regexp.MustCompile(`id="__krate_error">[^<]*"digest":"[0-9a-f]{10}"`).MatchString(html) || !strings.Contains(html, "Try again") {
 		t.Errorf("status %d, want the 500 page with the error digest:\n%s", status, html)
 	}
-	if strings.Contains(logs(), "Segment page render error") {
-		t.Errorf("the error page was rendered per request:\n%.1500s", logs())
+	// The render error is printed by the server at request time.
+	if out := logs() + served(); strings.Contains(out, "Segment page render error") {
+		t.Errorf("the error page was rendered per request:\n%.1500s", out)
 	}
 }

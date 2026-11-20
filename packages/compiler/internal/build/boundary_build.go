@@ -1,7 +1,7 @@
 package build
 
 import (
-	"os"
+	"io"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
@@ -17,7 +17,7 @@ const maxBoundaryPasses = 4
 // adds the reporting boundaries to opts.BoundaryThrows so they render their
 // getDerivedStateFromError fallback, and prints a KR3009 warning per caught
 // error instead of failing the build.
-func applyBoundaryFallbacks(page string, tree *irtree.ComponentTree, res *renderer.EmitResult, opts irtree.BuildOptions,
+func applyBoundaryFallbacks(stderr io.Writer, page string, tree *irtree.ComponentTree, res *renderer.EmitResult, opts irtree.BuildOptions,
 	rebuild func(irtree.BuildOptions) (*irtree.ComponentTree, *renderer.EmitResult)) (*irtree.ComponentTree, *renderer.EmitResult) {
 	if len(res.BoundaryThrows) == 0 {
 		return tree, res
@@ -43,7 +43,7 @@ func applyBoundaryFallbacks(page string, tree *irtree.ComponentTree, res *render
 		opts.BoundaryThrows = caught
 		tree, res = rebuild(opts)
 	}
-	printTreeWarnings(os.Stderr, warnings)
+	printTreeWarnings(stderr, warnings)
 	return tree, res
 }
 

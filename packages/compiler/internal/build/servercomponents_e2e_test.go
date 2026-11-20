@@ -196,7 +196,7 @@ export default function Feed() {
 // waits for its health endpoint.
 func startSidecar(t *testing.T, node, repoRoot, root, outDir string) (string, func()) {
 	t.Helper()
-	staged := stageServerRenderer(repoRoot, outDir)
+	staged := stageServerRenderer(os.Stderr, repoRoot, outDir)
 	if staged == "" {
 		t.Fatal("stageServerRenderer returned empty path")
 	}

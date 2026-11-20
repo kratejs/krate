@@ -1,10 +1,8 @@
 package build
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -63,7 +61,7 @@ func compileRedirects(rules []config.Redirect) []redirectRule {
 	for _, rd := range rules {
 		m, err := compileMatcher(rd.Source, routesource.KindRedirect, rd.Has, rd.Missing)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sSkipped redirect %q:%s %v\n", cYellow, rd.Source, cReset, err)
+			eprintf("  %sSkipped redirect %q:%s %v\n", cYellow, rd.Source, cReset, err)
 			continue
 		}
 		out = append(out, redirectRule{m, rd})
@@ -81,7 +79,7 @@ func compileRewrites(rules []config.Rewrite) []rewriteRule {
 	for _, rw := range rules {
 		m, err := compileMatcher(rw.Source, routesource.KindRewrite, rw.Has, rw.Missing)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sSkipped rewrite %q:%s %v\n", cYellow, rw.Source, cReset, err)
+			eprintf("  %sSkipped rewrite %q:%s %v\n", cYellow, rw.Source, cReset, err)
 			continue
 		}
 		out = append(out, rewriteRule{m, rw})
@@ -99,7 +97,7 @@ func compileHeaderRules(rules []config.HeaderRule) []headerRuleC {
 	for _, hr := range rules {
 		m, err := compileMatcher(hr.Source, routesource.KindHeader, hr.Has, hr.Missing)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sSkipped header rule %q:%s %v\n", cYellow, hr.Source, cReset, err)
+			eprintf("  %sSkipped header rule %q:%s %v\n", cYellow, hr.Source, cReset, err)
 			continue
 		}
 		out = append(out, headerRuleC{m, hr})

@@ -1074,7 +1074,7 @@ func (b *Builder) BuildAll() error {
 	b.twMu.Unlock()
 	// Passes before page bundling keep going on failure so one build shows
 	// every error class (see passErrors).
-	var early passErrors
+	early := passErrors{w: b.stderr()}
 	if err := b.prepareActions(); err != nil {
 		early.add("Server action error", err)
 	}
@@ -1616,7 +1616,7 @@ func (b *Builder) BuildAll() error {
 		printf("  %s*%s Compiled %d server bundles\n", cCyan, cReset, len(serverBundles))
 		// Stage the bundled SSR renderer driver so `krate serve` runs it with
 		// plain node instead of requiring a TypeScript runtime.
-		if staged := stageServerRenderer(b.Root, b.Cfg.OutDir); staged != "" {
+		if staged := stageServerRenderer(b.stderr(), b.Root, b.Cfg.OutDir); staged != "" {
 			printf("  %s*%s Staged SSR renderer driver\n", cCyan, cReset)
 		} else {
 			fmt.Fprintf(b.stderr(), "  %sWarning: SSR renderer driver not staged - server-renderer source not found under %s (ensure @krate/runtime is installed)%s\n", cYellow, b.Root, cReset)
@@ -1625,7 +1625,7 @@ func (b *Builder) BuildAll() error {
 	tl.Lap("server-bundles")
 
 	// Compile runtime server components (*.runtime.tsx, // @runtime, runtimeDirs)
-	runtimeCompBundles := CompileRuntimeComponents(b.Root, b.Cfg.OutDir, b.Cfg.BaseURLPath(), b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.RuntimeDirs)
+	runtimeCompBundles := CompileRuntimeComponents(b.stderr(), b.Root, b.Cfg.OutDir, b.Cfg.BaseURLPath(), b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.RuntimeDirs)
 	if len(runtimeCompBundles) > 0 {
 		printf("  %s*%s Compiled %d runtime components\n", cCyan, cReset, len(runtimeCompBundles))
 	}
@@ -2823,7 +2823,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		emitter.BasePath = b.Cfg.BaseURLPath()
 		emitter.GoComponents = pageOpts.GoComponents
 		emitResult = emitter.Emit(tree)
-		tree, emitResult = applyBoundaryFallbacks(page, tree, emitResult, pageOpts, func(opts irtree.BuildOptions) (*irtree.ComponentTree, *renderer.EmitResult) {
+		tree, emitResult = applyBoundaryFallbacks(b.stderr(), page, tree, emitResult, pageOpts, func(opts irtree.BuildOptions) (*irtree.ComponentTree, *renderer.EmitResult) {
 			t := b.buildTree(entryModule.Program, ann, opts)
 			if isDynamicRoute(page, b.Cfg.PagesDir) {
 				injectDynamicRoutePlaceholders(t, extractParamNames(page, b.Cfg.PagesDir))

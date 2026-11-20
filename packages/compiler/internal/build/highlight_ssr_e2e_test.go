@@ -56,7 +56,7 @@ func TestSSRCodeHighlightingE2E(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cfg.OutDir, ".krate", "highlight.json")); err != nil {
 		t.Fatalf("the build wrote no highlight tables for the server page: %v", err)
 	}
-	staged := stageServerRenderer(repoRoot, cfg.OutDir)
+	staged := stageServerRenderer(os.Stderr, repoRoot, cfg.OutDir)
 	if staged == "" {
 		t.Fatal("stageServerRenderer returned an empty path")
 	}
