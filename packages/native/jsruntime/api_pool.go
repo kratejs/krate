@@ -27,10 +27,17 @@ func apiRunnerBytecode() ([]byte, error) {
 type apiWorker struct {
 	rt     *Runtime
 	loaded map[string]int64
-	begin  []byte
+	hot    *hotCode
 }
 
-// DefaultAPIWorkers returns the default embedded API worker-pool size.
+// DefaultEmbeddedPoolSize is the default size of the embedded QuickJS API and
+// middleware pools. It is 1 on purpose: the VM's libc allocator takes one
+// process-wide lock on every malloc, so extra VMs only add contention and
+// measured throughput falls as the pool grows. Set ssr.apiWorkers to override.
+const DefaultEmbeddedPoolSize = 1
+
+// DefaultAPIWorkers returns the default worker count for the Node/Bun/Deno
+// sidecars, min(NumCPU, 8). The embedded runtime uses DefaultEmbeddedPoolSize.
 func DefaultAPIWorkers() int {
 	n := runtime.NumCPU()
 	if n < 1 {
@@ -84,7 +91,7 @@ func newAPIWorker(opts Options, env map[string]string, hooks *CacheHooks) (*apiW
 		_ = rt.Close()
 		return nil, err
 	}
-	begin, err := rt.Compile("__krate_begin(__krate_route_id, __krate_method, __krate_req)", EvalGlobal)
+	hot, err := compileHot(rt, false)
 	if err != nil {
 		_ = rt.Close()
 		return nil, err
@@ -92,7 +99,7 @@ func newAPIWorker(opts Options, env map[string]string, hooks *CacheHooks) (*apiW
 	return &apiWorker{
 		rt:     rt,
 		loaded: make(map[string]int64),
-		begin:  begin,
+		hot:    hot,
 	}, nil
 }
 

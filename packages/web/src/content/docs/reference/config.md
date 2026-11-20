@@ -487,7 +487,7 @@ ssr: {
   maxCacheSize: 128,          // ISR in-memory cache size
   middlewareRuntime: "quickjs",  // middleware.ts runtime
   apiRuntime: "quickjs",        // API route runtime
-  apiWorkers: 8,                // embedded QuickJS API worker pool (default min(NumCPU, 8))
+  apiWorkers: 1,                // embedded QuickJS API worker pool (default 1)
   apiIsolation: false,          // true = fresh VM per request (no shared state; slower)
   nodeWorkers: 8,               // Node sidecar worker processes (cluster)
   rendererWorkers: 1,           // SSR renderer worker processes (cluster; default 1)
@@ -520,9 +520,12 @@ ssr: {
   (single process). Region and ISR caches are per-worker, and ISR disk
   persistence is disabled while clustered. Irrelevant when all request-time
   regions render on the Go host (Go components).
-- **`apiWorkers`** sizes the embedded QuickJS API worker pool. Workers are
-  long-lived VMs that each load a route once and reuse it, so module state
-  persists across requests (Node semantics) and requests run in parallel.
+- **`apiWorkers`** sizes the embedded QuickJS API worker pool (default `1`).
+  Workers are long-lived VMs that each load a route once and reuse it, so
+  module state persists across requests (Node semantics) and a pool larger than
+  one runs requests in parallel. The default is 1 because the embedded VM's
+  allocator takes one process-wide lock, so extra VMs mostly add contention;
+  raise it for handlers that wait on I/O or timers.
 - **`apiIsolation`** runs every API request in a fresh VM (no shared module
   state). Slower; dev uses it automatically so route edits are picked up.
 

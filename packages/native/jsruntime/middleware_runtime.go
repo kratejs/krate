@@ -32,6 +32,7 @@ type MiddlewareRuntime struct {
 
 type mwWorker struct {
 	rt      *Runtime
+	hot     *hotCode
 	version int64
 }
 
@@ -70,7 +71,7 @@ type MiddlewareResult struct {
 // NewMiddlewareRuntime loads middleware.js and validates that it exports a
 // middleware function.
 func NewMiddlewareRuntime(middlewarePath string) (*MiddlewareRuntime, error) {
-	n := DefaultAPIWorkers()
+	n := DefaultEmbeddedPoolSize
 	m := &MiddlewareRuntime{path: middlewarePath, workers: n, tokens: make(chan struct{}, n)}
 	w, err := m.newWorker()
 	if err != nil {
@@ -86,7 +87,7 @@ func NewMiddlewareRuntime(middlewarePath string) (*MiddlewareRuntime, error) {
 // middleware or fail closed with the load error). Dev uses it so edits made
 // after startup, including adding the file, take effect.
 func NewLazyMiddlewareRuntime(middlewarePath string) *MiddlewareRuntime {
-	n := DefaultAPIWorkers()
+	n := DefaultEmbeddedPoolSize
 	m := &MiddlewareRuntime{path: middlewarePath, workers: n, tokens: make(chan struct{}, n), hot: true, lazy: true}
 	return m
 }
@@ -182,7 +183,11 @@ func (m *MiddlewareRuntime) newWorker() (*mwWorker, error) {
 	if msg, _ := v.(string); msg != "" {
 		return fail(errors.New(msg))
 	}
-	return &mwWorker{rt: rt, version: version}, nil
+	hot, err := compileHot(rt, true)
+	if err != nil {
+		return fail(err)
+	}
+	return &mwWorker{rt: rt, hot: hot, version: version}, nil
 }
 
 func (m *MiddlewareRuntime) acquire() (*mwWorker, error) {
@@ -245,8 +250,8 @@ func (m *MiddlewareRuntime) ExecuteContext(ctx context.Context, req MiddlewareRe
 		return MiddlewareResult{Action: MiddlewareError, Error: err.Error()}
 	}
 	defer m.release(w)
-	rt := w.rt
-	defer func() { _, _ = rt.Execute("__krate_finish()") }()
+	rt, hot := w.rt, w.hot
+	defer func() { _, _ = rt.EvalBytecode(hot.finish) }()
 
 	if req.URL == "" {
 		req.URL = "http://localhost" + req.Path
@@ -260,7 +265,7 @@ func (m *MiddlewareRuntime) ExecuteContext(ctx context.Context, req MiddlewareRe
 	if err := rt.SetGlobal("__krate_mw_req", string(envJSON)); err != nil {
 		return MiddlewareResult{Action: MiddlewareError, Error: err.Error()}
 	}
-	v, err := rt.Execute("__krate_mw_begin(__krate_mw_req)")
+	v, err := rt.EvalBytecode(hot.begin)
 	if err != nil {
 		return MiddlewareResult{Action: MiddlewareError, Error: err.Error()}
 	}
@@ -268,14 +273,14 @@ func (m *MiddlewareRuntime) ExecuteContext(ctx context.Context, req MiddlewareRe
 		return MiddlewareResult{Action: MiddlewareSkip}
 	}
 	phase := func() bool {
-		s, _ := rt.evalString("__krate_phase()")
+		s, _ := rt.evalString(hot.phase)
 		return s != "pending"
 	}
-	if err := rt.waitFor(ctx, apiTimeout(), phase); err != nil {
-		_, _ = rt.Execute("__krate_abort()")
+	if err := rt.waitFor(ctx, apiTimeout(), hot, phase); err != nil {
+		_, _ = rt.EvalBytecode(hot.abort)
 		return MiddlewareResult{Action: MiddlewareError, Error: "middleware: " + err.Error()}
 	}
-	raw, err := rt.evalString("__krate_mw_head()")
+	raw, err := rt.evalString(hot.head)
 	if err != nil {
 		return MiddlewareResult{Action: MiddlewareError, Error: err.Error()}
 	}

@@ -284,8 +284,9 @@ type SSRConfig struct {
 	APIRuntime string `json:"apiRuntime,omitempty"`
 	// APIWorkers is the size of the embedded QuickJS API worker pool. The pool
 	// runs that many requests concurrently and reuses VMs, so module state
-	// persists across requests (Node/Next semantics). Default: min(NumCPU, 8).
-	// Ignored when APIIsolation is set.
+	// persists across requests (Node/Next semantics). Default: 1, because the
+	// embedded VM's allocator is serialized process-wide, so more VMs add
+	// contention rather than throughput. Ignored when APIIsolation is set.
 	APIWorkers int `json:"apiWorkers,omitempty"`
 	// APIIsolation runs every API request in a fresh VM, so no module state is
 	// shared between requests. Slower; used automatically in dev so edits are

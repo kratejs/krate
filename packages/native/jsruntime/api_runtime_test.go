@@ -198,3 +198,24 @@ func TestAPIRouteStaticLeafUnderDynamicDir(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddedPoolDefaultsToOne(t *testing.T) {
+	if DefaultEmbeddedPoolSize != 1 {
+		t.Fatalf("DefaultEmbeddedPoolSize = %d, want 1", DefaultEmbeddedPoolSize)
+	}
+	a := NewAPIRouteRuntime(t.TempDir())
+	if a.workers != 1 || cap(a.idle) != 1 {
+		t.Errorf("API pool = %d workers, idle cap %d; want 1", a.workers, cap(a.idle))
+	}
+	a.SetPool(3, false)
+	if a.workers != 3 || cap(a.idle) != 3 {
+		t.Errorf("explicit SetPool(3) gave %d workers, idle cap %d", a.workers, cap(a.idle))
+	}
+	m := NewLazyMiddlewareRuntime(filepath.Join(t.TempDir(), "middleware.js"))
+	if m.workers != 1 || cap(m.tokens) != 1 {
+		t.Errorf("middleware pool = %d workers, tokens cap %d; want 1", m.workers, cap(m.tokens))
+	}
+	if DefaultAPIWorkers() < 1 {
+		t.Errorf("sidecar default must stay at least 1")
+	}
+}

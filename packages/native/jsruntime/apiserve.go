@@ -32,6 +32,41 @@ var (
 	errBudget     = errors.New("handler exceeded the request time budget (KRATE_API_TIMEOUT)")
 )
 
+// hotCode is the per-request helper calls, compiled to bytecode once per VM so
+// serving a request never parses JavaScript source.
+type hotCode struct {
+	begin, head           []byte
+	phase, finish, abort  []byte
+	timersNext, timersRun []byte
+	chunkStart, chunk     []byte
+}
+
+// compileHot compiles the helper calls for an API worker (mw false) or a
+// middleware worker (mw true).
+func compileHot(rt *Runtime, mw bool) (*hotCode, error) {
+	h := &hotCode{}
+	begin, head := "__krate_begin_req()", "__krate_head()"
+	if mw {
+		begin, head = "__krate_mw_begin(__krate_mw_req)", "__krate_mw_head()"
+	}
+	for _, c := range []struct {
+		dst *[]byte
+		src string
+	}{
+		{&h.begin, begin}, {&h.head, head},
+		{&h.phase, "__krate_phase()"}, {&h.finish, "__krate_finish()"}, {&h.abort, "__krate_abort()"},
+		{&h.timersNext, "__krate_timers_next()"}, {&h.timersRun, "__krate_timers_run()"},
+		{&h.chunkStart, "__krate_chunk_start()"}, {&h.chunk, "__krate_chunk()"},
+	} {
+		bc, err := rt.Compile(c.src, EvalGlobal)
+		if err != nil {
+			return nil, err
+		}
+		*c.dst = bc
+	}
+	return h, nil
+}
+
 // jsNumber converts a numeric result from the VM.
 func jsNumber(v any) (float64, bool) {
 	switch n := v.(type) {
@@ -51,7 +86,7 @@ func jsNumber(v any) (float64, bool) {
 
 // waitFor drives the microtask queue and the JS timer queue until ready()
 // reports true, the budget elapses, or ctx is cancelled.
-func (r *Runtime) waitFor(ctx context.Context, budget time.Duration, ready func() bool) error {
+func (r *Runtime) waitFor(ctx context.Context, budget time.Duration, hot *hotCode, ready func() bool) error {
 	deadline := time.Now().Add(budget)
 	for {
 		r.DrainJobs()
@@ -61,7 +96,7 @@ func (r *Runtime) waitFor(ctx context.Context, budget time.Duration, ready func(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		v, err := r.Execute("__krate_timers_next()")
+		v, err := r.EvalBytecode(hot.timersNext)
 		if err != nil {
 			return err
 		}
@@ -82,13 +117,14 @@ func (r *Runtime) waitFor(ctx context.Context, budget time.Duration, ready func(
 				return ctx.Err()
 			}
 		}
-		if _, err := r.Execute("__krate_timers_run()"); err != nil {
+		if _, err := r.EvalBytecode(hot.timersRun); err != nil {
 			return err
 		}
 	}
 }
 
 type jsEnvelope struct {
+	Route      string            `json:"route,omitempty"`
 	URL        string            `json:"url"`
 	Method     string            `json:"method"`
 	Headers    [][2]string       `json:"headers"`
@@ -141,8 +177,8 @@ func (r *Runtime) outBytes(bin bool, b64 string) ([]byte, bool) {
 	return valueBytes(r.vm, v)
 }
 
-func (r *Runtime) evalString(code string) (string, error) {
-	v, err := r.Execute(code)
+func (r *Runtime) evalString(bc []byte) (string, error) {
+	v, err := r.EvalBytecode(bc)
 	if err != nil {
 		return "", err
 	}
@@ -152,10 +188,10 @@ func (r *Runtime) evalString(code string) (string, error) {
 
 // run executes one request on this worker and streams the result into sink.
 func (w *apiWorker) run(ctx context.Context, routeID string, req APIRequest, sink APISink) *APIFailure {
-	rt := w.rt
+	rt, hot := w.rt, w.hot
 	rt.curBody = req.Body
 	defer func() {
-		_, _ = rt.Execute("__krate_finish()")
+		_, _ = rt.EvalBytecode(hot.finish)
 		rt.curBody, rt.take = nil, nil
 		if rt.headroom > 0 {
 			// The body's garbage can sit in reference cycles (promise
@@ -173,20 +209,16 @@ func (w *apiWorker) run(ctx context.Context, routeID string, req APIRequest, sin
 	if req.Method == "" {
 		req.Method = "GET"
 	}
-	env := jsEnvelope{URL: req.URL, Method: req.Method, Headers: envelopeHeaders(req.Headers), Params: req.Params, RemoteAddr: req.RemoteAddr, HasBody: len(req.Body) > 0}
+	env := jsEnvelope{Route: routeID, URL: req.URL, Method: req.Method, Headers: envelopeHeaders(req.Headers), Params: req.Params, RemoteAddr: req.RemoteAddr, HasBody: len(req.Body) > 0}
 	envJSON, err := json.Marshal(env)
 	if err != nil {
 		return &APIFailure{Status: 500, Message: err.Error()}
 	}
-	for name, val := range map[string]string{
-		"__krate_route_id": routeID, "__krate_method": strings.ToUpper(req.Method), "__krate_req": string(envJSON),
-	} {
-		if err := rt.SetGlobal(name, val); err != nil {
-			return &APIFailure{Status: 500, Message: err.Error()}
-		}
+	if err := rt.SetGlobal("__krate_req", string(envJSON)); err != nil {
+		return &APIFailure{Status: 500, Message: err.Error()}
 	}
 
-	v, err := rt.EvalBytecode(w.begin)
+	v, err := rt.EvalBytecode(hot.begin)
 	if err != nil {
 		return &APIFailure{Status: 500, Message: err.Error()}
 	}
@@ -214,11 +246,11 @@ func (w *apiWorker) run(ctx context.Context, routeID string, req APIRequest, sin
 		budget += time.Duration(len(req.Body)>>20) * 4 * time.Second
 	}
 	phase := func() bool {
-		s, _ := rt.evalString("__krate_phase()")
+		s, _ := rt.evalString(hot.phase)
 		return s != "pending"
 	}
-	if err := rt.waitFor(ctx, budget, phase); err != nil {
-		_, _ = rt.Execute("__krate_abort()")
+	if err := rt.waitFor(ctx, budget, hot, phase); err != nil {
+		_, _ = rt.EvalBytecode(hot.abort)
 		if errors.Is(err, context.Canceled) {
 			return &APIFailure{Status: 499, Message: "client closed request"}
 		}
@@ -227,7 +259,7 @@ func (w *apiWorker) run(ctx context.Context, routeID string, req APIRequest, sin
 		}
 		return &APIFailure{Status: 500, Message: err.Error()}
 	}
-	raw, err := rt.evalString("__krate_head()")
+	raw, err := rt.evalString(hot.head)
 	if err != nil {
 		return &APIFailure{Status: 500, Message: err.Error()}
 	}
@@ -266,23 +298,23 @@ func (w *apiWorker) run(ctx context.Context, routeID string, req APIRequest, sin
 }
 
 func (w *apiWorker) pumpStream(ctx context.Context, budget time.Duration, sink APISink) *APIFailure {
-	rt := w.rt
+	rt, hot := w.rt, w.hot
 	for {
-		if _, err := rt.Execute("__krate_chunk_start()"); err != nil {
+		if _, err := rt.EvalBytecode(hot.chunkStart); err != nil {
 			return &APIFailure{Status: 500, Message: err.Error(), Started: true}
 		}
 		ready := func() bool {
-			s, _ := rt.evalString("__krate_chunk()")
+			s, _ := rt.evalString(hot.chunk)
 			return s != ""
 		}
-		if err := rt.waitFor(ctx, budget, ready); err != nil {
-			_, _ = rt.Execute("__krate_abort()")
+		if err := rt.waitFor(ctx, budget, hot, ready); err != nil {
+			_, _ = rt.EvalBytecode(hot.abort)
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
 			return &APIFailure{Status: 500, Message: "response stream: " + err.Error(), Started: true}
 		}
-		raw, _ := rt.evalString("__krate_chunk()")
+		raw, _ := rt.evalString(hot.chunk)
 		var c struct {
 			Done  bool   `json:"done"`
 			Body  string `json:"body"`
@@ -306,7 +338,7 @@ func (w *apiWorker) pumpStream(ctx context.Context, budget time.Duration, sink A
 			continue
 		}
 		if err := sink.Write(data); err != nil {
-			_, _ = rt.Execute("__krate_abort()")
+			_, _ = rt.EvalBytecode(hot.abort)
 			return nil
 		}
 	}

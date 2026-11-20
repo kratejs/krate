@@ -64,9 +64,11 @@ overrides:
 ### Runtime model and performance
 
 - The embedded runtime keeps a **pool of long-lived VMs** (`ssr.apiWorkers`,
-  default `min(NumCPU, 8)`). Each worker loads a route module once and reuses it,
+  default `1`). Each worker loads a route module once and reuses it,
   so a request is a single handler call rather than a fresh VM plus a full
-  re-evaluation. Requests run in parallel across workers.
+  re-evaluation. With the default single worker, requests run one at a time; set
+  `ssr.apiWorkers` above 1 to run them in parallel (the embedded VM's allocator is
+  serialized process-wide, so this helps handlers that wait on I/O, not CPU-bound ones).
 - **Module state persists per worker across requests** (the same semantics as
   Node/Next: a module's top-level state survives between requests). Set
   `ssr.apiIsolation: true` to run every request in a fresh VM instead.
