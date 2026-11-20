@@ -1,9 +1,10 @@
 name: CI
 
 # Pull requests run a fast set; pushes to dev and main, the nightly schedule
-# and manual runs are full runs. .github/scripts/ci-scope.mjs decides which
-# Krate Native runners a pull request needs (it path-filters them) and whether
-# a run is a full one. What a pull request skips, and where it runs instead:
+# and manual runs are full runs. Each Krate Native job runs
+# .github/scripts/ci-scope.mjs as its first step to decide whether a pull
+# request reaches it (it path-filters them). What a pull request skips, and
+# where it runs instead:
 #   - packaging, install, update and signing smoke tests on every OS, the
 #     Flatpak and snap builds, the docs site as a native app: full runs.
 #   - the Wayland GUI pass, the native size and memory budgets, the memory
@@ -34,23 +35,6 @@ permissions:
   contents: read
 
 jobs:
-  changes:
-    name: Changes
-    runs-on: ubuntu-latest
-    outputs:
-      full: ${{ steps.scope.outputs.full }}
-      native: ${{ steps.scope.outputs.native }}
-      native_matrix: ${{ steps.scope.outputs.native_matrix }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Decide the scope of this run
-        id: scope
-        run: node .github/scripts/ci-scope.mjs
-        env:
-          EVENT: ${{ github.event_name }}
 
   lint:
     name: Lint and checks
@@ -448,24 +432,35 @@ jobs:
   # layer costs almost nothing.
   native-cross:
     name: Native cross-compile
-    needs: changes
-    if: needs.changes.outputs.native != 'none'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      # Decides whether a pull request reaches this runner (sets RUN); every
+      # later step is guarded by it. Full runs always run.
+      - name: Decide the scope of this run
+        run: node .github/scripts/ci-scope.mjs
+        env:
+          EVENT: ${{ github.event_name }}
+          RUNNER: cross
 
       - name: Set up Go
+        if: env.RUN == 'true'
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
           cache: false
 
       - name: Restore the Go caches
+        if: env.RUN == 'true'
         uses: ./.github/actions/go-cache-restore
         with:
           key: cross
 
       - name: Cross-compile the platform layers
+        if: env.RUN == 'true'
         run: |
           for t in windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 linux/arm64; do
             echo "== $t"
@@ -475,15 +470,16 @@ jobs:
         working-directory: packages/native
 
       - name: Save the Go caches
-        if: always()
+        if: env.RUN == 'true' && (always())
         uses: ./.github/actions/go-cache-save
 
   # Krate Native: the real-window (GUI) tests, the compiler's native tests,
   # and on full runs the packaging and update smoke tests, on each OS.
   #
-  # Which runners a pull request gets comes from the changes job (see
-  # .github/scripts/ci-scope.mjs). Roles: "primary" (ubuntu-latest) runs the
-  # whole GUI set plus the browser variant; "platform" (macos-latest,
+  # Every runner starts on every run, so none waits on another job; its first
+  # step (.github/scripts/ci-scope.mjs) decides whether a pull request reaches
+  # it. Roles: "primary" (ubuntu-24.04) runs the whole GUI set plus the
+  # browser variant; "platform" (macos-latest,
   # windows-latest) runs the whole GUI set, since their platform layers only
   # run there; "thin" (the arm64 runners) runs the shell's GUI tests and the
   # main end-to-end test on pull requests, everything on full runs.
@@ -500,13 +496,26 @@ jobs:
   # optional_tools; each is skipped with a ::notice:: line when really missing.
   native:
     name: Native (${{ matrix.os }})
-    needs: changes
-    if: needs.changes.outputs.native != 'none'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.changes.outputs.native_matrix) }}
+        include:
+          # Pinned, not ubuntu-latest: the snap smoke test builds a core24 snap
+          # in destructive mode, which snapcraft only allows on an Ubuntu 24.04
+          # host.
+          - os: ubuntu-24.04
+            role: primary
+          - os: ubuntu-24.04-arm
+            role: thin
+          - os: macos-latest
+            role: platform
+          - os: windows-latest
+            role: platform
+          # The Windows on ARM image lacks the Windows SDK tools and NSIS.
+          - os: windows-11-arm
+            role: thin
+            optional_tools: makensis,signtool,makeappx
     defaults:
       run:
         shell: bash
@@ -517,52 +526,69 @@ jobs:
       # Read by scripts/native-smoke.mjs.
       KRATE_OPTIONAL_TOOLS: ${{ matrix.optional_tools }}
       ROLE: ${{ matrix.role }}
-      FULL: ${{ needs.changes.outputs.full }}
+      FULL: ${{ github.event_name != 'pull_request' }}
       NIGHTLY: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
       # The snaps the snap smoke test builds with, bases first. Changing the list
       # changes the cache key, so the next full run downloads them again.
       SNAPS: core22 core24 snapcraft gnome-46-2404 gnome-46-2404-sdk mesa-2404 gtk-common-themes
       # The GUI packages: the whole module, or on a thin pull-request run the
       # shell's GUI tests only.
-      GUI_PKGS: ${{ (matrix.role == 'thin' && needs.changes.outputs.full != 'true') && './shell' || './...' }}
+      GUI_PKGS: ${{ (matrix.role == 'thin' && github.event_name == 'pull_request') && './shell' || './...' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      # Decides whether a pull request reaches this runner (sets RUN); every
+      # later step is guarded by it. Full runs always run.
+      - name: Decide the scope of this run
+        run: node .github/scripts/ci-scope.mjs
+        env:
+          EVENT: ${{ github.event_name }}
+          RUNNER: ${{ matrix.os }}
 
       - name: Set up Go
+        if: env.RUN == 'true'
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
           cache: false
 
       - name: Restore the Go caches
+        if: env.RUN == 'true'
         uses: ./.github/actions/go-cache-restore
         with:
           key: native
 
       - name: Enable pnpm
+        if: env.RUN == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
           run_install: false
 
       - name: Set up Node
+        if: env.RUN == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: pnpm
 
       - name: Set up Bun
+        if: env.RUN == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.5
 
       - name: Set up Deno
+        if: env.RUN == 'true'
         uses: denoland/setup-deno@v1
         with:
           deno-version: 2.9.8
 
       # Every host runtime must be present: the host child tests need all three.
       - name: Check the host runtimes
+        if: env.RUN == 'true'
         run: |
           status=0
           for t in node bun deno; do
@@ -576,12 +602,15 @@ jobs:
           exit $status
 
       - name: Install JS dependencies
+        if: env.RUN == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Sync framework docs
+        if: env.RUN == 'true'
         run: node scripts/sync-krate-docs.mjs
 
       - name: Build JS packages
+        if: env.RUN == 'true'
         run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
 
       # The real services the Linux tests talk to: dunst (notifications),
@@ -589,7 +618,7 @@ jobs:
       # compositor) and the tools the packaging smoke test needs (rpm,
       # desktop-file-validate, squashfs).
       - name: Install the Linux webview, Xvfb and desktop services
-        if: runner.os == 'Linux'
+        if: env.RUN == 'true' && (runner.os == 'Linux')
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb openbox xdotool dbus dbus-bin \
@@ -599,7 +628,7 @@ jobs:
           fi
 
       - name: Install appimagetool (Linux)
-        if: runner.os == 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Linux' && env.FULL == 'true')
         run: |
           mkdir -p "$HOME/bin"
           # appimagetool-x86_64 or appimagetool-aarch64, matching the runner.
@@ -615,7 +644,7 @@ jobs:
       # manager state, and with the real daemons installed above:
       # KRATE_REQUIRE_E2E makes a missing daemon a failure, not a skip.
       - name: GUI tests (Linux, Xvfb and openbox, real desktop services)
-        if: runner.os == 'Linux'
+        if: env.RUN == 'true' && (runner.os == 'Linux')
         run: |
           # shellcheck disable=SC2016
           xvfb-run -a bash -c '
@@ -639,7 +668,7 @@ jobs:
       # GTK use it. The tests are the X11 pass's; only the GDK backend differs,
       # so pull requests run the X11 pass alone.
       - name: "GUI tests (Linux, Wayland via weston on Xvfb)"
-        if: runner.os == 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Linux' && env.FULL == 'true')
         run: |
           # shellcheck disable=SC2016
           xvfb-run -a bash -c '
@@ -667,7 +696,7 @@ jobs:
       # Blocking, like the Linux GUI steps: a failing macOS or Windows GUI test
       # fails the job. -v keeps skips visible in the log.
       - name: GUI tests (macOS, Windows)
-        if: runner.os != 'Linux'
+        if: env.RUN == 'true' && (runner.os != 'Linux')
         run: |
           # shellcheck disable=SC2086
           go test -p 1 -count=1 -timeout 20m -v $GUI_PKGS
@@ -682,7 +711,7 @@ jobs:
       # is not repeated: its GUI tests walk one page load in order, so a second
       # pass in the same process cannot work.
       - name: GUI tests repeated (Linux, platform/linux, sdk/guitest)
-        if: runner.os == 'Linux' && env.NIGHTLY == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Linux' && env.NIGHTLY == 'true')
         run: |
           # shellcheck disable=SC2016
           xvfb-run -a bash -c '
@@ -709,7 +738,7 @@ jobs:
       # session bus would start dunst through systemd without the display, and
       # a notification would wait for the bus's 25s activation timeout.
       - name: Compiler native tests (Linux, GUI under Xvfb)
-        if: runner.os == 'Linux'
+        if: env.RUN == 'true' && (runner.os == 'Linux')
         run: |
           if [ "$FULL" = true ]; then run='GUI'; skip=''
           elif [ "$ROLE" = thin ]; then run='^TestNativeE2EGUI$'; skip=''
@@ -734,7 +763,7 @@ jobs:
       # Acceptance: the docs site builds as a native app, packages as .deb,
       # .rpm, .tar.gz and an AppImage, and the installed binaries serve it.
       - name: Docs site as a native app (Linux)
-        if: matrix.role == 'primary' && env.FULL == 'true'
+        if: env.RUN == 'true' && (matrix.role == 'primary' && env.FULL == 'true')
         run: xvfb-run -a go test -count=1 -timeout 30m -v -run TestNativeDocsSiteE2E ./cmd/krate
         working-directory: packages/compiler
         env:
@@ -749,7 +778,7 @@ jobs:
       # block in this step's log (or in the job summary), a fragment of
       # budgets.json to paste in.
       - name: Compiler native tests (macOS, Windows)
-        if: runner.os != 'Linux'
+        if: env.RUN == 'true' && (runner.os != 'Linux')
         run: |
           if [ "$FULL" = true ]; then run='GUI|TestNativeBudgetSizes'; skip=''
           elif [ "$ROLE" = thin ]; then run='^TestNativeE2EGUI$'; skip=''
@@ -766,7 +795,7 @@ jobs:
       # Plugins are Go code linked into a per-app shell, built with the Go
       # toolchain on the runner; the system-info plugin has its own module.
       - name: Native plugin tests (macOS, Windows)
-        if: runner.os != 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os != 'Linux' && env.FULL == 'true')
         run: |
           (cd packages/compiler && GOWORK=off go test -p 1 -count=1 -timeout 20m -run Plugin ./internal/build)
           (cd examples/native-plugin/native-plugins/system-info && GOWORK=off go test -count=1 ./...)
@@ -774,7 +803,7 @@ jobs:
       # Binary sizes (the stripped shell, Go-only, TypeScript-only and example
       # release executables) against packages/native/budgets.json. No display.
       - name: Native size budgets (Linux)
-        if: runner.os == 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Linux' && env.FULL == 'true')
         run: go test -p 1 -count=1 -timeout 20m -run 'TestNativeBudgetSizes' -v ./internal/build
         working-directory: packages/compiler
         env:
@@ -788,29 +817,29 @@ jobs:
       # user would, check that it serves its first page, and update it to
       # 1.1.0 through the real updater against a local signed feed.
       - name: Packaging smoke test, build packages (Linux)
-        if: runner.os == 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Linux' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs linux prepare
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, .deb install, launch, remove (Linux)
-        if: runner.os == 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Linux' && env.FULL == 'true')
         run: xvfb-run -a node scripts/native-smoke.mjs linux deb
 
       - name: Packaging smoke test, .rpm structure (Linux)
-        if: runner.os == 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Linux' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs linux rpm
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, AppImage launch (Linux)
-        if: runner.os == 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Linux' && env.FULL == 'true')
         run: xvfb-run -a node scripts/native-smoke.mjs linux appimage
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Update smoke test, 1.0.0 to 1.1.0 (Linux)
-        if: runner.os == 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Linux' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs linux update
 
       # Real signatures with a key generated in the job: krate native sign
@@ -818,28 +847,28 @@ jobs:
       # fail). Notarization and Developer ID signing need secrets and stay
       # manual (docs/native/signing).
       - name: Signing smoke test, gpg (Linux)
-        if: runner.os == 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Linux' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs linux sign
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, build packages (macOS)
-        if: runner.os == 'macOS' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'macOS' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs macos prepare
 
       - name: Packaging smoke test, mount the dmg, launch (macOS)
-        if: runner.os == 'macOS' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'macOS' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs macos dmg
 
       - name: Update smoke test, 1.0.0 to 1.1.0 (macOS)
-        if: runner.os == 'macOS' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'macOS' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs macos update
 
       # codesign with the ad hoc signature of "prepare" and with a self-signed
       # identity from a temporary keychain, both checked with codesign --verify
       # --deep --strict (a tampered bundle must fail).
       - name: Signing smoke test, ad hoc and self-signed identity (macOS)
-        if: runner.os == 'macOS' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'macOS' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs macos sign
         env:
           KRATE_REQUIRE_E2E: "1"
@@ -847,13 +876,13 @@ jobs:
       # A universal (arm64 + amd64 lipo) app bundle and a Mac App Store
       # package (sandbox entitlements, ad hoc signed), both structure-checked.
       - name: Packaging smoke test, universal app (macOS)
-        if: runner.os == 'macOS' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'macOS' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs macos universal
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, Mac App Store package (macOS)
-        if: runner.os == 'macOS' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'macOS' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs macos mas
         env:
           KRATE_REQUIRE_E2E: "1"
@@ -863,26 +892,26 @@ jobs:
       # (optional_tools): the smoke steps then skip the NSIS installer with a
       # notice.
       - name: Install NSIS and create a signing certificate (Windows)
-        if: runner.os == 'Windows' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Windows' && env.FULL == 'true')
         continue-on-error: ${{ contains(matrix.optional_tools, 'makensis') }}
         run: |
           choco install nsis -y --no-progress
           echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
 
       - name: Create a signing certificate (Windows)
-        if: runner.os == 'Windows' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Windows' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs windows cert
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, build and sign packages (Windows)
-        if: runner.os == 'Windows' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Windows' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs windows prepare
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, NSIS silent install, launch, uninstall (Windows)
-        if: runner.os == 'Windows' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Windows' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs windows nsis
         env:
           KRATE_REQUIRE_E2E: "1"
@@ -891,19 +920,19 @@ jobs:
       # stand-in bootstrapper (nothing is downloaded, the runner's runtime
       # registration is hidden only for the run and restored).
       - name: Packaging smoke test, NSIS WebView2 check (Windows)
-        if: runner.os == 'Windows' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Windows' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs windows webview2
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, MSIX validate, install, launch (Windows)
-        if: runner.os == 'Windows' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Windows' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs windows msix
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Update smoke test, 1.0.0 to 1.1.0 (Windows)
-        if: runner.os == 'Windows' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os == 'Windows' && env.FULL == 'true')
         run: node scripts/native-smoke.mjs windows update
 
       # Memory of the system webview on real macOS and Windows machines, on
@@ -913,7 +942,7 @@ jobs:
       # from native.memory in krate.config.ts, set here per run and restored
       # afterwards.
       - name: Native memory report (macOS, Windows)
-        if: runner.os != 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (runner.os != 'Linux' && env.FULL == 'true')
         env:
           GOWORK: "off"
         run: |
@@ -938,7 +967,7 @@ jobs:
       # Compare the numbers above with the linux-amd64 limits in
       # packages/native/budgets.json. Informational.
       - name: Native memory budget comparison (macOS, Windows)
-        if: always() && runner.os != 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (always() && runner.os != 'Linux' && env.FULL == 'true')
         continue-on-error: true
         run: |
           node scripts/native-budget-compare.mjs \
@@ -946,7 +975,7 @@ jobs:
             "performance=native-memory/performance/report.json"
 
       - name: Upload native memory reports
-        if: always() && runner.os != 'Linux' && env.FULL == 'true'
+        if: env.RUN == 'true' && (always() && runner.os != 'Linux' && env.FULL == 'true')
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -955,20 +984,20 @@ jobs:
           if-no-files-found: warn
 
       - name: Cache Playwright browsers
-        if: matrix.role == 'primary'
+        if: env.RUN == 'true' && (matrix.role == 'primary')
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install chromium
-        if: matrix.role == 'primary'
+        if: env.RUN == 'true' && (matrix.role == 'primary')
         run: pnpm exec playwright install --with-deps chromium
 
       # The native app with --browser in place of a webview, the dev session
       # and the release build.
       - name: Native end-to-end in the browser (chromium)
-        if: matrix.role == 'primary'
+        if: env.RUN == 'true' && (matrix.role == 'primary')
         run: go test -p 1 -count=1 -timeout 20m -run 'TestNativeE2E|TestNativeDevSession|TestNativeRelease' -v ./internal/build
         working-directory: packages/compiler
         env:
@@ -980,14 +1009,14 @@ jobs:
       # the snap is built in destructive mode on the runner and installed with
       # --dangerous.
       - name: Install flatpak and flatpak-builder
-        if: matrix.role == 'primary' && env.FULL == 'true'
+        if: env.RUN == 'true' && (matrix.role == 'primary' && env.FULL == 'true')
         run: |
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder appstream
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
       - name: Packaging smoke test, Flatpak build, install, run (Linux)
-        if: matrix.role == 'primary' && env.FULL == 'true'
+        if: env.RUN == 'true' && (matrix.role == 'primary' && env.FULL == 'true')
         run: xvfb-run -a node scripts/native-smoke.mjs linux flatpak
         env:
           KRATE_REQUIRE_E2E: "1"
@@ -999,14 +1028,14 @@ jobs:
       # is never retried or skipped.
       - name: Cache the snaps
         id: snaps
-        if: matrix.role == 'primary' && env.FULL == 'true'
+        if: env.RUN == 'true' && (matrix.role == 'primary' && env.FULL == 'true')
         uses: actions/cache@v4
         with:
           path: ~/snaps
           key: snaps-v1-${{ runner.arch }}-${{ env.SNAPS }}
 
       - name: Download the snaps
-        if: matrix.role == 'primary' && env.FULL == 'true' && steps.snaps.outputs.cache-hit != 'true'
+        if: env.RUN == 'true' && (matrix.role == 'primary' && env.FULL == 'true' && steps.snaps.outputs.cache-hit != 'true')
         run: |
           mkdir -p ~/snaps
           cd ~/snaps
@@ -1015,7 +1044,7 @@ jobs:
           done
 
       - name: Install snapcraft
-        if: matrix.role == 'primary' && env.FULL == 'true'
+        if: env.RUN == 'true' && (matrix.role == 'primary' && env.FULL == 'true')
         run: |
           cd ~/snaps
           for s in $SNAPS; do
@@ -1031,14 +1060,14 @@ jobs:
           snapcraft --version
 
       - name: Packaging smoke test, snap build, install, run (Linux)
-        if: matrix.role == 'primary' && env.FULL == 'true'
+        if: env.RUN == 'true' && (matrix.role == 'primary' && env.FULL == 'true')
         run: xvfb-run -a node scripts/native-smoke.mjs linux snap
         env:
           KRATE_REQUIRE_E2E: "1"
           KRATE_SNAP_DESTRUCTIVE: "1"
 
       - name: Save the Go caches
-        if: always()
+        if: env.RUN == 'true' && (always())
         uses: ./.github/actions/go-cache-save
 
   node-versions:
