@@ -139,11 +139,17 @@ Limits to know about:
 - `krate dev` never compiles: it runs every route on the embedded QuickJS runtime
   (and says so once), so a route can pass in dev and fall back in the build. Run
   `krate build` to see the warnings.
-- The server does not provide `request.cookies`, `request.nextUrl`,
-  `headers()`/`cookies()`/`redirect()` from the request store, `revalidatePath`,
-  `after()`, a per-request `AbortSignal` or middleware-style `NextResponse`
-  helpers. A route that uses them either fails coverage and falls back, or
-  does not get them: keep such routes on the default runtime.
+- The compiled server does not provide `request.cookies`, `request.nextUrl`,
+  `after()`, `revalidatePath()`, `revalidateTag()` or the request-store helpers
+  (`cookies()`, `headers()`, `draftMode()`), and a route cannot import `@krate/*`
+  or `next/*` modules. The build finds these before compiling: a route that
+  uses one, or imports a local module under the project root that does,
+  is not compiled. It falls back to the embedded runtime with a
+  [`KR7238`](/docs/reference/diagnostics/#kr7238) warning at the file and line of
+  the use (an error with `ssr.scriptcStrict`). The check is by name, so it can
+  report a local function that happens to be called `headers`; rename it or
+  keep the route on the default runtime. `request.signal` works: it aborts
+  when the client disconnects. The list shrinks as the server gains features.
 - Dynamic route params are passed as a plain object, as for the other runtimes.
   There is no `eval`, `new Function`, `vm` or dynamic `import()`.
 - Routes are compiled together: one coverage-clean entry is built, so a scriptc

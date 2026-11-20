@@ -1579,12 +1579,12 @@ With ssr.apiRuntime set to "scriptc", krate build compiles the TypeScript routes
 Known limits:
 
 - Experimental and production only: krate dev runs every route on the embedded runtime, so a route can fall back only in krate build.
-- The compiled server has no request.cookies, request.nextUrl, request-store helpers (headers(), cookies(), redirect()), revalidatePath, after() or per-request AbortSignal; routes that need them stay on the default runtime.
+- The compiled server has no request.cookies, request.nextUrl, request-store helpers (cookies(), headers(), draftMode()), revalidatePath, revalidateTag or after(), and a route cannot import @krate/* or next/* modules; the build detects these by name in the route and the local modules it imports and runs such a route on the embedded runtime with KR7238.
 - Needs scriptc (Node 24 or later) and clang or zig at build time, and the executable is built for the build machine's platform; routes scriptc rejects fall back instead of failing unless ssr.scriptcStrict is set.
 
 Diagnostics: `KR7236`, `KR7238`
 
-Evidence: `TestScriptcPartitionAndFallback`, `TestScriptcEntryUsesNamedImportsOnly`, `TestScriptcBuildAndServeWithStandIn`, `TestScriptcBuildAndServeReal`, `TestScriptcSidecarProxy`, `TestAPIRuntimeScriptcValidation`
+Evidence: `TestScriptcPartitionAndFallback`, `TestScriptcEntryUsesNamedImportsOnly`, `TestScriptcBuildAndServeWithStandIn`, `TestScriptcBuildAndServeReal`, `TestScriptcSidecarProxy`, `TestScriptcRouteFindings`, `TestScriptcServeCrashingExecutableAnswers503`, `TestAPIRuntimeScriptcValidation`
 
 ## How claims are verified
 

@@ -187,6 +187,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Breaking
 
+- `ssr.apiRuntime` is validated: a value other than `"quickjs"`, `"node"`, `"bun"`, `"deno"` or
+  `"scriptc"` (case-insensitive) is now a config error. Before, any other value ran the API routes on the
+  Node API sidecar without saying so. Use `"node"` for that, or remove the key for the embedded runtime.
+  `ssr.middlewareRuntime: "scriptc"` is also rejected.
 - Output-quality changes that can affect a site (details under Fixed):
   - heading ids keep doubled hyphens like GitHub (`#go-components--api-routes`), so external links to
     the old collapsed ids of such headings stop matching;
@@ -253,7 +257,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   `scriptc coverage`; one scriptc rejects, with a default export, or Node-only keeps its existing
   runtime and is reported as KR7238 (an error with `ssr.scriptcStrict: true`). A missing scriptc or
   linker is KR7236. `.krate/api-scriptc.json` records where each route runs. `krate dev` keeps the
-  embedded runtime and says so once. `ssr.apiRuntime` is now validated. See docs features/api-routes.
+  embedded runtime and says so once. A route that imports `@krate/*` or `next/*`, or uses
+  `request.cookies`, `request.nextUrl`, `after()`, `revalidatePath()`, `revalidateTag()` or the request-store
+  helpers (in itself or a local module it imports), is not compiled and runs on QuickJS with KR7238. See docs
+  features/api-routes. `ssr.apiRuntime` is now validated (see Breaking).
 - Benchmarks page (docs guides/benchmarks) with cold build time, client JS size, API route and
   runtime-component SSR throughput against Next.js, Vite, Astro, SvelteKit and Remix. Scores live in
   `packages/web/src/data/benchmarks.json`, written by `node packages/benchmark/src/run.mjs publish`;
