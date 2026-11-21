@@ -372,10 +372,42 @@ export function installDiscreteEffects(options: any): void {
     if (typeof requestAnimationFrame === 'function') raf = requestAnimationFrame(done);
   };
   // options._commit (mangled __c) runs after refs and, through preact/hooks'
-  // own wrapper, after layout effects.
+  // own wrapper, after layout effects. Only a commit that ends a render
+  // flushes: a portal commits while its parent's render is still running, and
+  // the queue then holds the effects of components rendered earlier in that
+  // pass, whose layout and insertion effects have not run yet.
+  const open = trackRenders(options);
   const prevCommit = options.__c;
   options.__c = (vnode: unknown, queue: unknown) => {
     if (prevCommit) prevCommit(vnode, queue);
-    if (discrete && flushEffects) flushEffects();
+    if (discrete && flushEffects && open.size === 0) flushEffects();
   };
+}
+
+/**
+ * The vnodes whose diff has started and not finished, kept in
+ * options.__krateOpen (the compiler's shared preact/hooks module installs the
+ * same tracker). It is empty between renders. __b is Preact's diff hook; a
+ * vnode whose render throws gets __e (the error hook) instead of diffed.
+ */
+export function trackRenders(options: any): Set<unknown> {
+  if (options.__krateOpen) return options.__krateOpen;
+  const open = new Set<unknown>();
+  options.__krateOpen = open;
+  const prevDiff = options.__b;
+  const prevDiffed = options.diffed;
+  const prevError = options.__e;
+  options.__b = (vnode: unknown) => {
+    open.add(vnode);
+    if (prevDiff) prevDiff(vnode);
+  };
+  options.diffed = (vnode: unknown) => {
+    open.delete(vnode);
+    if (prevDiffed) prevDiffed(vnode);
+  };
+  options.__e = function (this: unknown, error: unknown, vnode: unknown, ...rest: unknown[]) {
+    open.delete(vnode);
+    return prevError.call(this, error, vnode, ...rest);
+  };
+  return open;
 }

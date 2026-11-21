@@ -1304,8 +1304,16 @@ export const Image = (p) => h("img", p);
 // once. After each commit, the next component render first flushes the queue
 // (Preact hands it to options.requestAnimationFrame). __c and __r are Preact's
 // commit and render hooks, which preact/hooks itself uses.
-const preactEffectOrderJS = `
-import { options as __o } from "preact";
+//
+// Only a commit that ends a render counts. A portal (compat's createPortal
+// calls render() while its parent renders) commits in the middle of the outer
+// render, and the queue then holds the effects of components rendered earlier
+// in that pass, whose layout and insertion effects have not run: flushing them
+// ran motion's useEffect before its useInsertionEffect handed it the new props,
+// so an `animate` change never started (Genesis sidebar labels after a Radix
+// tooltip). preactRenderTrackingJS keeps the vnodes being diffed in
+// options.__krateOpen; a commit with none left ends a render.
+const preactEffectOrderJS = preactRenderTrackingJS + `
 var __pending = null, __committed = false;
 var __raf = __o.requestAnimationFrame, __commit = __o.__c, __render = __o.__r;
 function __afterFrame(cb) {
@@ -1321,7 +1329,7 @@ __o.requestAnimationFrame = function (flush) {
 };
 __o.__c = function (vnode, queue) {
   if (__commit) __commit(vnode, queue);
-  __committed = true;
+  if (!__o.__krateOpen.size) __committed = true;
 };
 __o.__r = function (vnode) {
   if (__committed) {
@@ -1369,6 +1377,21 @@ export function useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot) 
   return __krateUses(subscribe, st.hydrating ? function () { return st.hydrating ? getServerSnapshot() : getSnapshot(); } : getSnapshot);
 }
 __compat.useSyncExternalStore = useSyncExternalStore;`
+
+// preactRenderTrackingJS keeps, in options.__krateOpen, the vnodes whose diff
+// has started and not finished (__b is Preact's diff hook; a vnode whose render
+// throws gets __e, its error hook, instead of diffed). It is empty between
+// renders and non-empty while a render, or a portal's render inside one, runs.
+// installDiscreteEffects in @krate/runtime/react-compat installs the same.
+const preactRenderTrackingJS = `
+import { options as __o } from "preact";
+if (!__o.__krateOpen) {
+  var __open = (__o.__krateOpen = new Set());
+  var __diff = __o.__b, __diffed = __o.diffed, __error = __o.__e;
+  __o.__b = function (vnode) { __open.add(vnode); if (__diff) __diff(vnode); };
+  __o.diffed = function (vnode) { __open.delete(vnode); if (__diffed) __diffed(vnode); };
+  __o.__e = function (error, vnode) { __open.delete(vnode); return __error.apply(this, arguments); };
+}`
 
 // preactExternalsPlugin marks exactly the given specifiers external.
 func preactExternalsPlugin(exts []string) api.Plugin {

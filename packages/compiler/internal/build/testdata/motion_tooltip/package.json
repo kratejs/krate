@@ -1,0 +1,10 @@
+{
+  "name": "krate-motion-tooltip",
+  "private": true,
+  "type": "module",
+  "description": "motion's LayoutGroup/layoutId with Radix tooltips, as in the Genesis sidebar, checked in a browser by TestUseClientIslandBrowserMotionTooltip. Not part of the pnpm workspace: the test installs these with npm on demand.",
+  "dependencies": {
+    "motion": "14.6.0",
+    "radix-ui": "1.8.1"
+  }
+}
