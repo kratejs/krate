@@ -111,6 +111,30 @@ afterEach(() => {
 });
 
 describe('SPA navigation', () => {
+  it('loads a document of another build with a full navigation', async () => {
+    document.head.insertAdjacentHTML('beforeend', '<meta name="krate-build" content="build-a">');
+    routes['/next'] = { body: page('Next', '<h1>Next</h1>', '<meta name="krate-build" content="build-b">') };
+    routes['/same'] = { body: page('Same', `<h1>Same</h1>${link('/next', 'Next')}`, '<meta name="krate-build" content="build-a">') };
+    document.querySelector('#root')!.insertAdjacentHTML('beforeend', link('/same', 'Same'));
+    click(document.querySelector('a[href="/same"]')!);
+    await settle();
+    expect(document.querySelector('#root h1')!.textContent).toBe('Same');
+    expect(hardNavs).toEqual([]);
+    click(document.querySelector('a[href="/next"]')!);
+    await settle();
+    expect(hardNavs).toEqual([['http://localhost:3000/next', false]]);
+    expect(document.querySelector('#root h1')!.textContent).toBe('Same');
+  });
+
+  it('swaps documents that carry no build (dev)', async () => {
+    routes['/next'] = { body: page('Next', '<h1>Next</h1>', '<meta name="krate-build" content="build-b">') };
+    document.querySelector('#root')!.insertAdjacentHTML('beforeend', link('/next', 'Next'));
+    click(document.querySelector('a[href="/next"]')!);
+    await settle();
+    expect(hardNavs).toEqual([]);
+    expect(document.querySelector('#root h1')!.textContent).toBe('Next');
+  });
+
   it('swaps the app root, title, history and announces the route', async () => {
     const nav = events('krate:navigate');
     click(document.querySelector('a[href="/about"]')!);

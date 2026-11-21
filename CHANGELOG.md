@@ -598,6 +598,14 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Island entries are named by their content (`chunks/island_<id>.<hash>.js`) and cached as immutable. They
+  were named from their source, so an entry kept its name while its code, or the content-hashed chunks it
+  imports, changed between builds, and was served `no-cache`. A cache that held it anyway (a CDN's browser
+  TTL) paired the old entry with the new build's other islands, and a module they share, such as a React
+  context, existed twice on the page (Genesis after a deploy: "`Tooltip` must be used within
+  `TooltipProvider`"). The page scripts and server bundles that name an entry are renamed or rewritten with
+  it. Each page also carries its build id (`<meta name="krate-build">`), and the SPA router loads a page of
+  another build with a full navigation, as Next.js does, instead of running two builds' modules together.
 - Preact islands and client components: a component's passive effects (`useEffect`) no longer run before
   its insertion and layout effects when a portal re-renders later in the same render. Krate's effect-order
   shims took the portal's commit (compat's `createPortal` commits while its parent is still rendering) for

@@ -56,7 +56,7 @@ func filesFixture(files map[string]string) projectFixture {
 
 // volatileRe matches what differs between builds of one project made in
 // different directories: chunk content hashes and the project directory.
-var volatileRe = regexp.MustCompile(`\.[0-9a-z]{6,8}\.(js|css)|-[0-9a-z]{6,8}\.mjs|island_[0-9a-f]{12}|isl-[0-9a-z]+`)
+var volatileRe = regexp.MustCompile(`island_[0-9a-f]{12}(\.[0-9a-f]{10})?|\.[0-9a-z]{6,8}\.(js|css)|-[0-9a-z]{6,8}\.mjs|isl-[0-9a-z]+|krate-build"? content="?[0-9a-f]{16}`)
 
 // missingRuntimeRe matches the page a missing-runtime warning names.
 var missingRuntimeRe = regexp.MustCompile(`src/pages/[^\s:]+:0:0: the @krate/runtime hydration bundle`)

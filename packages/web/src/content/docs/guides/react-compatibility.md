@@ -1098,7 +1098,7 @@ How it works:
 
   Preact 10.20 or newer is required. If Preact is missing, the build fails with an actionable error rather than
   shipping a broken island.
-- Each island gets an entry file (`chunks/island_<id>.js`). The entries of all
+- Each island gets an entry file (`chunks/island_<id>.<hash>.js`). The entries of all
   pages are bundled together with code splitting, so a module two pages import
   (a store, a query client, the library itself) is one shared file with one
   instance, and the Preact modules are emitted once and wired through an import
@@ -1402,9 +1402,13 @@ modules that are already loaded.
   Keep what must last in a store.
 - **Static pages stay static.** A page without islands loads no island code, and
   the Preact import map is a small JSON block.
-- **Caching.** The entry file of an island (`island_<id>.js`) is revalidated on
-  every visit; the shared chunks (`isl-<hash>.js`) are content-hashed and cached
-  as immutable.
+- **Caching.** Island entries (`island_<id>.<hash>.js`) and the shared chunks
+  (`isl-<hash>.js`) are named by their content and cached as immutable: a new
+  build serves new names for every file that changed, so a cache in front of
+  the site can never pair one build's island with another build's chunks. Each
+  page carries its build id (`<meta name="krate-build">`); the SPA router loads a
+  page of another build (a deploy since the tab opened) with a full navigation,
+  so the modules on one page always come from one build.
 
 ### Pages rendered per request
 

@@ -1356,9 +1356,31 @@ async function runNavigation(req: NavRequest): Promise<void> {
   await commitDocument(result.doc, req, seq);
 }
 
+/** The build a document belongs to: the compiler's krate-build meta ("" in dev). */
+function buildOf(doc: Document): string {
+  const meta = doc.querySelector('meta[name="krate-build"]');
+  return (meta && meta.getAttribute('content')) || '';
+}
+
+/** The build of the page that started the router. */
+let loadedBuild: string | undefined;
+
 async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): Promise<void> {
   const doc = new DOMParser().parseFromString(loaded.html, 'text/html');
   const url = loaded.url;
+  // A document of another build (a deploy since this page loaded) brings that
+  // build's islands and page scripts. Next to the modules already running (a
+  // kept layout island), every module they share would exist twice, such as
+  // a React context its provider and consumers then disagree on. Load it with a
+  // full navigation, as Next.js does when its build id changes.
+  if (loadedBuild === undefined) loadedBuild = buildOf(document);
+  const build = buildOf(doc);
+  if (loadedBuild && build && build !== loadedBuild) {
+    endTransition();
+    setStatus('idle');
+    hardNavigate(url, req.kind !== 'push');
+    return;
+  }
   const newRoot = appRoot(doc);
   const oldRoot = appRoot(document);
 
@@ -2409,6 +2431,7 @@ export function reinitRouter(): void {
 export function destroyRouter(): void {
   if (!initialized) return;
   initialized = false;
+  loadedBuild = undefined;
   if ((globalThis as any)[LIVE_ROUTER] === krateRouter) delete (globalThis as any)[LIVE_ROUTER];
   document.removeEventListener('click', clickHandler);
   document.removeEventListener('submit', submitHandler as EventListener);

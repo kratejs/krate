@@ -478,6 +478,11 @@ func (b *Builder) runtimeCommonHead() string {
 			sb.WriteString("</script>\n")
 		}
 	}
+	if !b.DevMode && !b.NativeTarget {
+		// Which build the document belongs to: the SPA router loads a document
+		// of another build with a full navigation (buildIDPlaceholder).
+		sb.WriteString(`<meta name="krate-build" content="` + buildIDPlaceholder + `">` + "\n")
+	}
 	if !off {
 		sb.WriteString("<style>@view-transition{navigation:auto}")
 		sb.WriteString("@media (prefers-reduced-motion: reduce){")
@@ -1634,9 +1639,32 @@ func (b *Builder) BuildAll() error {
 	tl.Lap("runtime-components")
 	bl.Lap("tools")
 
+	// Island entries get names from their content now that every file naming
+	// them is written (see contentHashIslandEntries). Dev builds keep the
+	// stable names: they are never cached.
+	var outputRenames map[string]string
+	if !b.DevMode {
+		if earlyPrecompress != nil {
+			<-earlyPrecompress
+		}
+		renames, err := contentHashIslandEntries(b.Cfg.OutDir, publicFiles)
+		if err != nil {
+			failOutput(fmt.Errorf("naming the island entries under %s by their content: %w", filepath.Join(b.Cfg.OutDir, "chunks"), err))
+		}
+		outputRenames = renames
+	}
 	manifest.HashedAssets = collectHashedAssets(b.Cfg.OutDir, publicFiles)
+	if !b.DevMode {
+		if err := stampBuildID(b.Cfg.OutDir, publicFiles, manifest.HashedAssets); err != nil {
+			failOutput(fmt.Errorf("writing the build id into the documents under %s: %w", b.Cfg.OutDir, err))
+		}
+	}
 	if err := WriteManifest(manifest, b.Cfg.OutDir, serverBundles); err != nil {
 		failOutput(fmt.Errorf("writing the build manifest under %s: %w", ServerOutPath(b.Cfg.OutDir), err))
+	}
+	// The manifest was written from the names the build used before.
+	if err := applyOutputRenames(ServerOutPath(b.Cfg.OutDir), outputRenames); err != nil {
+		failOutput(fmt.Errorf("updating the build manifest under %s: %w", ServerOutPath(b.Cfg.OutDir), err))
 	}
 
 	// Generate typed route declarations (.krate/types/routes.d.ts + bridge).
