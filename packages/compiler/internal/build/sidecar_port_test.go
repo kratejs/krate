@@ -2,6 +2,7 @@ package build
 
 import (
 	"net"
+	"net/http"
 	"os"
 	"runtime"
 	"strconv"
@@ -61,4 +62,34 @@ func testEphemeralRange(t *testing.T) (int, int) {
 		t.Fatalf("ip_local_port_range: %q", data)
 	}
 	return lo, hi
+}
+
+// The host proxies to the Node sidecar at the address the sidecar listens on
+// and the readiness probe checked (127.0.0.1). "localhost" resolves to ::1
+// first, where another server can hold the same port: Windows lets a wildcard
+// listener sit next to the sidecar's loopback one.
+func TestNodeSidecarProxyReachesTheSidecarItProbed(t *testing.T) {
+	e2eEnv(t)
+	b, root := buildInstProject(t, instFiles(`export async function register() {
+  (globalThis as any).__krateInst = "ready";
+}`))
+	b.Cfg.SSR.NodeWorkers = 1
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	v, ok := sidecarPorts.Load(b.Cfg.Server.Port)
+	if !ok {
+		t.Fatal("no sidecar port recorded")
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort("::1", strconv.Itoa(v.(int))))
+	if err != nil {
+		t.Fatalf("listen on the IPv6 loopback side of the sidecar port: %v", err)
+	}
+	other := &http.Server{Handler: http.NotFoundHandler()}
+	go func() { _ = other.Serve(ln) }()
+	t.Cleanup(func() { _ = other.Close() })
+	if code, body := getText(t, base+"/api/pid"); code != 200 || !strings.Contains(body, `"state":"ready"`) {
+		t.Fatalf("GET /api/pid: %d %s", code, body)
+	}
 }

@@ -1743,7 +1743,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 	}
 
-	sidecarURL, _ := url.Parse(fmt.Sprintf("http://localhost:%d", apiPort))
+	// The address the sidecar listens on and the readiness probe checks:
+	// "localhost" may resolve to ::1, where another server can hold the port.
+	sidecarURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", apiPort))
 	apiProxy := httputil.NewSingleHostReverseProxy(sidecarURL)
 	// Every request the host forwards carries the per-process secret (replacing
 	// anything the client sent), so the sidecar can refuse direct connections
@@ -1826,7 +1828,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	gate := &middlewareGate{
 		rt:           middlewareRT,
 		dev:          hub != nil,
-		sidecarURL:   fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
+		sidecarURL:   fmt.Sprintf("http://127.0.0.1:%d/__krate/middleware", apiPort),
 		file:         middlewarePath,
 		required:     middlewareRequired,
 		secret:       revalHost.secret,
