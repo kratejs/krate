@@ -82,27 +82,20 @@ func nodeOnlyProject(t *testing.T, root string) *Builder {
 	return New(root, cfg)
 }
 
-func setLegacyNodeOnly(t *testing.T, on bool) {
-	t.Helper()
-	prev := legacyNodeOnlyDetection
-	legacyNodeOnlyDetection = on
-	t.Cleanup(func() { legacyNodeOnlyDetection = prev })
-}
-
 // The detection gives every route the Node-only flag the full QuickJS bundle
 // gives it, proves the expected routes without that bundle, and writes a stub
 // instead of the full bundle for a Node-only route.
 func TestNodeOnlyDetectionMatchesFullBundle(t *testing.T) {
+	t.Parallel()
 	legacyRoot, newRoot := t.TempDir(), t.TempDir()
 
-	setLegacyNodeOnly(t, true)
 	lb := nodeOnlyProject(t, legacyRoot)
+	lb.legacyNodeOnly = true
 	if err := lb.CompileAPIRoutes(nodeOnlyRoutes(legacyRoot)); err != nil {
 		t.Fatal(err)
 	}
 	legacy := readRouteMetas(t, legacyRoot)
 
-	legacyNodeOnlyDetection = false
 	nb := nodeOnlyProject(t, newRoot)
 	if err := nb.CompileAPIRoutes(nodeOnlyRoutes(newRoot)); err != nil {
 		t.Fatal(err)
@@ -211,6 +204,7 @@ func normalizeRoot(b []byte, root string) []byte {
 // A route that turns Node-only replaces its full QuickJS bundle with the stub,
 // and a route that stops being Node-only gets its bundle back.
 func TestNodeOnlyStubFollowsRoute(t *testing.T) {
+	t.Parallel()
 	b, root := compatProject(t, map[string]string{
 		"src/api/r.ts": `export function GET() { return Response.json({ ok: true }); }`,
 	}, nil)
@@ -245,6 +239,7 @@ func TestNodeOnlyStubFollowsRoute(t *testing.T) {
 // An esbuild error in a route that is not provably Node-only is reported as
 // before.
 func TestNodeOnlyDetectionKeepsBundleErrors(t *testing.T) {
+	t.Parallel()
 	b, root := compatProject(t, map[string]string{
 		"src/api/bad.ts": "import { x } from \"./missing\";\nexport function GET() { return Response.json({ x }); }",
 	}, nil)
@@ -257,6 +252,7 @@ func TestNodeOnlyDetectionKeepsBundleErrors(t *testing.T) {
 // krate serve sends a Node-only route to the Node sidecar, including one that
 // a dynamic route next to it would otherwise match.
 func TestServeRoutesNodeOnlyStubsToNode(t *testing.T) {
+	t.Parallel()
 	root, cfg := externalsProject(t, nodeOnlyFiles(), func(c *config.Config) {
 		c.ServerExternalPackages = []string{"@fake/ext"}
 	})

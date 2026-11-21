@@ -9,6 +9,7 @@ import (
 // value the build cannot resolve renders empty (the browser fills it in) and a
 // value it can resolve renders as that value.
 func TestIdentifierNamesNeverReachTheMarkup(t *testing.T) {
+	t.Parallel()
 	const imp = "import { createSignal, createMemo } from '@krate/runtime';\n"
 	sources := map[string]struct{ mod, local, arg string }{
 		"module const":      {"const ZQinit = 5;", "", "ZQinit"},

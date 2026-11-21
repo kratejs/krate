@@ -50,6 +50,7 @@ const (
 )
 
 func TestRuntimeChunkKeepsReferencedFeatures(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		scan string

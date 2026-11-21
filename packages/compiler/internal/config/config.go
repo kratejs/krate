@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/routesource"
@@ -1106,8 +1107,13 @@ func Default() *Config {
 }
 
 // Warnings collects non-fatal config issues (unknown keys, suspicious values).
-// It is populated by Load and read by the CLI to print notices.
+// It is populated by Load and read by the CLI to print notices. Loads run one
+// at a time (warningsMu), so concurrent callers use LoadWithWarnings to get
+// the warnings of their own load.
 var Warnings []string
+
+// warningsMu serializes the loads that reset and fill Warnings.
+var warningsMu sync.Mutex
 
 // Validate runs semantic checks on a loaded config. Fatal issues are returned
 // as an error; tolerated-but-suspicious ones are appended to Warnings.
@@ -1175,6 +1181,20 @@ func CheckExplicitConfig(root, path string) error {
 
 // LoadWith loads the config with an explicit command/mode context.
 func LoadWith(root string, opts LoadOptions) (*Config, error) {
+	cfg, _, err := LoadWithWarnings(root, opts)
+	return cfg, err
+}
+
+// LoadWithWarnings is LoadWith that also returns the warnings of this load
+// (what Warnings holds once it returns).
+func LoadWithWarnings(root string, opts LoadOptions) (*Config, []string, error) {
+	warningsMu.Lock()
+	defer warningsMu.Unlock()
+	cfg, err := loadWith(root, opts)
+	return cfg, append([]string(nil), Warnings...), err
+}
+
+func loadWith(root string, opts LoadOptions) (*Config, error) {
 	Warnings = nil
 	cfg := Default()
 

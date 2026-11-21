@@ -10,6 +10,7 @@ import (
 // canonicalPath is called for every module of every page; it must cache, and
 // a reset (a new build) must see a symlink that changed in between.
 func TestCanonicalPathCachesUntilReset(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
 	for _, d := range []string{a, b} {

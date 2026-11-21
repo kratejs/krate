@@ -2,7 +2,7 @@ package build
 
 import (
 	"fmt"
-	"os"
+	"io"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
@@ -14,13 +14,15 @@ import (
 // aggregates; BuildAll seeds its failure list from this.
 type passErrors struct {
 	errs []error
+	// w receives the printed errors (the builder's stderr).
+	w io.Writer
 }
 
 // add prints err under label and records it. A joined error is split so each
 // diagnostic is printed and counted on its own.
 func (p *passErrors) add(label string, err error) {
 	for _, e := range flattenErrors(err) {
-		fmt.Fprintf(os.Stderr, "  %s%s:%s %s\n", cRed, label, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{e}), "\n", "\n    "))
+		fmt.Fprintf(p.w, "  %s%s:%s %s\n", cRed, label, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{e}), "\n", "\n    "))
 		p.errs = append(p.errs, e)
 	}
 }

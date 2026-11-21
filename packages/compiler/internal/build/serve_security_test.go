@@ -10,6 +10,7 @@ import (
 )
 
 func TestRewriteDestinationOpenRedirect(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name, path, source, dest, want string
 	}{
@@ -52,6 +53,7 @@ func writeTree(t *testing.T, root string, files map[string]string) {
 }
 
 func TestImageSrcOutsidePublicIsRejected(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	svg := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>`
 	writeTree(t, root, map[string]string{

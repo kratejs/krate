@@ -63,27 +63,16 @@ var missingRuntimeRe = regexp.MustCompile(`src/pages/[^\s:]+:0:0: the @krate/run
 
 func buildWithEngine(t *testing.T, fixture projectFixture, engine string, setup func(*Builder)) engineBuild {
 	t.Helper()
-	t.Setenv(jsworker.EnvVar, engine)
 	root, cfg := fixture(t)
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Chdir(wd) }()
-	metadataCache.Clear()
-	realHintsCache.Clear()
-	resetModuleWarnings()
 	b := New(root, cfg)
+	b.jsEngine = engine
 	b.Prof = NewProfiler(true)
 	if setup != nil {
 		setup(b)
 	}
-	logs := captureStderrFile(t)
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("%s build: %v\n%s", engine, err, logs())
+	raw, err := captureBuild(b)
+	if err != nil {
+		t.Fatalf("%s build: %v\n%s", engine, err, raw)
 	}
 	normalize := func(s string) string {
 		// Node prints file URLs, which escape "~" (Windows short names)
@@ -115,7 +104,7 @@ func buildWithEngine(t *testing.T, fixture projectFixture, engine string, setup 
 		out.pages[filepath.ToSlash(rel)] = normalize(string(data))
 		return nil
 	})
-	out.raw = logs()
+	out.raw = raw
 	out.warnings = warningBlocks(normalize(out.raw))
 	b.Prof.mu.Lock()
 	for k, n := range b.Prof.counts {
@@ -256,6 +245,7 @@ export default function T() { return <p>t</p>; }`,
 // TestBuildJSParityMetadata covers metadata, generateMetadata per static
 // param, generateStaticParams, thrown errors and their warnings.
 func TestBuildJSParityMetadata(t *testing.T) {
+	t.Parallel()
 	builds := checkParity(t, filesFixture(metadataParityFiles), "metadata", "static-params")
 	if b, ok := builds["quickjs"]; ok {
 		head := b.pages["blog/b/index.html"]
@@ -274,6 +264,7 @@ func TestBuildJSParityMetadata(t *testing.T) {
 // TestBuildJSParityHints covers resource-hint renders, merged and alone,
 // with a render whose module throws.
 func TestBuildJSParityHints(t *testing.T) {
+	t.Parallel()
 	fixture := func(t *testing.T) (string, *config.Config) { return hintsFixture(t, 6, 2) }
 	builds := checkParity(t, fixture, "real-hints")
 	if b, ok := builds["quickjs"]; ok && !strings.Contains(b.pages["p3/index.html"], "/models/m3.glb") {
@@ -292,6 +283,7 @@ func TestBuildJSParityHints(t *testing.T) {
 // error (and later runs on its own), and the bundle names no global only
 // QuickJS has, which would keep the merged run off the worker.
 func TestRealHintsMergedEngineError(t *testing.T) {
+	t.Parallel()
 	prelude := func(slot int) string {
 		p := realHintsPrelude("/react-dom-server.js", slot)
 		var kept []string
@@ -312,8 +304,8 @@ func TestRealHintsMergedEngineError(t *testing.T) {
 	}
 	for _, e := range buildEngines(t) {
 		t.Run(e, func(t *testing.T) {
-			t.Setenv(jsworker.EnvVar, e)
 			b := New(t.TempDir(), config.Default())
+			b.jsEngine = e
 			b.Prof = NewProfiler(true)
 			defer b.closeJSWorker()
 			tags := b.runRealHintsMergedCode(code, len(renders))
@@ -337,6 +329,7 @@ func TestRealHintsMergedEngineError(t *testing.T) {
 
 // TestBuildJSParityIslands covers island server renders.
 func TestBuildJSParityIslands(t *testing.T) {
+	t.Parallel()
 	fixture := func(t *testing.T) (string, *config.Config) {
 		root := t.TempDir()
 		cfg := setupIslandProject(t, root, true)
@@ -353,6 +346,7 @@ func TestBuildJSParityIslands(t *testing.T) {
 // evaluation, and gives another build a runtime that cannot start: both
 // builds finish in QuickJS with the pages a QuickJS build makes.
 func TestBuildJSWorkerFailureFallsBack(t *testing.T) {
+	t.Parallel()
 	nodePath, err := exec.LookPath("node")
 	if err != nil {
 		requireE2E(t, "node is not installed")
@@ -396,8 +390,9 @@ func killWorkers(p *jsworker.Pool) {
 // TestBuildJSQuickJSOverride checks that KRATE_BUILD_JS=quickjs starts no
 // worker.
 func TestBuildJSQuickJSOverride(t *testing.T) {
-	t.Setenv(jsworker.EnvVar, "quickjs")
+	t.Parallel()
 	b := New(t.TempDir(), config.Default())
+	b.jsEngine = "quickjs"
 	if p := b.jsWorker(); p != nil {
 		t.Fatalf("KRATE_BUILD_JS=quickjs selected %s", p.Name)
 	}
@@ -431,6 +426,7 @@ export default function P() { return <main><h1>p%d</h1></main>; }`, i, i)
 // reports, for the best of three builds, the build time, the CPU time of the
 // build and its workers, and the time spent in evaluations.
 func TestBuildJSMetadataPerf(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("KRATE_BUILD_JS_PERF") == "" {
 		t.Skip("set KRATE_BUILD_JS_PERF=1 to build a 40-page fixture three times per engine")
 	}

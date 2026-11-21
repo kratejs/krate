@@ -116,6 +116,7 @@ func getBody(t *testing.T, url string) (int, http.Header, string) {
 // checkbox and Radix dialog parts, and the global Link. The icon is plain
 // HTML, the stateful components are islands rendered by the server first.
 func TestAsyncPageRendersCompiledReactComponents(t *testing.T) {
+	t.Parallel()
 	b, root := asyncReactProject(t)
 	if err := b.BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
@@ -157,6 +158,7 @@ func TestAsyncPageRendersCompiledReactComponents(t *testing.T) {
 // the Radix checkbox toggles, the dialog opens through its trigger (the
 // trigger and the content share the dialog's context) and closes again.
 func TestCompiledReactComponentsBrowser(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the compiled island browser test")
@@ -202,6 +204,7 @@ func TestCompiledReactComponentsBrowser(t *testing.T) {
 // children for an async page and a synchronous one; a nested async layout
 // gates its subtree with redirect(); pages outside stay static.
 func TestAsyncLayouts(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/app/_layout.tsx": `import { Loader2 } from "lucide-react";
 export default async function Layout({ children }: any) {
@@ -261,6 +264,7 @@ export default async function Layout({ children }: any) {
 // components are all stateless (an icon) loads no island JavaScript, and an
 // async child component of a static page renders a compiled component too.
 func TestStatelessCompiledComponentsShipNoIslandJS(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/UserNav.tsx": `import { Loader2 } from "lucide-react";
 export async function UserNav() {
@@ -303,6 +307,7 @@ export default async function Only() { await Promise.resolve(); return <main><Lo
 // inside the layout; a page that throws renders the boundary's UI inside the
 // layout (status 500, no-store) and ships the boundary's client JS.
 func TestErrorBoundaryUnderAsyncLayout(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/(app)/_layout.tsx": `export default async function Layout({ children }: any) {
   const user = await Promise.resolve({ name: "ada" });
@@ -358,6 +363,7 @@ export default function Error({ error, reset }: any) {
 // served as one module, or the build fails with `No matching export in
 // "krate-pkg-boundary:lucide-react"` for the icons of whichever tree lost.
 func TestAsyncLayoutAndPageShareAPackageBoundary(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/_layout.tsx": `import { Download } from "lucide-react";
 export default async function Layout({ children }: any) {
@@ -430,6 +436,7 @@ export { Button }
 // directive-less Button asChild around a Link. The Slot's props merge onto the
 // link; the tag is never "[object Object]".
 func TestServerPageButtonAsChild(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/button.tsx": shadcnButton,
 		"src/pages/index.tsx": `import { Button } from "../components/button";
@@ -474,6 +481,7 @@ export default function Static() {
 // (a memo around a forwardRef, a lazy, a context provider and consumer) run as
 // components on an async page, directly and through a variable tag.
 func TestServerPageForwardRefMemoLazyTypes(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/exotic.tsx": `const Fwd: any = { $$typeof: Symbol.for("react.forward_ref"), render: (p: any, ref: any) => <b id="fwd" data-ref={String(ref)}>{p.children}</b> };
 export const Memo: any = { $$typeof: Symbol.for("react.memo"), type: Fwd };

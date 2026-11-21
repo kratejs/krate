@@ -22,6 +22,7 @@ func pages(idx ...int) pageSet {
 }
 
 func TestPlanCSSSheets(t *testing.T) {
+	t.Parallel()
 	all := pages(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
 	cases := []struct {
 		name  string
@@ -97,6 +98,7 @@ func linkedSheets(t *testing.T, path string) []string {
 // TestPageCSSSplitBySource: two pages importing the same stylesheet link one
 // shared file for it, followed by a file with their own CSS, in import order.
 func TestPageCSSSplitBySource(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeProjectFile(t, root, "src/lib/shared.css", bigCSS("shared", 400))
 	writeProjectFile(t, root, "src/pages/a.css", ".own-a{color:red}")
@@ -135,6 +137,7 @@ func TestPageCSSSplitBySource(t *testing.T) {
 // TestPageCSSDevModeOneSheet: a dev build keeps one stylesheet per page, in
 // the same source order.
 func TestPageCSSDevModeOneSheet(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := config.Default()
 	cfg.Resolve(root)
@@ -166,6 +169,7 @@ func TestPageCSSDevModeOneSheet(t *testing.T) {
 // `@utility` that another source (here a package stylesheet) defines, now that
 // each source is processed on its own.
 func TestPageCSSApplyAcrossSources(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeProjectFile(t, root, "node_modules/twlib/package.json", `{"name":"twlib","version":"1.0.0"}`)
 	writeProjectFile(t, root, "node_modules/twlib/lib.css", "@utility brandy { color: #123456; letter-spacing: 3px; }\n"+bigCSS("lib", 300))

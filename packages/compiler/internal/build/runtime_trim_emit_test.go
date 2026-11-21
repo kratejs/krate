@@ -47,6 +47,7 @@ var optionalProbes = map[string]bool{
 // kbindList probes krateBindList, so before the table existed the list
 // feature was dropped and keyed lists never updated in production builds.
 func TestBootstrapHelperFeatureDeps(t *testing.T) {
+	t.Parallel()
 	_, m := loadFeatureManifest(t)
 	owner := map[string]string{}
 	for _, name := range optionalRuntimeFeatures {
@@ -133,6 +134,7 @@ var identRe = regexp.MustCompile(`[A-Za-z_$][A-Za-z0-9_$]*`)
 // the core) were this one bug class: a passing build whose page JS calls a
 // function the shipped runtime lacks.
 func TestTrimmedRuntimeDefinesEmittedNames(t *testing.T) {
+	t.Parallel()
 	repoRoot, m := loadFeatureManifest(t)
 	if len(m.Full) == 0 {
 		t.Skip("krate-features.json has no full export list (rebuild @krate/runtime)")
@@ -310,6 +312,7 @@ export default function Page() {
 // it in a real browser (KRATE_BROWSER=chromium|firefox|webkit, as for
 // TestBrowserConformance).
 func TestTrimmedRuntimeBrowser(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -339,6 +342,14 @@ func runTrimmedBrowser(t *testing.T, repoRoot, browser, mode, pageSrc string) {
 // and returns the output directory.
 func buildTrimmedProject(t *testing.T, repoRoot string, pages map[string]string) string {
 	t.Helper()
+	outDir, _ := buildTrimmedProjectOutput(t, repoRoot, pages)
+	return outDir
+}
+
+// buildTrimmedProjectOutput is buildTrimmedProject that also returns the
+// warnings of the build.
+func buildTrimmedProjectOutput(t *testing.T, repoRoot string, pages map[string]string) (string, string) {
+	t.Helper()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "packages"), 0755); err != nil {
 		t.Fatal(err)
@@ -352,10 +363,11 @@ func buildTrimmedProject(t *testing.T, repoRoot string, pages map[string]string)
 	cfg := config.Default()
 	cfg.PagesDir = filepath.Join(root, "src", "pages")
 	cfg.OutDir = filepath.Join(root, "dist")
-	if err := New(root, cfg).BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
+	out, err := captureBuild(New(root, cfg))
+	if err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
-	return cfg.OutDir
+	return cfg.OutDir, out
 }
 
 func runTrimmedBrowserScript(t *testing.T, repoRoot, browser, mode, outDir string) {
@@ -379,6 +391,7 @@ func runTrimmedBrowserScript(t *testing.T, repoRoot, browser, mode, outDir strin
 // A layout that renders `{children}` in two places mounts two instances, so
 // each copy gets its own hydration keys and both hydrate in the browser.
 func TestChildrenRenderedTwiceHydrateBothCopies(t *testing.T) {
+	t.Parallel()
 	repoRoot, err := repoRootPath()
 	if err != nil {
 		t.Fatal(err)
@@ -455,13 +468,13 @@ export default function P() {
 // Children rendered once per loop iteration share one set of keys, which is
 // reported instead of leaving all but one copy dead.
 func TestChildrenRenderedInALoopIsReported(t *testing.T) {
+	t.Parallel()
 	repoRoot, err := repoRootPath()
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, _ := captureOutput(func() error {
-		buildTrimmedProject(t, repoRoot, map[string]string{
-			"index.tsx": `import { createSignal } from '@krate/runtime';
+	_, out := buildTrimmedProjectOutput(t, repoRoot, map[string]string{
+		"index.tsx": `import { createSignal } from '@krate/runtime';
 function List({ children }: { children?: any }) {
   return <ul>{[1, 2].map((i) => <li key={i}>{children}</li>)}</ul>;
 }
@@ -470,8 +483,6 @@ export default function P() {
   return <List><button onClick={() => setN(n() + 1)}>go</button></List>;
 }
 `,
-		})
-		return nil
 	})
 	if !strings.Contains(out, "KR8323") || !strings.Contains(out, "once per iteration in <List>") {
 		t.Errorf("expected a KR8323 warning:\n%s", out)

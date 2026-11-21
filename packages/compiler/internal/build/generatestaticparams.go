@@ -718,7 +718,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		Page:    spp.PagePath,
 		Program: entryModule.Program,
 	}
-	b.runPageHook("AfterParse", spp.PagePath, parseCtx, func() error { return plugin.RunAfterParse(parseCtx) })
+	b.runPageHook("AfterParse", spp.PagePath, parseCtx, func() error { return b.plugins.RunAfterParse(parseCtx) })
 	entryModule.Program = parseCtx.Program
 
 	// The entry program is fresh per generated page, so its getCollection
@@ -727,14 +727,14 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
 		return nil, "", err
 	}
-	renderMode, revalidate, _ := resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules, b.importResolver().Resolve)
+	renderMode, revalidate, _ := b.resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules, b.importResolver().Resolve)
 
 	// Global streaming override: if configured, all *static* pages stream.
 	// Explicit ssr/isr opts win - forcing them to streaming would silently
 	// defeat a page author's per-page config.
 	if b.Cfg.SSR.Streaming && renderMode == RenderSSG {
 		renderMode = RenderStreaming
-		fmt.Fprintf(os.Stderr, "  %s*%s %s -> streaming (global override)\n", cCyan, cReset, filepath.Base(spp.PagePath))
+		fmt.Fprintf(b.stderr(), "  %s*%s %s -> streaming (global override)\n", cCyan, cReset, filepath.Base(spp.PagePath))
 	}
 
 	// Bind route params (e.g. slug) to their concrete values, then inline
@@ -863,7 +863,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		HasJS:    len(emitResult.Signatures) > 0,
 		RawCSS:   bundle.CSS,
 	}
-	b.runPageHook("AfterRender", spp.PagePath, renderCtx, func() error { return plugin.RunAfterRender(renderCtx) })
+	b.runPageHook("AfterRender", spp.PagePath, renderCtx, func() error { return b.plugins.RunAfterRender(renderCtx) })
 	emitResult.HTML = renderCtx.HTML
 	emitResult.HeadHTML = renderCtx.HeadHTML
 	bundle.CSS = renderCtx.RawCSS
@@ -875,7 +875,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 			HTML:  emitResult.HTML,
 			Route: spp.OutPath,
 		}
-		b.runPageHook("AfterMarkdownParse", spp.PagePath, mdCtx, func() error { return plugin.RunAfterMarkdownParse(mdCtx) })
+		b.runPageHook("AfterMarkdownParse", spp.PagePath, mdCtx, func() error { return b.plugins.RunAfterMarkdownParse(mdCtx) })
 		emitResult.HTML = mdCtx.HTML
 	}
 

@@ -116,14 +116,13 @@ type sharedGraphRun struct {
 func buildSharedGraph(t *testing.T, pages int) sharedGraphRun {
 	t.Helper()
 	root, cfg := sharedGraphProject(t, pages)
-	t.Chdir(root)
 	counter := newFileLoadCounter()
 	esbuildLoads.Store(counter)
 	defer esbuildLoads.Store(nil)
 	before := esbuildStatsSnapshot()
 	b := New(root, cfg)
 	start := time.Now()
-	out, err := captureOutput(b.BuildAll)
+	out, err := captureBuild(b)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("BuildAll with %d pages: %v\n%s", pages, err, out)

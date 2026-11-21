@@ -25,6 +25,7 @@ import (
 // KRATE_E2E_DOCS=1 because it builds the shell and the whole site (about a
 // minute), and it needs the JS packages built (pnpm build).
 func TestNativeDocsSiteE2E(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("KRATE_E2E_DOCS") != "1" {
 		t.Skip("set KRATE_E2E_DOCS=1 to run the docs-site acceptance test")
 	}

@@ -2,6 +2,7 @@ package build
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,7 +14,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
@@ -33,7 +33,8 @@ func requestFlash(r *http.Request) (string, flashPayload, bool) {
 	if err != nil || c.Value == "" {
 		return "", flashPayload{}, false
 	}
-	value, ok := verifyFlash(c.Value)
+	secret, _ := r.Context().Value(flashSecretKey{}).(string)
+	value, ok := verifyFlash(secret, c.Value)
 	if !ok {
 		return "", flashPayload{}, false
 	}
@@ -48,9 +49,17 @@ func requestFlash(r *http.Request) (string, flashPayload, bool) {
 	return value, p, true
 }
 
-// flashSecret is the per-process secret the action sidecar signs flash cookies
-// with ("" accepts unsigned cookies: tests and a sidecar run on its own).
-var flashSecret atomic.Value
+// flashSecretKey holds, in a request context, the secret the action sidecar of
+// the server the request reached signs flash cookies with ("" accepts unsigned
+// cookies: tests and a sidecar run on its own).
+type flashSecretKey struct{}
+
+// withFlashSecret gives the requests of a server its flash signing secret.
+func withFlashSecret(secret string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), flashSecretKey{}, secret)))
+	})
+}
 
 // flashSecretEnv names the variable that sets the flash signing key, shared by
 // every instance of a deployment (the portable handler reads the same one).
@@ -75,8 +84,7 @@ func signFlashValue(secret, payload string) string {
 // verifyFlash returns the payload part of a flash cookie value. When a secret
 // is configured the value must carry a valid signature, so a cookie planted by
 // another origin (a sibling subdomain) is ignored rather than shown.
-func verifyFlash(value string) (string, bool) {
-	secret, _ := flashSecret.Load().(string)
+func verifyFlash(secret, value string) (string, bool) {
 	payload, sig, signed := strings.Cut(value, ".")
 	if secret == "" {
 		return payload, true

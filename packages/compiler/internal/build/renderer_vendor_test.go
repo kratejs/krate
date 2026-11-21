@@ -46,6 +46,7 @@ func copyFixture(t *testing.T, src, dst string) {
 // comes from a Krate package that vendors its engine (krate.vendor), linked
 // into node_modules like a workspace package or installed as a copy.
 func TestRendererComponentAndVendorPackage(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"linked", "installed"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
@@ -68,7 +69,7 @@ func TestRendererComponentAndVendorPackage(t *testing.T) {
 			cfg.PagesDir = filepath.Join(root, "src", "pages")
 			cfg.OutDir = filepath.Join(root, "dist")
 			cfg.Minify = false
-			out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+			out, err := captureBuild(New(root, cfg))
 			if err != nil {
 				t.Fatalf("BuildAll: %v\n%s", err, out)
 			}
@@ -129,6 +130,7 @@ func TestRendererComponentAndVendorPackage(t *testing.T) {
 }
 
 func TestUsesSuspenseSkipsRendererChildren(t *testing.T) {
+	t.Parallel()
 	parse := func(src string) *ast.Program {
 		prog, errs := tsstrip.Parse("page.tsx", src, tsstrip.Options{})
 		if len(errs) > 0 {

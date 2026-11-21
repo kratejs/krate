@@ -89,6 +89,7 @@ func realReactClientProject(t *testing.T) (*Builder, string) {
 // "use client" parent. The parent is a real-React island as a whole, so the
 // Preact boundary path is never taken.
 func TestRealReactUseClientModule(t *testing.T) {
+	t.Parallel()
 	b, root := realReactClientProject(t)
 	if err := b.BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)

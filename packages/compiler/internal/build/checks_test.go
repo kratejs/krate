@@ -9,6 +9,7 @@ import (
 // TestBuildChecksFailOnError verifies a `checks` config makes BuildAll fail
 // when a page violates an error-severity rule.
 func TestBuildChecksFailOnError(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeTestFile(t, root, "src/pages/index.tsx", `export default function Page() {
   return <body><img src="/logo.png" /></body>;

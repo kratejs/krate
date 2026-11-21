@@ -12,6 +12,7 @@ import (
 // batched build prints each entry as a separate Stdin build would, and gives
 // it the same metafile inputs: the client chunk checks scan these outputs.
 func TestEsbuildBatchMatchesSeparateBuilds(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	write := func(rel, src string) {
 		p := filepath.Join(root, rel)
@@ -84,6 +85,7 @@ func TestEsbuildBatchMatchesSeparateBuilds(t *testing.T) {
 // batch, which changes how another entry that imports it is printed: the
 // batch flags that entry, and only it, so it is built on its own.
 func TestEsbuildBatchFlagsEntriesWrappedByOthers(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for name, src := range map[string]string{
 		"m.js":    "export const used = () => 'used-mark';\nexport const unused = () => 'unused-mark';\n",

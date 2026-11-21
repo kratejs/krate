@@ -60,6 +60,7 @@ func monorepoIncludes() map[string][]string {
 }
 
 func TestNodeTargetMirrorsOutputFileTracingRoot(t *testing.T) {
+	t.Parallel()
 	var top string
 	root, cfg := externalsProjectAt(t, monorepoFiles(), "apps/web", func(c *config.Config) {
 		top = filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(c.PagesDir))))
@@ -118,6 +119,7 @@ func TestNodeTargetMirrorsOutputFileTracingRoot(t *testing.T) {
 }
 
 func TestNodeTargetFlatLayoutWithoutTracingRoot(t *testing.T) {
+	t.Parallel()
 	root, cfg := externalsProjectAt(t, monorepoFiles(), "apps/web", func(c *config.Config) {
 		c.OutputFileTracingIncludes = map[string][]string{"*": {"public/**"}}
 	})
@@ -136,6 +138,7 @@ func TestNodeTargetFlatLayoutWithoutTracingRoot(t *testing.T) {
 }
 
 func TestOutputFileTracingRootMustContainProjectAndGlobs(t *testing.T) {
+	t.Parallel()
 	root, cfg := externalsProjectAt(t, monorepoFiles(), "apps/web", func(c *config.Config) {
 		c.OutputFileTracingRoot = filepath.Join(filepath.Dir(c.PagesDir), "pages")
 	})
@@ -150,6 +153,7 @@ func TestOutputFileTracingRootMustContainProjectAndGlobs(t *testing.T) {
 }
 
 func TestExpandProjectGlobPrunesUnreachableDirs(t *testing.T) {
+	t.Parallel()
 	if !canMatchPrefix([]string{"node_modules", ".pnpm", "a*", "x"}, []string{"node_modules", ".pnpm", "abc"}) {
 		t.Error("a matching prefix must be walked")
 	}

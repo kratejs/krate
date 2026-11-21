@@ -50,15 +50,13 @@ export default function ` + name + `({ n, children }: any) {
 func renderSplitSSR(t *testing.T, proj *Builder, combined bool) string {
 	t.Helper()
 	b := New(proj.Root, proj.Cfg)
-	old := combinedSSRModules
-	combinedSSRModules = combined
-	defer func() { combinedSSRModules = old }()
-	before := esbuildStatsSnapshot()
+	b.noCombinedSSR = !combined
+	before := esbuildCallsUnder(b.Root)
 	if err := b.BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
-	calls := esbuildStatsSince(before)
-	combinedCalls, separate := calls["(*clientSSRImpls).buildCombined"].n, calls["(*clientSSRImpls).buildOneOutput"].n
+	calls := esbuildCallsSince(b.Root, before)
+	combinedCalls, separate := calls["(*clientSSRImpls).buildCombined"], calls["(*clientSSRImpls).buildOneOutput"]
 	if combined && (combinedCalls != 1 || separate != 0) {
 		t.Errorf("want one combined server render build and no separate ones, got %d combined and %d separate", combinedCalls, separate)
 	}
@@ -86,6 +84,7 @@ func renderSplitSSR(t *testing.T, proj *Builder, combined bool) string {
 // at its own path, the module they share is emitted once in a chunk, and the
 // page renders the same HTML as with separate builds.
 func TestClientSSRModulesShareChunks(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	b, root := scProject(t, splitSSRFiles())
 	withPreact(t, root)
@@ -183,6 +182,7 @@ func distOutsideSSRModules(t *testing.T, root string) map[string]string {
 // fails, nothing of it is written, every module builds on its own, and the
 // error is the failing module's own, as with separate builds.
 func TestCombinedSSRFallsBackPerModule(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/lib/shared.ts":      "export const word = 'shared';\n",
 		"src/components/A.tsx":   "\"use client\";\nimport { word } from '../lib/shared';\nexport default function A() { return <p>a {word}</p>; }\n",
@@ -196,10 +196,10 @@ func TestCombinedSSRFallsBackPerModule(t *testing.T) {
 		cbs = append(cbs, ClientBoundary{ModuleID: clientModuleID(root, p), SourcePath: p, Exports: []string{"default"}})
 	}
 	impls := newClientSSRImpls(b.importResolver(), nil, root, b.Cfg.OutDir, nil, "")
-	before := esbuildStatsSnapshot()
+	before := esbuildCallsUnder(root)
 	impls.buildAll(cbs)
-	calls := esbuildStatsSince(before)
-	if n, m := calls["(*clientSSRImpls).buildCombined"].n, calls["(*clientSSRImpls).buildOneOutput"].n; n != 1 || m != 3 {
+	calls := esbuildCallsSince(root, before)
+	if n, m := calls["(*clientSSRImpls).buildCombined"], calls["(*clientSSRImpls).buildOneOutput"]; n != 1 || m != 3 {
 		t.Errorf("want one combined build and three separate ones after it failed, got %d and %d", n, m)
 	}
 	for _, cb := range cbs[:2] {

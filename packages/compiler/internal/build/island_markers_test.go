@@ -52,6 +52,7 @@ export default async function Home() {
 // two comments, with its props in the first, and no element: the parent's
 // children are the component's root nodes.
 func TestIslandMarkersLeaveNoElement(t *testing.T) {
+	t.Parallel()
 	ensureRuntimeDist(t)
 	b, root := scProject(t, islandMarkerFiles)
 	withPreact(t, root)
@@ -81,6 +82,7 @@ func TestIslandMarkersLeaveNoElement(t *testing.T) {
 }
 
 func TestBrowserIslandMarkers(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the island markers browser test")

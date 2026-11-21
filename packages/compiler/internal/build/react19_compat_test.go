@@ -23,6 +23,7 @@ export default function Counter() {
 // 1. Client APIs in build-time tiers fail the build.
 
 func TestBuildTimeTierRejectsClientAPIs(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		files   map[string]string
 		contain string

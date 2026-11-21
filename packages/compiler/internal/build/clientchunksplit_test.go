@@ -174,6 +174,7 @@ func candidateModules(cands map[string]bool) map[string]*bundler.CSSModuleInfo {
 // and its shared chunks above; a use the bounds do not decide checks the
 // chunk on its own.
 func TestClientChunkSplitBatchMatchesSeparateBuilds(t *testing.T) {
+	t.Parallel()
 	files := clientChunkSplitFiles()
 	b, root := scProject(t, files)
 	withPreact(t, root)
@@ -300,6 +301,7 @@ func TestClientChunkSplitBatchMatchesSeparateBuilds(t *testing.T) {
 // the batch prints the shared code once. The boundary with an import() is
 // built alone.
 func TestClientChunkSplitSharedChunksAreUpperBounds(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, clientChunkSplitFiles())
 	withPreact(t, root)
 	if err := b.BuildAll(); err != nil {
@@ -374,6 +376,7 @@ func TestClientChunkSplitSharedChunksAreUpperBounds(t *testing.T) {
 // render per request, so the CSS scan of client chunks, which runs for static
 // pages, does not apply to them.)
 func TestClientChunkSplitSiteOutputUnchanged(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
 	}
@@ -428,15 +431,13 @@ export default async function IconPage() {
 	cfg := b.Cfg
 	cfg.Minify = true
 	build := func(split bool) (map[string]string, *Builder) {
-		old := clientChunkSplit
-		clientChunkSplit = split
-		defer func() { clientChunkSplit = old }()
 		dist := filepath.Join(root, "dist")
 		if err := os.RemoveAll(dist); err != nil {
 			t.Fatal(err)
 		}
 		nb := New(root, cfg)
-		if out, err := captureOutput(nb.BuildAll); err != nil {
+		nb.noClientChunkSplit = !split
+		if out, err := captureBuild(nb); err != nil {
 			t.Fatalf("BuildAll split=%v: %v\n%s", split, err, out)
 		}
 		out := map[string]string{}
@@ -451,15 +452,15 @@ export default async function IconPage() {
 		})
 		return out, nb
 	}
-	before := esbuildStatsSnapshot()
+	before := esbuildCallsUnder(root)
 	split, sb := build(true)
-	calls := esbuildStatsSince(before)
+	calls := esbuildCallsSince(root, before)
 	unsplit, _ := build(false)
 	t.Logf("esbuild calls of the split build: %v", calls)
-	if calls["batch:(*Builder).runClientChunkBatchWith"].n == 0 {
+	if calls["batch:(*Builder).runClientChunkBatchWith"] == 0 {
 		t.Error("no client chunk check batch ran")
 	}
-	t.Logf("package boundaries checked on their own: %d", calls["batch:(*Builder).checkClientChunkAlone"].n)
+	t.Logf("package boundaries checked on their own: %d", calls["batch:(*Builder).checkClientChunkAlone"])
 	if len(unsplit) == 0 {
 		t.Fatal("the build wrote nothing")
 	}
@@ -498,6 +499,7 @@ export default async function IconPage() {
 // Boundaries that reach an import() are checked again together in an unsplit
 // batch, not each on its own, and get the results of separate builds.
 func TestClientChunkSplitRechecksLazyEntriesUnsplit(t *testing.T) {
+	t.Parallel()
 	files := clientChunkSplitFiles()
 	files["src/components/H.tsx"] = `"use client";
 import { widgetB } from "big-lib";
@@ -527,13 +529,13 @@ export default function H() {
 	for i, r := range set {
 		jobs[i] = &roundJob{input: r}
 	}
-	before := esbuildStatsSnapshot()
+	before := esbuildCallsUnder(root)
 	b.runClientChunkBatch(jobs)
-	calls := esbuildStatsSince(before)
-	if n := calls["(*Builder).buildClientChunk"].n; n != 0 {
+	calls := esbuildCallsSince(root, before)
+	if n := calls["(*Builder).buildClientChunk"]; n != 0 {
 		t.Errorf("%d boundaries were checked on their own, want the lazy ones rechecked in one unsplit batch: %v", n, calls)
 	}
-	if n := calls["batch:(*Builder).runClientChunkBatchWith"].n; n != 2 {
+	if n := calls["batch:(*Builder).runClientChunkBatchWith"]; n != 2 {
 		t.Errorf("want a split batch and one unsplit batch, got %d batches: %v", n, calls)
 	}
 	for i, j := range jobs {

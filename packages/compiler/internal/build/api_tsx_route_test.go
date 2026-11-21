@@ -14,6 +14,7 @@ import (
 // ImageResponse tree, migrated to src/api/og.tsx) is built and served, and its
 // JSX is the server element tree. It used to be skipped by the build.
 func TestAPIRouteTSX(t *testing.T) {
+	t.Parallel()
 	ensureRuntimeDist(t)
 	files := map[string]string{
 		"package.json": `{"name":"tsx-route","type":"module"}`,

@@ -142,6 +142,7 @@ func nativeStrings(v any) []string {
 }
 
 func TestNativeAppBuildsExample(t *testing.T) {
+	t.Parallel()
 	root := nativeExampleCopy(t)
 	b := newNativeBuilder(t, root)
 	// Cfg from the example's own config is not loaded here; the builder
@@ -324,6 +325,7 @@ func hasDiagCode(err error, code diag.Code) bool {
 }
 
 func TestNativeAppDeveloperToolsAreDevOnlyUnlessDebug(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		dev   bool

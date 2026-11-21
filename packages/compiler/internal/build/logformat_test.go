@@ -7,6 +7,7 @@ import (
 )
 
 func TestFormatRequestLineNeutralisesControlCharacters(t *testing.T) {
+	t.Parallel()
 	forged := "/\x1b[2J\n10:00:00 GET /forged 200 1ms"
 	for _, color := range []bool{false, true} {
 		line := formatRequestLine("GET", forged, 200, time.Millisecond, color)

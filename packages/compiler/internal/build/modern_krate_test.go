@@ -44,6 +44,7 @@ func buildKrateProject(t *testing.T, files map[string]string) (string, string, e
 // TestKrateModernOperators verifies exponentiation, shifts, and bitwise
 // operators parse and survive codegen in Krate-native handlers.
 func TestKrateModernOperators(t *testing.T) {
+	t.Parallel()
 	page := `
 		import { createSignal } from '@krate/runtime';
 		export default function Page() {

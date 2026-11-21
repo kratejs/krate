@@ -51,6 +51,7 @@ func shakenPlan(t *testing.T, refs map[string]bool, features []string, suspense,
 // calls and the runtime itself read from window, and the router API, but
 // not the other exports.
 func TestShakenRuntimeExposesReferencedNames(t *testing.T) {
+	t.Parallel()
 	in, load := shakenPlan(t, jsRefs(`createSignal(0); kbindText("a", () => 1);`), nil, false, false)
 	exposed := map[string]bool{}
 	for _, name := range in.Expose {
@@ -94,6 +95,7 @@ func TestShakenRuntimeExposesReferencedNames(t *testing.T) {
 // the build cannot see (an island, window[name]) gets every export of the
 // modules it ships.
 func TestShakenRuntimeUnknownCodeGetsEveryExport(t *testing.T) {
+	t.Parallel()
 	_, m := loadFeatureManifest(t)
 	in, _ := shakenPlan(t, map[string]bool{}, optionalRuntimeFeatures, true, true)
 	want := map[string]bool{}
@@ -136,6 +138,7 @@ func TestShakenRuntimeUnknownCodeGetsEveryExport(t *testing.T) {
 // after the other modules have assigned their exports, which it reads from
 // window when it loads.
 func TestShakenRuntimeSuspenseRunsLast(t *testing.T) {
+	t.Parallel()
 	in, _ := shakenPlan(t, map[string]bool{"__krateBoundary": true}, []string{"actions"}, true, false)
 	exposed := strings.Join(in.Expose, ",")
 	for _, name := range []string{"setActionTransitionRunner", "__krateBoundary", "krateCondActivity"} {
@@ -152,6 +155,7 @@ func TestShakenRuntimeSuspenseRunsLast(t *testing.T) {
 // TestShakenRuntimeHashIsStable checks that the runtime chunk depends only on
 // the references, not on their order or on an earlier build.
 func TestShakenRuntimeHashIsStable(t *testing.T) {
+	t.Parallel()
 	_, m := loadFeatureManifest(t)
 	if !runtimeModulesAvailable(&m) {
 		t.Skip("krate-features.json lists no runtime modules (rebuild @krate/runtime)")
@@ -179,6 +183,7 @@ func TestShakenRuntimeHashIsStable(t *testing.T) {
 // package, whose manifest lists no modules, or one missing a module, gets
 // the concatenated prebuilt pieces.
 func TestShakenRuntimeFallsBackToPrebuiltPieces(t *testing.T) {
+	t.Parallel()
 	repoRoot, m := loadFeatureManifest(t)
 	if !runtimeModulesAvailable(&m) {
 		t.Skip("krate-features.json lists no runtime modules (rebuild @krate/runtime)")
@@ -238,6 +243,7 @@ func TestShakenRuntimeFallsBackToPrebuiltPieces(t *testing.T) {
 }
 
 func TestGlobalReads(t *testing.T) {
+	t.Parallel()
 	src := `const g = globalThis;
 if (typeof g.disposeAll === 'function') g.disposeAll();
 const target = (api ?? globalThis);
@@ -259,6 +265,7 @@ obj.g.krateE;`
 }
 
 func TestScriptRefsFollowsUsedHelpers(t *testing.T) {
+	t.Parallel()
 	script := "window.kbindA=function(){kbindB();createSignal()};\n" +
 		"window.kbindB=function(){createEffect()};\n" +
 		"window.kbindC=function(){createMemo()};\n" +
@@ -324,6 +331,7 @@ export default function Page() {
 // public/ counts like page code: its references are defined, and a computed
 // global in it ships the full surface.
 func TestShakenRuntimeScansPublicScripts(t *testing.T) {
+	t.Parallel()
 	plain := buildShakeProject(t, map[string]string{
 		"src/pages/index.tsx": shakeCounterPage,
 		"public/app.js":       `createResource(() => 1); // createRoot in a comment does not count`,
@@ -345,6 +353,7 @@ func TestShakenRuntimeScansPublicScripts(t *testing.T) {
 
 // TestClientRuntimeExportsAll checks the clientRuntime.exports opt-out.
 func TestClientRuntimeExportsAll(t *testing.T) {
+	t.Parallel()
 	js := buildShakeProject(t, map[string]string{
 		"src/pages/index.tsx": strings.Replace(shakeCounterPage, `<script src="/app.js"></script>`, "", 1),
 	}, func(c *config.Config) { c.ClientRuntime.Exports = "all" })
@@ -356,6 +365,7 @@ func TestClientRuntimeExportsAll(t *testing.T) {
 }
 
 func TestScriptSitePath(t *testing.T) {
+	t.Parallel()
 	for _, c := range [][3]string{
 		{"index.html", "/app.js?v=1", "/app.js"},
 		{"docs/a/index.html", "lib/x.js#h", "/docs/a/lib/x.js"},

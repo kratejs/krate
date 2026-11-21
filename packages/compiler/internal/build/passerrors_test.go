@@ -15,6 +15,7 @@ import (
 // One build reports every failing pass: a server action validation error
 // (KR7004), a metadata route failure (KR7130) and a page that cannot bundle.
 func TestBuildReportsErrorsFromEveryPass(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
 		t.Skip("node is not installed")

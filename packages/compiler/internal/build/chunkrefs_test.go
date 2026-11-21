@@ -20,6 +20,7 @@ import (
 // importer directory, and the batched chunk checks (#37) are shared between
 // them. Every chunk a server bundle or page names must be written.
 func TestPackageBoundaryChunkSharedAcrossDirectories(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
 	}
@@ -66,12 +67,12 @@ export default async function Page() {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
 	b.Cfg.Minify = true
-	before := esbuildStatsSnapshot()
-	if out, err := captureOutput(b.BuildAll); err != nil {
+	before := esbuildCallsUnder(root)
+	if out, err := captureBuild(b); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
-	calls := esbuildStatsSince(before)
-	if calls["batch:(*Builder).runClientChunkBatchWith"].n == 0 {
+	calls := esbuildCallsSince(root, before)
+	if calls["batch:(*Builder).runClientChunkBatchWith"] == 0 {
 		t.Error("no client chunk check batch ran")
 	}
 	missing, err := findMissingChunkRefs(b.Cfg.OutDir, "", nil)
@@ -109,6 +110,7 @@ func iconTags(names []string) string {
 }
 
 func TestFindMissingChunkRefs(t *testing.T) {
+	t.Parallel()
 	out := t.TempDir()
 	write := func(rel, s string) {
 		p := filepath.Join(out, filepath.FromSlash(rel))
@@ -153,6 +155,7 @@ func TestFindMissingChunkRefs(t *testing.T) {
 }
 
 func TestCheckChunkRefsFailsBuild(t *testing.T) {
+	t.Parallel()
 	b, _ := scProject(t, map[string]string{"src/pages/index.tsx": `export default function Home() { return <p>hi</p>; }`})
 	dist := b.Cfg.OutDir
 	if err := os.MkdirAll(filepath.Join(dist, "chunks"), 0755); err != nil {

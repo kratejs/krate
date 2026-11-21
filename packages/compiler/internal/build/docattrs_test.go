@@ -25,15 +25,15 @@ func (docAttrsPlugin) Hooks() plugin.PluginHooks {
 // elements to headHTML sets the attributes of the document elements; the
 // page's own attribute of the same name wins.
 func TestPluginHooksSetDocumentAttributes(t *testing.T) {
-	saved := plugin.DefaultRegistry
-	plugin.DefaultRegistry = plugin.NewRegistry()
-	defer func() { plugin.DefaultRegistry = saved }()
-	if err := plugin.Register(docAttrsPlugin{}); err != nil {
+	t.Parallel()
+	reg := plugin.NewRegistry()
+	if err := reg.Add(docAttrsPlugin{}); err != nil {
 		t.Fatal(err)
 	}
 	b, root := scProject(t, map[string]string{
 		"src/pages/index.tsx": `export default function Home() { return <main><Head><html className="page" /></Head><h1>x</h1></main>; }`,
 	})
+	usePlugins(b, reg)
 	if err := b.BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
@@ -53,6 +53,7 @@ func TestPluginHooksSetDocumentAttributes(t *testing.T) {
 }
 
 func TestSplitDocTagsMergesAttributeByAttribute(t *testing.T) {
+	t.Parallel()
 	head := `<meta name="a" content="b"><html lang="fr" class="a"></html><html class="b"></html><body data-x="1"></body>`
 	rest, htmlA, body := splitDocTags(head, true)
 	if rest != `<meta name="a" content="b">` {
@@ -69,6 +70,7 @@ func TestSplitDocTagsMergesAttributeByAttribute(t *testing.T) {
 }
 
 func TestSetStartTagAttrsEscapesAndKeeps(t *testing.T) {
+	t.Parallel()
 	doc := `<!DOCTYPE html><html lang="en"><head></head><body class="x" data-a="1"><div id="root"></div></body></html>`
 	out := setStartTagAttrs(doc, "html", docAttrs{"class": `dark" onload="alert(1)`, "data-flag": ""})
 	if !strings.Contains(out, `<html class="dark&quot; onload=&quot;alert(1)" data-flag lang="en">`) {
@@ -84,6 +86,7 @@ func TestSetStartTagAttrsEscapesAndKeeps(t *testing.T) {
 }
 
 func TestAttrMapConfig(t *testing.T) {
+	t.Parallel()
 	var s config.SiteConfig
 	if err := (&s.HTMLAttributes).UnmarshalJSON([]byte(`{"class":"dark","data-n":3,"hidden":true,"x":false,"y":null}`)); err != nil {
 		t.Fatal(err)
@@ -102,6 +105,7 @@ func TestAttrMapConfig(t *testing.T) {
 // TestDocumentAttributesInPrerenderedPages: site config sets the base, a layout
 // and the page refine it from <Head>, and the page's lang export wins.
 func TestDocumentAttributesInPrerenderedPages(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/_layout.tsx": `export default function Layout({ children }: { children: any }) {
   return <div><Head><html lang="fr" className="dark" /><body className="font-sans" /></Head>{children}</div>;
@@ -141,6 +145,7 @@ export default function About() { return <h1>about</h1>; }`,
 // TestDocumentAttributesAtRequestTime: an async page sets <html> and <body>
 // attributes from data it awaits, and the response carries them.
 func TestDocumentAttributesAtRequestTime(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/theme.tsx": `export function Theme({ mode }: { mode: string }) {
   return <Head><html lang="fr" className={mode} /><body data-mode={mode} /></Head>;
@@ -180,6 +185,7 @@ export default async function Home() {
 // TestConfigDocAttrsUseJSXNames loads a real krate.config.ts, so the loader's
 // key handling is covered, and builds with JSX attribute names.
 func TestConfigDocAttrsUseJSXNames(t *testing.T) {
+	t.Parallel()
 	_, root := scProject(t, map[string]string{
 		"krate.config.ts":     `export default { site: { htmlAttributes: { className: 'dark', lang: 'en' }, bodyAttributes: { className: 'min-h-screen' } } };`,
 		"src/pages/index.tsx": `export default function Home() { return <h1>home</h1>; }`,
@@ -202,4 +208,10 @@ func TestConfigDocAttrsUseJSXNames(t *testing.T) {
 			t.Errorf("missing %q:\n%s", want, data)
 		}
 	}
+}
+
+// usePlugins makes b run the hooks of reg instead of the default registry.
+func usePlugins(b *Builder, reg *plugin.Registry) {
+	b.plugins = reg
+	b.diskCache.enabled = diskCacheEnabled(b.Cfg.Sourcemap, reg.HasPerPageHooks(), hasCommunityPlugins(b.Cfg))
 }

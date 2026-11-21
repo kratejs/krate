@@ -20,6 +20,7 @@ import (
 // or KRATE_ECOSYSTEM_INSTALL=1 to have the test run npm install (network).
 // It also needs KRATE_BROWSER like the other browser gates.
 func TestBrowserEcosystemLibraries(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -103,9 +104,7 @@ func TestBrowserEcosystemLibraries(t *testing.T) {
 	cfg.PagesDir = filepath.Join(root, "src", "pages")
 	cfg.OutDir = filepath.Join(root, "dist")
 	cfg.Minify = true
-	// The runtime bundle is found next to the working directory.
-	t.Chdir(root)
-	if _, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if _, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
 	// Pages under async layouts render per request, so they need the server.

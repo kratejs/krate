@@ -10,6 +10,7 @@ import (
 // TestReactiveHeadKeepsItsBindings: a <title> bound to state, hoisted from a
 // component, keeps the hydration marker its binding finds.
 func TestReactiveHeadKeepsItsBindings(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/index.tsx": `import { useState } from "react";
 function Inbox(props: { unread: number }) {
@@ -34,6 +35,7 @@ export default function Page() {
 }
 
 func TestInjectServerGlobalsSkipsBoundNames(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		src  string
 		want string
@@ -59,6 +61,7 @@ func TestInjectServerGlobalsSkipsBoundNames(t *testing.T) {
 }
 
 func TestDedupeHeadLastKeepsTheLastTagPerKey(t *testing.T) {
+	t.Parallel()
 	head := "<title>A</title>\n<meta name=\"description\" content=\"a\">\n<meta property=\"og:image\" content=\"1\">\n<title>B</title>\n<meta name=\"description\" content=\"b\">\n"
 	got := dedupeHeadLast(head)
 	want := "<meta property=\"og:image\" content=\"1\">\n<title>B</title>\n<meta name=\"description\" content=\"b\">\n"
@@ -71,6 +74,7 @@ func TestDedupeHeadLastKeepsTheLastTagPerKey(t *testing.T) {
 }
 
 func TestLiftIslandHead(t *testing.T) {
+	t.Parallel()
 	body, head := liftIslandHead(`<div><krate-head><title>T</title><krate-head><meta name="a" content="b"></krate-head></krate-head><p>x</p></div>`)
 	if body != `<div><p>x</p></div>` {
 		t.Errorf("body = %q", body)
@@ -85,6 +89,7 @@ func TestLiftIslandHead(t *testing.T) {
 // last <Head> of the page wins, as it does for request-time renders, and the
 // page wins over its layout.
 func TestHeadFromComponentsInPrerenderedPages(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/seo.tsx": `export function Seo({ title }: { title: string }) {
   return <Head><title>{title}</title><meta name="description" content="from seo" /></Head>;
@@ -131,6 +136,7 @@ export default function Home() {
 // report: a component inside <Head> that has state must not make the page load
 // the runtime and a hydration script, because its markup is not in the body.
 func TestSegmentPageHeadComponentShipsNoJS(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/tags.tsx": `import { createSignal } from "@krate/runtime";
 export function Tags({ desc }: { desc: string }) {
@@ -167,6 +173,7 @@ export default function NotFound() {
 // like any other component. The island renders on the server at build time,
 // its <Head> content goes to the document head and the island body has none.
 func TestHeadInReactIsland(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/seo-icon.tsx": `import { Check } from "lucide-react";
 export function SeoIcon({ title }: { title: string }) {
@@ -199,6 +206,7 @@ export default function Home() { return <main><SeoIcon title="Island title" /></
 // can use <Head> as a global or import it from @krate/runtime. Both used to
 // fail at request time (ReferenceError, then a missing export).
 func TestHeadAndTagGlobalsInServerComponents(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/seo.tsx": `export function Seo({ title }: { title: string }) {
   return <Head><title>{title}</title></Head>;
@@ -239,6 +247,7 @@ export default async function Home() {
 }
 
 func TestDedupeHeadKeepsMediaAndIconVariants(t *testing.T) {
+	t.Parallel()
 	head := `<meta name="theme-color" content="#fff" media="(prefers-color-scheme: light)">` + "\n" +
 		`<meta name="theme-color" content="#000" media="(prefers-color-scheme: dark)">` + "\n" +
 		`<link rel="icon" href="/a.svg" type="image/svg+xml">` + "\n" +
@@ -267,6 +276,7 @@ func TestDedupeHeadKeepsMediaAndIconVariants(t *testing.T) {
 }
 
 func TestHeadTagKeyIncludesMedia(t *testing.T) {
+	t.Parallel()
 	doc := `<head><meta name="theme-color" content="#fff" media="(prefers-color-scheme: light)"></head>`
 	got := mergeHeadSection(doc, "", `<meta name="theme-color" content="#000" media="(prefers-color-scheme: dark)">`)
 	if !strings.Contains(got, "#fff") || !strings.Contains(got, "#000") {

@@ -12,6 +12,7 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/deploy"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/jseval"
@@ -370,6 +371,17 @@ func jsString(s string) string {
 // under <out>/.krate/server. Nothing is imported at request time, so the
 // result runs on Node, Vercel, Netlify and Cloudflare Workers.
 func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.ServerPlan, error) {
+	return buildServerBundle(root, cfg, target, func(ds []diag.Diagnostic) { printWarningsOnce(os.Stderr, ds) })
+}
+
+// BuildServerBundle is BuildServerBundle for the project of b after its
+// build: the warnings go to b's writer, and one the build already printed
+// is not printed again.
+func (b *Builder) BuildServerBundle(target string) (*deploy.ServerPlan, error) {
+	return buildServerBundle(b.Root, b.Cfg, target, b.printWarningsOnce)
+}
+
+func buildServerBundle(root string, cfg *config.Config, target string, warn func([]diag.Diagnostic)) (*deploy.ServerPlan, error) {
 	if !IsServerTarget(target) {
 		return nil, fmt.Errorf("%q does not run the portable server (want one of: %s)", target, strings.Join(ServerTargets, ", "))
 	}
@@ -532,7 +544,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	for _, k := range apiKeys {
 		data.APIRoutes = append(data.APIRoutes, k)
 		if secs, warns := readAPIMaxDuration(keys[k]); secs > 0 || len(warns) > 0 {
-			printWarningsOnce(os.Stderr, warns)
+			warn(warns)
 			if secs > 0 {
 				if data.APIMaxDuration == nil {
 					data.APIMaxDuration = map[string]int{}

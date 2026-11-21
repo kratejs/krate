@@ -55,6 +55,7 @@ func relDeps(b *Builder, root, route string) []string {
 // Routes compiled together in batches get the artifacts, metadata and dev
 // dependencies they get compiled one at a time, nested routes included.
 func TestAPIRouteBatchMatchesSeparateBuilds(t *testing.T) {
+	t.Parallel()
 	for _, runtime := range []string{"", "node"} {
 		for _, sourcemap := range []bool{false, true} {
 			sepRoot, batRoot := t.TempDir(), t.TempDir()
@@ -129,6 +130,7 @@ func TestAPIRouteBatchMatchesSeparateBuilds(t *testing.T) {
 // building its routes one at a time, the error names the broken route, and
 // the other routes still get their artifacts.
 func TestAPIRouteBatchFallsBackOnBrokenRoute(t *testing.T) {
+	t.Parallel()
 	for _, runtime := range []string{"", "node"} {
 		root := t.TempDir()
 		b := nodeOnlyProject(t, root)
@@ -162,6 +164,7 @@ func TestAPIRouteBatchFallsBackOnBrokenRoute(t *testing.T) {
 }
 
 func TestSplitBatches(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		n, limit int
 		want     []int
@@ -186,6 +189,7 @@ func TestSplitBatches(t *testing.T) {
 // entry loads lazily (which wraps it) is not wrapped for the others, and each
 // entry keeps the code and imports of a separate build.
 func TestFileBatchWrapsPerEntry(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
 		"lib/shared.ts": "import { hostname } from \"node:os\";\nexport const used = () => 1;\nexport const unused = () => hostname();\n",
@@ -261,6 +265,7 @@ func relDepsOf(root, metafile string) []string {
 // QuickJS batch: the batch's routes build on their own, the error names the
 // route, and the others get the bundles separate builds give them.
 func TestAPIRouteQuickJSBatchFallsBack(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{
 		"src/api/a.ts":                        `export function GET() { return Response.json({ a: 1 }); }`,
 		"src/api/users/[id].ts":               "import { h } from \"../../lib/h\";\nexport function GET() { return Response.json({ h: h() }); }",

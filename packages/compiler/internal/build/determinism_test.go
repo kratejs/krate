@@ -11,6 +11,7 @@ import (
 // TestBuildIsDeterministic verifies two independent builds of the same sources
 // produce byte-identical output (stable content hashes, no map-order leakage).
 func TestBuildIsDeterministic(t *testing.T) {
+	t.Parallel()
 	const page = `
 import { createSignal } from '@krate/runtime';
 export default function Page() {

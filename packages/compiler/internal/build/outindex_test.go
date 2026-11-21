@@ -19,6 +19,7 @@ import (
 )
 
 func TestOutIndexProdVersusDev(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{
 		"index.html":       "<h1>home</h1>",
@@ -70,6 +71,7 @@ func TestOutIndexProdVersusDev(t *testing.T) {
 }
 
 func TestOutIndexISRWritesAndManifests(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{
 		"index.html":             "home",
@@ -105,6 +107,7 @@ func TestOutIndexISRWritesAndManifests(t *testing.T) {
 
 // The indexed file system must refuse exactly what hardenedDir refuses.
 func TestIndexedDirHardeningMatchesHardenedDir(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{
 		"index.html":            "home",
@@ -146,6 +149,7 @@ func TestIndexedDirHardeningMatchesHardenedDir(t *testing.T) {
 }
 
 func TestIndexedStaticServing(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := strings.Repeat("0123456789", 100)
 	writeTree(t, dir, map[string]string{"index.html": "<h1>home</h1>", "data.txt": body, "page/index.html": "page"})
@@ -230,6 +234,7 @@ func TestIndexedStaticServing(t *testing.T) {
 }
 
 func TestIndexedPrecompressed(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{
 		"app.js": "plain", "app.js.br": "BROTLI", "app.js.gz": "GZ", "only.css": "c", "only.css.gz": "GZCSS",
@@ -282,6 +287,7 @@ func TestIndexedPrecompressed(t *testing.T) {
 }
 
 func TestMiddlewareGateFileStatOnce(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mw := filepath.Join(dir, "middleware.js")
 	g := &middlewareGate{file: mw}
@@ -301,6 +307,7 @@ func TestMiddlewareGateFileStatOnce(t *testing.T) {
 // A response with no length that trickles must reach the client piece by piece
 // through the logging, gzip and deadline writers.
 func TestProxyStreamsIncrementally(t *testing.T) {
+	t.Parallel()
 	release := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
@@ -384,6 +391,7 @@ func startNodeSidecar(t *testing.T, routes map[string]string) (addr string) {
 // A complete response goes out with a Content-Length; a body still being
 // produced (any content type) keeps streaming.
 func TestNodeSidecarLengthAndStreaming(t *testing.T) {
+	t.Parallel()
 	addr := startNodeSidecar(t, map[string]string{
 		"json.js": `export function GET() { return Response.json({ ok: true, n: 42 }); }`,
 		"text.js": `export function GET() { return new Response("hello"); }`,

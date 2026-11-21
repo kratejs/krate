@@ -8,6 +8,7 @@ import (
 )
 
 func TestTailwindOffWarningPointsAtTheDirective(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeFileRel(t, root, "src/styles/globals.css", "body { margin: 0 }\n\n  @import 'tailwindcss';\n")
 	writeFileRel(t, root, "node_modules/x/other.css", "@import 'tailwindcss';\n")

@@ -33,7 +33,6 @@ func islandCycleProject(t *testing.T) (string, *config.Config) {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
 	realReactFixtureFrom(t, root, repo)
-	t.Chdir(root)
 	writeProjectFile(t, root, "src/lib/a.ts", `import { fromB, B } from './b';
 let count = 0;
 export function bump() { return ++count; }
@@ -86,11 +85,12 @@ export default function Page() { return <main><h1>home</h1><Scene /><Count /></m
 // real-React island both reach ships once, in one shared chunk, and is not
 // reported as bundled twice.
 func TestIslandCycleSharedAcrossFlavours(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
 	}
 	root, cfg := islandCycleProject(t)
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -121,6 +121,7 @@ func TestIslandCycleSharedAcrossFlavours(t *testing.T) {
 // of the shared cycle once (so they see 1 and 2), and the cycle ran in a
 // valid order.
 func TestBrowserIslandCycleShared(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -139,7 +140,7 @@ func TestBrowserIslandCycleShared(t *testing.T) {
 		t.Skip("cannot stop an in-process server on this platform")
 	}
 	root, cfg := islandCycleProject(t)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	base, err := startKrateServer(t, root, cfg)

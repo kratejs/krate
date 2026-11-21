@@ -27,6 +27,7 @@ func actionBatchFiles() map[string]string {
 
 // Action modules bundled in a batch get the files separate builds write.
 func TestActionBatchMatchesSeparateBuilds(t *testing.T) {
+	t.Parallel()
 	for _, sourcemap := range []bool{false, true} {
 		var trees [2]map[string][]byte
 		for k, separate := range []bool{false, true} {
@@ -72,6 +73,7 @@ func TestActionBatchMatchesSeparateBuilds(t *testing.T) {
 
 // A broken action module is reported on its own; the others still build.
 func TestActionBatchFallsBackOnBrokenModule(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	files := actionBatchFiles()
 	files["src/actions/broken.ts"] = "\"use server\";\nimport { x } from \"./missing\";\nexport async function bad() { return x; }\n"

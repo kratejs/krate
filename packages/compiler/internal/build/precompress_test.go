@@ -31,6 +31,7 @@ func writeAsset(t *testing.T, path, content string) {
 // (precompressed -> gzip -> http.FileServer) negotiates the sibling per
 // Accept-Encoding and serves the correct bytes.
 func TestPrecompressedLiveServer(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	home := "<!doctype html><html><body>" + strings.Repeat("home page content ", 200) + "</body></html>"
 	js := "export const x = 1;\n" + strings.Repeat("console.log('y');\n", 200)
@@ -129,6 +130,7 @@ func TestPrecompressedLiveServer(t *testing.T) {
 // Scripts and stylesheets are encoded at brotli's maximum level, other text at
 // level 10, unless the fallback level does better.
 func TestPrecompressTextBrotliLevels(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"a.js", "a.css", "a.mjs", "A.JS"} {
 		if got := brotliLevelFor(name); got != 11 {
 			t.Errorf("brotliLevelFor(%q) = %d, want 11", name, got)
@@ -166,7 +168,11 @@ func TestPrecompressTextBrotliLevels(t *testing.T) {
 			t.Errorf("%s.br has %d bytes, want %d", name, len(got), len(want))
 		}
 	}
-	// On real markup-like text the maximum level wins.
+}
+
+// On real markup-like text the maximum brotli level wins.
+func TestPrecompressMarkupMaxLevelWins(t *testing.T) {
+	t.Parallel()
 	doc, err := os.ReadFile("../../../../packages/web/src/content/docs/reference/config.md")
 	if err != nil {
 		t.Skip("docs not available")
@@ -188,6 +194,7 @@ func mustBrotli(t *testing.T, data []byte, level int) []byte {
 // A precompressed asset served through the gzip writer names Accept-Encoding
 // in Vary once.
 func TestAddVaryOnce(t *testing.T) {
+	t.Parallel()
 	h := http.Header{}
 	addVary(h, "Accept-Encoding")
 	addVary(h, "accept-encoding")
@@ -201,7 +208,7 @@ func TestAddVaryOnce(t *testing.T) {
 // A production build with an unset compress config writes both siblings; an
 // explicit false is honoured; a dev build writes none.
 func TestBuildPrecompressesByDefault(t *testing.T) {
-	defaultPrecompression(t)
+	t.Parallel()
 	siblings := func(mut func(*config.Config), dev bool) (br, gz bool) {
 		root, cfg := secProject(t)
 		cfg.Redirects = nil
@@ -210,6 +217,7 @@ func TestBuildPrecompressesByDefault(t *testing.T) {
 			mut(cfg)
 		}
 		b := New(root, cfg)
+		defaultPrecompression(b)
 		b.DevMode = dev
 		if err := b.BuildAll(); err != nil {
 			t.Fatalf("BuildAll: %v", err)

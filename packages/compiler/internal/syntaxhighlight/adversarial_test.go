@@ -32,6 +32,7 @@ var advLangs = map[string]bool{"ts": true, "markdown": true, "bash": true, "html
 // strings and comments, deep nesting, long words and lines. A regex that
 // backtracks catastrophically on any of them fails the test.
 func TestAdversarialInputs(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	needNode(t, root)
 	size := 20000

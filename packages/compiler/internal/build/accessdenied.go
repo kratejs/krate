@@ -1,7 +1,6 @@
 package build
 
 import (
-	"os"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -72,8 +71,8 @@ func warnStaticAccessDenied(file string, prog *ast.Program, source, where string
 	return &d
 }
 
-func printAccessDeniedWarning(d *diag.Diagnostic) {
+func (b *Builder) printAccessDeniedWarning(d *diag.Diagnostic) {
 	if d != nil {
-		printWarningsOnce(os.Stderr, []diag.Diagnostic{*d})
+		b.printWarningsOnce([]diag.Diagnostic{*d})
 	}
 }

@@ -41,6 +41,7 @@ const compatSrc = `export default function P(){const v=createCSSChoice('a',['a',
 const shimMarker = "window.__krateHasShim"
 
 func TestCompatLegacyEmitsShimAndClassCSS(t *testing.T) {
+	t.Parallel()
 	html, outDir := buildCompatSrc(t, compatSrc, func(c *config.Config) { c.Compat.Mode = "legacy" })
 	if !strings.Contains(html, shimMarker) {
 		t.Errorf("legacy mode should inject the shim:\n%.1200s", html)

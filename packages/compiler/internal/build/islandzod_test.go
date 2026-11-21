@@ -41,7 +41,6 @@ func zodIslandProject(t *testing.T, both bool) (string, *config.Config) {
 		t.Skipf("cannot link zod: %v", err)
 	}
 	realReactFixtureFrom(t, root, repo)
-	t.Chdir(root)
 	writeProjectFile(t, root, "node_modules/countlib/package.json", `{"name":"countlib","version":"1.0.0","main":"index.js","peerDependencies":{"react":"^19.0.0"}}`)
 	writeProjectFile(t, root, "node_modules/countlib/index.js", `import { useEffect, useState } from 'react';
 export function useOnce(fn) {
@@ -92,6 +91,7 @@ export default function Page() { return <main><h1>home</h1><Name /><Scene /></ma
 // locales and a zod chunk under 40 kB gzipped, whether zod is bundled into
 // the island or shared between both kinds of island.
 func TestIslandZodTreeShaken(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
 	}
@@ -102,7 +102,7 @@ func TestIslandZodTreeShaken(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			root, cfg := zodIslandProject(t, both)
-			out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+			out, err := captureBuild(New(root, cfg))
 			if err != nil {
 				t.Fatalf("BuildAll: %v\n%s", err, out)
 			}
@@ -142,6 +142,7 @@ func TestIslandZodTreeShaken(t *testing.T) {
 // TestBrowserIslandZod: the tree-shaken zod still validates in both kinds of
 // island.
 func TestBrowserIslandZod(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -160,7 +161,7 @@ func TestBrowserIslandZod(t *testing.T) {
 		t.Skip("cannot stop an in-process server on this platform")
 	}
 	root, cfg := zodIslandProject(t, true)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	base, err := startKrateServer(t, root, cfg)

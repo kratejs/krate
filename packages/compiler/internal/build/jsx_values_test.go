@@ -12,6 +12,7 @@ import (
 )
 
 func TestLocalJSXConstantsAndJSXProps(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		files map[string]string
 		want  []string
@@ -157,6 +158,7 @@ export default function Page() {
 }
 
 func TestJSXHeldInConstPassedAsProp(t *testing.T) {
+	t.Parallel()
 	html, _, err := buildKrateProject(t, map[string]string{
 		"src/components/LegalDoc.tsx": `export default function LegalDoc({ title, sections }: { title: string; sections: { id: string; heading: string; body: any }[] }) {
   return (
@@ -203,6 +205,7 @@ export default function Terms() {
 // (KRATE_BROWSER checks Probe flips to the mounted value and the receiver's
 // own state still works).
 func TestStatefulComponentPassedAsJSXProp(t *testing.T) {
+	t.Parallel()
 	repoRoot, err := repoRootPath()
 	if err != nil {
 		t.Fatal(err)

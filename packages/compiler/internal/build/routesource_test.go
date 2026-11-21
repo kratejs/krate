@@ -10,6 +10,7 @@ import (
 )
 
 func TestMergeRequestQuery(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name, dest, raw, want string
 	}{
@@ -33,6 +34,7 @@ func TestMergeRequestQuery(t *testing.T) {
 }
 
 func TestRewriteDestinationNextSyntax(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name, path, source, dest, want string
 	}{
@@ -91,6 +93,7 @@ func do(h http.Handler, method, target string, hdr map[string]string) *httptest.
 }
 
 func TestConfigRedirectsLikeNext(t *testing.T) {
+	t.Parallel()
 	h := configRedirectMiddleware(ddRedirects(), okHandler())
 	tests := []struct {
 		target string
@@ -124,6 +127,7 @@ func TestConfigRedirectsLikeNext(t *testing.T) {
 }
 
 func TestConfigRedirectStatusCodes(t *testing.T) {
+	t.Parallel()
 	rules := []config.Redirect{
 		{Source: "/a", Destination: "/x"},
 		{Source: "/b", Destination: "/x", Permanent: true},
@@ -140,6 +144,7 @@ func TestConfigRedirectStatusCodes(t *testing.T) {
 }
 
 func TestConfigRedirectHasMissing(t *testing.T) {
+	t.Parallel()
 	rules := []config.Redirect{
 		{Source: "/app", Destination: "/new/:org", StatusCode: 307, Has: []config.RouteCondition{{Type: "host", Value: "(?P<org>[a-z]+)\\.example\\.com"}}},
 		{Source: "/gate", Destination: "/login", StatusCode: 307, Missing: []config.RouteCondition{{Type: "cookie", Key: "session"}}},
@@ -174,6 +179,7 @@ func TestConfigRedirectHasMissing(t *testing.T) {
 // The redirect layer sits in front of the handler it wraps, so it answers
 // before a middleware gate that refuses everything and also for /api.
 func TestConfigRedirectRunsBeforeInnerAndOnAPI(t *testing.T) {
+	t.Parallel()
 	deny := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	})
@@ -194,6 +200,7 @@ func TestConfigRedirectRunsBeforeInnerAndOnAPI(t *testing.T) {
 }
 
 func TestConfigRedirectOpenRedirectProtection(t *testing.T) {
+	t.Parallel()
 	rules := []config.Redirect{
 		{Source: "/u/:name", Destination: "/:name"},
 		{Source: "/docs/:path*", Destination: "/documentation/:path*"},
@@ -231,6 +238,7 @@ func TestConfigRedirectOpenRedirectProtection(t *testing.T) {
 }
 
 func TestCustomHeadersWinOverHandlerHeaders(t *testing.T) {
+	t.Parallel()
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/_hashed/") {
 			w.Header().Set("Cache-Control", immutableCacheControl)
@@ -307,6 +315,7 @@ func TestCustomHeadersWinOverHandlerHeaders(t *testing.T) {
 }
 
 func TestCustomHeadersApplyToRedirectsAndErrors(t *testing.T) {
+	t.Parallel()
 	rules := []config.HeaderRule{{Source: "/:path*", Headers: map[string]string{"X-Rule": "1"}}}
 	h := customHeadersMiddleware(rules, configRedirectMiddleware(ddRedirects(), http.NotFoundHandler()))
 	if w := do(h, "GET", "/store/foo", nil); w.Code != 308 || w.Header().Get("X-Rule") != "1" {

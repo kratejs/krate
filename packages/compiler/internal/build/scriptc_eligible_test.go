@@ -14,6 +14,7 @@ import (
 // Each use of something the scriptc server lacks is found with its position,
 // in the route or in a local module it imports.
 func TestScriptcRouteFindings(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		files map[string]string
@@ -68,6 +69,7 @@ func TestScriptcRouteFindings(t *testing.T) {
 }
 
 func TestScriptcRouteFindingCleanRoute(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	files := map[string]string{
 		"src/api/r.ts":     "import { greet } from '../lib/greet';\nimport { createHash } from 'node:crypto';\nexport function GET(request: Request) {\n  const u = new URL(request.url);\n  const c = request.headers.get('cookie');\n  return Response.json({ g: greet(u.searchParams.get('n') ?? 'x'), c });\n}",
@@ -149,6 +151,7 @@ func TestScriptcFindingsAreErrorsWhenStrict(t *testing.T) {
 // TestScriptcRouteFindingFollowsPathAliases checks that the scan reaches a
 // capability imported through a tsconfig path alias.
 func TestScriptcRouteFindingFollowsPathAliases(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	files := map[string]string{
 		"src/api/r.ts":       "import { who } from '@/lib/session';\nexport function GET() { return Response.json({ who: who() }); }",

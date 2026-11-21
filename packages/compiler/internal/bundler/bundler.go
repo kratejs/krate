@@ -1006,10 +1006,6 @@ func (b *Bundler) CheckCompositionRules() error {
 	return nil
 }
 
-// KrateRoot is the absolute path to the krate compiler's root directory.
-// Set by the build system at startup to enable virtual package resolution.
-var KrateRoot string
-
 // ResolveImport resolves an import path to an absolute file path. Exported for
 // consumers (e.g. the annotator's import-binding resolution) that need the same
 // relative/node_modules/index resolution rules the bundler applies.

@@ -20,6 +20,7 @@ func pageModeFor(t *testing.T, files map[string]string) RenderMode {
 }
 
 func TestClientNoStoreFetchKeepsPageStatic(t *testing.T) {
+	t.Parallel()
 	mode := pageModeFor(t, map[string]string{
 		"src/pages/index.tsx": `import { Live } from "../components/live";
 export default function Home() {
@@ -40,6 +41,7 @@ export function Live() {
 }
 
 func TestServerNoStoreFetchStillMakesPageSSR(t *testing.T) {
+	t.Parallel()
 	mode := pageModeFor(t, map[string]string{
 		"src/pages/index.tsx": `import { load } from "../lib/data";
 export default function Home() {
@@ -54,6 +56,7 @@ export default function Home() {
 }
 
 func TestServerReachableModulesStopsAtUseClient(t *testing.T) {
+	t.Parallel()
 	entry := &bundler.Module{Path: "/p/index.tsx", Imports: []string{"./c"}}
 	client := &bundler.Module{Path: "/p/c.tsx", SourceCode: "\"use client\";\n", Imports: []string{"./lib"}}
 	lib := &bundler.Module{Path: "/p/lib.ts"}

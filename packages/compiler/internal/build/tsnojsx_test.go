@@ -13,6 +13,7 @@ import (
 // project root must never be parsed as JSX: `c.default < c.min` is a
 // comparison, not a tag.
 func TestWorkspaceTSFileIsNotParsedAsJSX(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	root := filepath.Join(base, "app")
 	pkg := filepath.Join(base, "packages", "builder-core")

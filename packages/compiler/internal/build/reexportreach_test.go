@@ -35,6 +35,7 @@ func reachesReExportByWalk(texts map[string]string, entry string) bool {
 // on random graphs with cycles, names that are prefixes of other names
 // ("x1.js" in "x1.jsx"), self references and stray "./" text.
 func TestReachesReExportMatchesWalk(t *testing.T) {
+	t.Parallel()
 	rng := rand.New(rand.NewSource(1))
 	for round := 0; round < 300; round++ {
 		n := 1 + rng.Intn(14)

@@ -75,13 +75,14 @@ export default async function Page() {
 // provider's context, and the adopted children survive the provider's
 // re-renders and a hide/show.
 func TestIslandPropsShipOnce(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	b, root, big := islandPropsProject(t)
 	withPreact(t, root)
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+	if out, err := captureBuild(b); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	base, err := startKrateServer(t, root, b.Cfg)

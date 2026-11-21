@@ -29,6 +29,7 @@ var tagRe = regexp.MustCompile(`<!--/?k:[^>]*-->| data-k(attr-[a-z-]+)?=[^ >]+`)
 func visibleHTML(html string) string { return tagRe.ReplaceAllString(html, "") }
 
 func TestContextReact19ProviderAndConsumer(t *testing.T) {
+	t.Parallel()
 	html, outDir := buildCompatSrc(t, `import { createContext, useContext, useState } from "react";
 const Density = createContext("comfortable");
 const Auth = createContext({ user: null as string | null });

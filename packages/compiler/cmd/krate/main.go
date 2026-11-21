@@ -1029,7 +1029,7 @@ func runDeploy(flags cliFlags, args []string) {
 	dopts := deploy.Options{StaticOnly: flags.StaticOnly}
 	if deploy.WantsServer(target, deploy.ServerFeatures(root, cfg.OutDir), flags.StaticOnly) {
 		fmt.Printf("%s%s  Bundling the server for %s%s\n", cBold, cCyan, target, cReset)
-		plan, err := build.BuildServerBundle(root, cfg, target)
+		plan, err := builder.BuildServerBundle(target)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%sDeploy error:%s %v\n", cRed, cReset, err)
 			exit(1)

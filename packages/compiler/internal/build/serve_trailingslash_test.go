@@ -16,6 +16,7 @@ import (
 // static pages and request-time pages follow the same URL form, and the
 // not-found page's own URLs answer 404 in every mode.
 func TestServeTrailingSlashModes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		mode string
 		want map[string][2]interface{}
@@ -91,6 +92,7 @@ func TestServeTrailingSlashModes(t *testing.T) {
 }
 
 func TestSlashlessTarget(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		method, url, want string
 	}{

@@ -1,7 +1,6 @@
 package build
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,7 @@ import (
 // Links to pages another app serves on the same domain (the marketing site at
 // "/" while Krate runs under "/app") opt out of the base path and the router.
 func TestBasePathOutsideLinks(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/index.tsx": `export default function Home() {
   return (
@@ -25,16 +25,7 @@ func TestBasePathOutsideLinks(t *testing.T) {
 	})
 	b.Cfg.BasePath = "/app"
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldErr := os.Stderr
-	os.Stderr = w
-	buildErr := b.BuildAll()
-	os.Stderr = oldErr
-	_ = w.Close()
-	logs, _ := io.ReadAll(r)
+	logs, buildErr := captureBuild(b)
 	if buildErr != nil {
 		t.Fatalf("BuildAll: %v", buildErr)
 	}
@@ -71,6 +62,7 @@ func TestBasePathOutsideLinks(t *testing.T) {
 // An @import of a missing local stylesheet fails the build with its position;
 // a remote @import still passes through.
 func TestMissingCSSImportFailsBuild(t *testing.T) {
+	t.Parallel()
 	b, _ := scProject(t, map[string]string{
 		"src/pages/index.tsx": `import "../styles.css";
 export default function Home() { return <main>x</main>; }`,

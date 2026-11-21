@@ -11,6 +11,7 @@ import (
 // handler, not the page handler. The Next.js migrator relies on this to keep
 // the public URL of route handlers that live outside app/api.
 func TestServeRewriteToAPIRoute(t *testing.T) {
+	t.Parallel()
 	root, cfg := secProject(t)
 	cfg.Redirects = nil
 	cfg.Rewrites = []config.Rewrite{

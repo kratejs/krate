@@ -90,7 +90,12 @@ type Result struct {
 // executable path, or "" for QuickJS. preferred lists the project's runtime
 // settings in priority order; node and bun among them win.
 func Select(preferred ...string) (name, path string) {
-	return selectWith(exec.LookPath, os.Getenv(EnvVar), preferred...)
+	return SelectEngine(os.Getenv(EnvVar), preferred...)
+}
+
+// SelectEngine is Select with engine in place of the KRATE_BUILD_JS value.
+func SelectEngine(engine string, preferred ...string) (name, path string) {
+	return selectWith(exec.LookPath, engine, preferred...)
 }
 
 func selectWith(look func(string) (string, error), env string, preferred ...string) (string, string) {

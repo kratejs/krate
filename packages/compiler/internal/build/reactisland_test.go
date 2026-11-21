@@ -100,6 +100,7 @@ func writeProjectFile(t *testing.T, root, rel, src string) {
 // React library runs as a Preact island (rendered on the server, hydrated in
 // place) instead of crashing in the browser.
 func TestReactHookLibraryPageIsland(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	reactLibFixture(t, root)
@@ -114,7 +115,7 @@ func TestReactHookLibraryPageIsland(t *testing.T) {
 			return <button id="b" onClick={inc}>{label} {n}</button>;
 		}
 	`)
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}

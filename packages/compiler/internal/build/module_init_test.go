@@ -15,6 +15,7 @@ import (
 // static modules are left out, and a statement reading a binding that cannot
 // be brought into the page script is reported.
 func TestModuleSetupStatementsReplay(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeProjectFile(t, root, "node_modules/plug/package.json", `{"name":"plug","version":"1.0.0","type":"module","main":"index.js"}`)
 	writeProjectFile(t, root, "node_modules/plug/index.js", `
@@ -73,7 +74,7 @@ func TestModuleSetupStatementsReplay(t *testing.T) {
 	cfg.PagesDir = filepath.Join(root, "src", "pages")
 	cfg.OutDir = filepath.Join(root, "dist")
 	cfg.Minify = false
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}

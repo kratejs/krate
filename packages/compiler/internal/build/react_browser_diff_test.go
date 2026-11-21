@@ -2,9 +2,9 @@ package build
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -258,32 +258,22 @@ func rbFilter(t *testing.T, fixtures []rbFixture) ([]rbFixture, bool) {
 	return out, true
 }
 
-// captureOutput runs fn with os.Stdout and os.Stderr redirected and returns
-// what was written. Build warnings are printed, not returned, so this is how
-// the harness sees diagnostic codes. Tests in this package do not run in
-// parallel, so swapping the globals is safe.
-func captureOutput(fn func() error) (string, error) {
-	r, w, err := os.Pipe()
-	if err != nil {
-		return "", fn()
-	}
-	oldOut, oldErr := os.Stdout, os.Stderr
-	os.Stdout, os.Stderr = w, w
-	done := make(chan string, 1)
-	go func() {
-		b, _ := io.ReadAll(r)
-		done <- string(b)
-	}()
-	func() {
-		defer func() {
-			os.Stdout, os.Stderr = oldOut, oldErr
-		}()
-		err = fn()
-	}()
-	w.Close()
-	out := <-done
-	r.Close()
-	return out, err
+// captureBuild runs b.BuildAll and returns the warnings it printed. Build
+// warnings are printed, not returned, so this is how the harness sees
+// diagnostic codes; SetStderr keeps them apart from concurrent builds.
+func captureBuild(b *Builder) (string, error) {
+	logs := builderStderr(b)
+	err := b.BuildAll()
+	b.SetStderr(nil)
+	return logs(), err
+}
+
+// builderStderr collects the warnings of b's builds from now on; the
+// returned function reads what was collected.
+func builderStderr(b *Builder) func() string {
+	var buf syncBuffer
+	b.SetStderr(&buf)
+	return buf.String
 }
 
 // buildKrateFixture builds fx as the index page of a fresh project under
@@ -316,7 +306,7 @@ func buildKrateFixture(fx rbFixture, projDir, outDir, basePath string) (*config.
 	cfg.BasePath = basePath
 	b := New(projDir, cfg)
 	b.shareAllScopes = os.Getenv("KRATE_REACTBROWSER_SHARED") != ""
-	out, err := captureOutput(func() error { return b.BuildAll() })
+	out, err := captureBuild(b)
 	return cfg, out, err
 }
 
@@ -597,6 +587,7 @@ func compareSides(r rbResult) (string, string) {
 // TestReactBrowserDifferential runs the corpus in a real browser against
 // React 19. Requires KRATE_BROWSER (like TestBrowserConformance).
 func TestReactBrowserDifferential(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the React browser differential")
@@ -869,8 +860,7 @@ func provideRuntime(t *testing.T, work string) {
 
 // startKrateServer serves a built project in-process with the real Krate
 // server (static pages, server actions through the Node sidecar) and returns
-// its base URL. The server is stopped when the test binary signals itself at
-// cleanup; see stopInProcessServers.
+// its base URL. The server is stopped at cleanup; see serveInProcess.
 //
 // freePort only probes its ports, so another process (or an outgoing
 // connection given an ephemeral port, as macOS does from the same range) can
@@ -893,10 +883,7 @@ func startKrateServer(t *testing.T, root string, cfg *config.Config) (string, er
 func startKrateServerOn(t *testing.T, root string, cfg *config.Config, port int) (string, error) {
 	t.Helper()
 	cfg.Server.Port = port
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- Serve(root, cfg, time.Now())
-	}()
+	errCh := serveInProcess(t, func(ctx context.Context) error { return ServeContext(ctx, root, cfg, time.Now()) })
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
@@ -909,9 +896,6 @@ func startKrateServerOn(t *testing.T, root string, cfg *config.Config, port int)
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode < 500 {
-				// Serve installs its signal handler before it answers HTTP, so
-				// signaling at cleanup cannot kill the test binary.
-				registerServerStop(t, errCh)
 				break
 			}
 		}

@@ -14,6 +14,7 @@ import (
 // React package, read usePathname() as a string and useSearchParams() as a
 // URLSearchParams, and follow client-side navigation.
 func TestRouterHooksInClientComponentsReturnValues(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the router hooks browser test")

@@ -49,6 +49,7 @@ func readRouteMetas(t *testing.T, root string) map[string]apiRouteMeta {
 }
 
 func TestAPIRouteNodeBuiltinIsNodeOnly(t *testing.T) {
+	t.Parallel()
 	b, root := compatProject(t, map[string]string{
 		"src/api/hash.ts": `import { createHash } from "node:crypto";
 export function GET() {

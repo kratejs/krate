@@ -28,7 +28,7 @@ func (b *Builder) warnTailwindOff(file, found string) {
 	if file == "" {
 		file, line, col = b.findTailwindDirective(found)
 	}
-	printWarningsOnce(os.Stderr, []diag.Diagnostic{{
+	b.printWarningsOnce([]diag.Diagnostic{{
 		File:     file,
 		Line:     line,
 		Col:      col,

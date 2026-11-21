@@ -11,6 +11,7 @@ import (
 // server-only helper lazily imports a Node module. No client component reaches
 // the helper, so the lazy import must not become a browser chunk.
 func TestServerOnlyLazyImportIsNotABrowserChunk(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/server/queues.ts": `import { createHash } from "node:crypto";
 import { EventEmitter } from "events";
@@ -33,7 +34,7 @@ export default async function Home() {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	out, err := captureOutput(b.BuildAll)
+	out, err := captureBuild(b)
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -47,6 +48,7 @@ export default async function Home() {
 // that imports it is "use client" (Next.js semantics), so an async page that
 // renders those client components builds instead of reporting KR8013.
 func TestDirectivelessHookModuleBehindClientBoundaryBuilds(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"node_modules/fake-hooks/package.json": `{"name":"fake-hooks","version":"1.0.0","main":"index.js","peerDependencies":{"react":"*"}}`,
 		"node_modules/fake-hooks/index.js": `import React from 'react';
@@ -66,7 +68,7 @@ export default async function Home() {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	out, err := captureOutput(b.BuildAll)
+	out, err := captureBuild(b)
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -76,6 +78,7 @@ export default async function Home() {
 // Node, so a package that ships a `browser` entry (one that throws without a
 // window, like node-abort-controller) must load its Node entry.
 func TestMetadataClosureLoadsNodeEntryOfPackages(t *testing.T) {
+	t.Parallel()
 	b, root := hooksProject(t, map[string]string{
 		"node_modules/dual-entry/package.json": `{"name":"dual-entry","version":"1.0.0","main":"index.js","browser":"browser.js"}`,
 		"node_modules/dual-entry/index.js":     `module.exports = { origin: function () { return "https://node.example"; } };`,
@@ -87,7 +90,7 @@ export const metadata = { metadataBase: siteOrigin(), title: "Site", openGraph: 
 export default function L({ children }: any) { return <div>{children}</div>; }`,
 		"src/pages/index.tsx": `export default function Home() { return <p>home</p>; }`,
 	})
-	logs := captureStderrFile(t)
+	logs := builderStderr(b)
 	if err := b.BuildAll(); err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +107,7 @@ export default function L({ children }: any) { return <div>{children}</div>; }`,
 // through its real path and through a symlink is one module, so its exports do
 // not clash with themselves (KR7116).
 func TestExportClashIgnoresOneFileUnderTwoPaths(t *testing.T) {
+	t.Parallel()
 	b, root := hooksProject(t, map[string]string{
 		"src/real/lib.ts": `export const X = 1;
 export function twice(n: number) { return n * 2; }`,
@@ -117,7 +121,7 @@ export default function Home() { return <p>{X + Y + Object.keys(all).length}</p>
 	if err := os.Symlink(filepath.Join(root, "src", "real"), filepath.Join(root, "src", "link")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	logs := captureStderrFile(t)
+	logs := builderStderr(b)
 	if err := b.BuildAll(); err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +135,7 @@ export default function Home() { return <p>{X + Y + Object.keys(all).length}</p>
 // paths (one inside the root, one outside). The two files are identical, so
 // whichever the page keeps behaves the same and nothing is reported (KR7116).
 func TestExportClashTwoCheckoutsOfOnePackage(t *testing.T) {
+	t.Parallel()
 	const lib = `export const SHARED_MAX = 10;
 export function twice(n: number) { return n * 2; }`
 	outside := t.TempDir()
@@ -149,7 +154,7 @@ export default function Home() { return <p>{SHARED_MAX + OTHER + Object.keys(all
 	if err := os.Symlink(outside, filepath.Join(root, "src", "other")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	logs := captureStderrFile(t)
+	logs := builderStderr(b)
 	if err := b.BuildAll(); err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +167,7 @@ export default function Home() { return <p>{SHARED_MAX + OTHER + Object.keys(all
 // name that export the same name are reported with their project-relative
 // paths, so the warning says which two files clash.
 func TestExportClashNamesProjectRelativeFiles(t *testing.T) {
+	t.Parallel()
 	b, _ := hooksProject(t, map[string]string{
 		"src/a/settings.ts": `export const LIMIT = 1;`,
 		"src/b/settings.ts": `export const LIMIT = 2;`,
@@ -172,7 +178,7 @@ import { LIMIT as OTHER } from "../b/settings";
 import * as all from "../barrel";
 export default function Home() { return <p>{LIMIT + OTHER + Object.keys(all).length}</p>; }`,
 	})
-	logs := captureStderrFile(t)
+	logs := builderStderr(b)
 	if err := b.BuildAll(); err != nil {
 		t.Fatal(err)
 	}
@@ -185,6 +191,7 @@ export default function Home() { return <p>{LIMIT + OTHER + Object.keys(all).len
 // TestExportClashIgnoresReexportedImport: `import { X } from "./m"; export { X }`
 // declares no X, so a module that re-exports m's X does not clash with m (KR7116).
 func TestExportClashIgnoresReexportedImport(t *testing.T) {
+	t.Parallel()
 	b, _ := hooksProject(t, map[string]string{
 		"src/maybe-link.tsx": `export function MaybeLink() { return <a>x</a>; }`,
 		"src/controls.tsx": `"use client";
@@ -194,7 +201,7 @@ export { MaybeLink };`,
 		"src/pages/index.tsx": `import { Controls, MaybeLink } from "../controls";
 export default function Home() { return <p><MaybeLink /><Controls /></p>; }`,
 	})
-	logs := captureStderrFile(t)
+	logs := builderStderr(b)
 	if err := b.BuildAll(); err != nil {
 		t.Fatal(err)
 	}

@@ -27,6 +27,7 @@ func executableInlineScripts(html string) []string {
 }
 
 func TestRuntimeHeadConfigBlock(t *testing.T) {
+	t.Parallel()
 	newBuilder := func(mutate func(*config.Config)) *Builder {
 		cfg := config.Default()
 		mutate(cfg)
@@ -73,6 +74,7 @@ func TestRuntimeHeadConfigBlock(t *testing.T) {
 // prerendered and request-time pages carry no executable inline script, so
 // `script-src 'self'` lets them work.
 func TestBuiltPagesRunUnderStrictScriptSrc(t *testing.T) {
+	t.Parallel()
 	root, cfg := serverlessProject(t, "serverless")
 	for _, rel := range []string{"index.html", "about/index.html", "ssr/index.html", "404.html"} {
 		data, err := os.ReadFile(filepath.Join(cfg.OutDir, filepath.FromSlash(rel)))

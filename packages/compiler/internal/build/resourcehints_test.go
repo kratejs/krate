@@ -35,7 +35,6 @@ func resourceHintsProject(t *testing.T) (string, *config.Config) {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
 	realReactFixtureFrom(t, root, repo)
-	t.Chdir(root)
 	writeProjectFile(t, root, "public/x.wasm", "\x00asm\x01\x00\x00\x00")
 	writeProjectFile(t, root, "public/img/a.png", "\x89PNG\r\n\x1a\n")
 	// Hooks from an npm package built on React make a module a Preact island.
@@ -156,7 +155,7 @@ func serveResourceHints(t *testing.T) string {
 		t.Skip("cannot stop an in-process server on this platform")
 	}
 	root, cfg := resourceHintsProject(t)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	base, err := startKrateServer(t, root, cfg)
@@ -204,6 +203,7 @@ func serveResourceHints(t *testing.T) string {
 // async page. Several components and calls preloading the same file give one
 // link.
 func TestResourceHintsServerHTML(t *testing.T) {
+	t.Parallel()
 	serveResourceHints(t)
 }
 
@@ -212,6 +212,7 @@ func TestResourceHintsServerHTML(t *testing.T) {
 // preload of the server HTML, and the preload() calls of the Preact and
 // real-React components in the browser add nothing. Requires KRATE_BROWSER.
 func TestBrowserResourceHints(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")

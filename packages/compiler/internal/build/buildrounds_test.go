@@ -10,6 +10,7 @@ import (
 // Pages that wait on jobs get them run together once every page waits, each
 // job once, and a page waiting on another page's job shares its result.
 func TestBuildRoundsBatchesJobsAcrossPages(t *testing.T) {
+	t.Parallel()
 	const pages = 20
 	pool := newWorkerPool(4)
 	r := newBuildRounds(pages, pool)
@@ -65,6 +66,7 @@ func TestBuildRoundsBatchesJobsAcrossPages(t *testing.T) {
 // A page that finishes without waiting does not hold up a round, and a page
 // waiting on a job queued in an earlier round resumes when it ran.
 func TestBuildRoundsPagesThatNeverWait(t *testing.T) {
+	t.Parallel()
 	pool := newWorkerPool(2)
 	r := newBuildRounds(3, pool)
 	var reg roundJobs
@@ -106,6 +108,7 @@ func TestBuildRoundsPagesThatNeverWait(t *testing.T) {
 // Without rounds (a dev rebuild of one page) jobs run at once, and a job two
 // callers share still runs once.
 func TestBuildRoundsNilRunsInline(t *testing.T) {
+	t.Parallel()
 	var reg roundJobs
 	var runs atomic.Int32
 	run := func(jobs []*roundJob) {
@@ -136,6 +139,7 @@ func TestBuildRoundsNilRunsInline(t *testing.T) {
 // Pages waiting for a job another page computes itself (an async layout's
 // part) count as waiting, so the rounds the owner waits on still start.
 func TestBuildRoundsOwnedJobWaitersDoNotBlockRounds(t *testing.T) {
+	t.Parallel()
 	const pages = 8
 	pool := newWorkerPool(3)
 	r := newBuildRounds(pages, pool)

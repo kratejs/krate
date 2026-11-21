@@ -44,6 +44,7 @@ func TestScaffoldedTemplatesBuildAndTypecheck(t *testing.T) {
 	}
 	for _, tpl := range templates {
 		t.Run(tpl.name, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			copyFixtureTree(t, filepath.Join(repo, "packages", tpl.dir), root)
 			if err := os.Rename(filepath.Join(root, "gitignore"), filepath.Join(root, ".gitignore")); err != nil && !os.IsNotExist(err) {
@@ -66,13 +67,12 @@ func TestScaffoldedTemplatesBuildAndTypecheck(t *testing.T) {
 			symlink(t, tsc[0], filepath.Join(nm, "typescript"))
 			symlink(t, filepath.Join(repo, "packages", "runtime"), filepath.Join(root, "packages", "runtime"))
 
-			config.Warnings = nil
-			cfg, err := config.Load(root)
+			cfg, warnings, err := config.LoadWithWarnings(root, config.LoadOptions{})
 			if err != nil {
 				t.Fatalf("config.Load: %v", err)
 			}
 			cfg.Resolve(root)
-			for _, w := range config.Warnings {
+			for _, w := range warnings {
 				t.Errorf("config warning on a fresh scaffold: %s", w)
 			}
 			if err := New(root, cfg).BuildAll(); err != nil {

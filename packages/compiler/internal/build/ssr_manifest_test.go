@@ -25,6 +25,7 @@ func writeServerManifest(t *testing.T, out, content string) string {
 // A corrupt server manifest stops startup instead of being read as "no SSR
 // pages", which would serve the frozen build HTML.
 func TestServeRefusesCorruptServerManifest(t *testing.T) {
+	t.Parallel()
 	root, out := guardProject(t, false, "false")
 	p := writeServerManifest(t, out, `{"pages": [`)
 	cfg := config.Default()

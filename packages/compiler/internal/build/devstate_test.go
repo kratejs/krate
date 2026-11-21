@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 )
 
 func TestDevServerPublishesStateAndDiscoveryRecord(t *testing.T) {
+	t.Parallel()
 	root, cfg := secProject(t)
 	cfg.Compress = config.CompressOff()
 	cfg.Redirects = nil
@@ -26,17 +28,14 @@ func TestDevServerPublishesStateAndDiscoveryRecord(t *testing.T) {
 	cfg.Server.Port = port
 	hub := NewDevHub()
 	hub.Publish(DevEvent{Type: "reload", Diagnostics: []diag.Diagnostic{{File: "src/pages/x.tsx", Line: 2, Message: "broken", Code: "KR7115"}}})
-	errCh := make(chan error, 1)
-	go func() { errCh <- ServeDev(root, cfg, hub, time.Now()) }()
-	base := fmt.Sprintf("http://127.0.0.1:%d", port)
-
 	// Registered first so it runs after the server has been stopped.
 	t.Cleanup(func() {
-		// registerServerStop cannot stop the server on Windows.
 		if _, ok := ReadDevServerRecord(root); ok && runtime.GOOS != "windows" {
 			t.Error("the discovery record must be removed when the dev server stops")
 		}
 	})
+	errCh := serveInProcess(t, func(ctx context.Context) error { return ServeDevContext(ctx, root, cfg, hub, time.Now()) })
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		if time.Now().After(deadline) {
@@ -49,7 +48,6 @@ func TestDevServerPublishesStateAndDiscoveryRecord(t *testing.T) {
 		}
 		if resp, err := http.Get(base + "/"); err == nil {
 			_ = resp.Body.Close()
-			registerServerStop(t, errCh)
 			break
 		}
 		time.Sleep(100 * time.Millisecond)

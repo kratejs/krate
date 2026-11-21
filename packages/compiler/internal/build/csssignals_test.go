@@ -35,6 +35,7 @@ func buildPageSrc(t *testing.T, src string) (string, string, error) {
 // TestBuildCSSSignalsZeroJS verifies the createCSSChoice transform end-to-end:
 // radios, labels, and panels are emitted with no client hydration JS.
 func TestBuildCSSSignalsZeroJS(t *testing.T) {
+	t.Parallel()
 	src := `export default function Tabs() {
 	const [tab, setTab] = createCSSChoice('overview');
 	return (

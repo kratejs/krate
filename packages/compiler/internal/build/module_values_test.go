@@ -9,6 +9,7 @@ import (
 )
 
 func TestHelperCallWithSignalArgIsNotDropped(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{
 		"src/pages/index.tsx": `
 import { createSignal } from "@krate/runtime";
@@ -37,7 +38,7 @@ func envProject(t *testing.T, env map[string]string, page string) (string, strin
 	cfg.Minify = false
 	b := New(root, cfg)
 	b.Env = env
-	out, err := captureOutput(func() error { return b.BuildAll() })
+	out, err := captureBuild(b)
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -84,6 +85,7 @@ export default function Page() {
 }
 
 func TestNonPublicEnvReadIsDiagnosedAndSafe(t *testing.T) {
+	t.Parallel()
 	html, js, out := envProject(t, map[string]string{"SECRET_TOKEN": "do-not-leak-1234"}, `
 import { createSignal } from "@krate/runtime";
 export default function Page() {

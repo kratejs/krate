@@ -8,6 +8,7 @@ import (
 )
 
 func TestSliceModuleKeepsTheClosureOnly(t *testing.T) {
+	t.Parallel()
 	write := func(src string) string {
 		p := filepath.Join(t.TempDir(), "page.tsx")
 		if err := os.WriteFile(p, []byte(src), 0o644); err != nil {

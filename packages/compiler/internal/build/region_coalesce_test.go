@@ -189,6 +189,7 @@ func TestStreamSiblingFailedRegionKeepsFallback(t *testing.T) {
 }
 
 func TestStreamSiblingUnreachableRendererStillCompletes(t *testing.T) {
+	t.Parallel()
 	absOut := t.TempDir()
 	writeRoute(t, absOut, "/live", coalesceShell)
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
@@ -205,6 +206,7 @@ func TestStreamSiblingUnreachableRendererStillCompletes(t *testing.T) {
 }
 
 func TestStreamOrderedRegionsFlushOnce(t *testing.T) {
+	t.Parallel()
 	absOut := t.TempDir()
 	writeRoute(t, absOut, "/live", coalesceShell)
 	port := startDelayedSidecar(t, []delayedFrame{
@@ -230,6 +232,7 @@ func TestStreamOrderedRegionsFlushOnce(t *testing.T) {
 }
 
 func TestGzipFlushWithoutNewBytesIsFree(t *testing.T) {
+	t.Parallel()
 	var plain, twice bytes.Buffer
 	run := func(dst *bytes.Buffer, extraFlushes int) {
 		h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

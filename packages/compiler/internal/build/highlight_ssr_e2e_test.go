@@ -32,6 +32,7 @@ export default function P() {
 // the browser), line marking included, and that an unsupported language falls
 // back to plain text.
 func TestSSRCodeHighlightingE2E(t *testing.T) {
+	t.Parallel()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		requireE2E(t, "node not available: %v", err)
@@ -46,7 +47,6 @@ func TestSSRCodeHighlightingE2E(t *testing.T) {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
-	t.Chdir(root)
 	cfg := config.Default()
 	cfg.PagesDir = filepath.Join(root, "src", "pages")
 	cfg.OutDir = filepath.Join(root, "dist")
@@ -56,7 +56,7 @@ func TestSSRCodeHighlightingE2E(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cfg.OutDir, ".krate", "highlight.json")); err != nil {
 		t.Fatalf("the build wrote no highlight tables for the server page: %v", err)
 	}
-	staged := stageServerRenderer(repoRoot, cfg.OutDir)
+	staged := stageServerRenderer(os.Stderr, repoRoot, cfg.OutDir)
 	if staged == "" {
 		t.Fatal("stageServerRenderer returned an empty path")
 	}

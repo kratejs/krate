@@ -22,6 +22,7 @@ import (
 //   - the runtime-tier component comes back as a krate-go marker, which the Go
 //     host then renders (with the request context forwarded).
 func TestGoComponentSSRPageE2E(t *testing.T) {
+	t.Parallel()
 	ensureRuntimeDist(t)
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -64,7 +65,7 @@ func TestGoComponentSSRPageE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	staged := stageServerRenderer(repoRoot, outDir)
+	staged := stageServerRenderer(os.Stderr, repoRoot, outDir)
 	if staged == "" {
 		t.Fatal("stageServerRenderer returned empty path")
 	}
@@ -124,6 +125,7 @@ func TestGoComponentSSRPageE2E(t *testing.T) {
 // cached per whole request, and none of them ever serves one visitor's render
 // to another.
 func TestGoComponentRegionCacheVariesOnWhatItReadsE2E(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("go"); err != nil {
 		requireE2E(t, "go toolchain not available: %v", err)
 	}

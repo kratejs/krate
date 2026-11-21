@@ -81,12 +81,16 @@ func setupIslandProject(t *testing.T, root string, withPreact bool) *config.Conf
 	cfg.PagesDir = pagesDir
 	cfg.OutDir = filepath.Join(root, "dist")
 	cfg.Minify = false
+	// Resolve the remaining paths (public/, the entry) against the project,
+	// as config.Load does; left relative they follow the working directory.
+	cfg.Resolve(root)
 	return cfg
 }
 
 // TestIslandSignalPropBridge verifies that a page-scope signal is evaluated in
 // the page, published to the island boot values, and passed as a prop.
 func TestIslandSignalPropBridge(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	if err := New(root, cfg).BuildAll(); err != nil {
@@ -141,6 +145,7 @@ func TestIslandSignalPropBridge(t *testing.T) {
 // TestIslandLocalComponent verifies a local React-compatible component used
 // inside an external subtree is bundled into that island and server-rendered.
 func TestIslandLocalComponent(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	pagesDir := filepath.Join(root, "src", "pages")
@@ -190,6 +195,7 @@ func TestIslandLocalComponent(t *testing.T) {
 }
 
 func TestIslandSSREscapesTextProps(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	page := `

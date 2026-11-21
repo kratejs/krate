@@ -58,11 +58,6 @@ func newClientSSRImpls(res *bundler.ImportResolver, results []*PageResult, root,
 	return impls
 }
 
-// shareServerBundleWork lets the page server bundles of a run share their
-// package resolutions and the sources their plugins derive from project
-// files. Tests turn it off to build every page as if it were alone.
-var shareServerBundleWork = true
-
 // compileServerBundlesWith is compileServerBundles with the server render
 // modules built by impls, which a caller may have prebuilt.
 func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
@@ -83,7 +78,10 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 	// it is left to esbuild again in its resolve.
 	serverMemo := newNativeResolveMemo()
 	files := &serverBundleFiles{}
-	if !shareServerBundleWork {
+	// The page bundles of a run share their package resolutions and the
+	// sources their plugins derive from project files, unless a test builds
+	// every page as if it were alone.
+	if impls.shareless {
 		serverMemo, files = nil, nil
 	}
 	var fatal []error

@@ -14,6 +14,7 @@ import (
 // calls redirect(): the SPA router must swap the page without page errors,
 // for both a plain function action and a useActionState dispatch.
 func TestServerActionRedirectInBrowser(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the action redirect e2e")

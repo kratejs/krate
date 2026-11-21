@@ -26,20 +26,21 @@ func newGate(t *testing.T, code string, dev bool) *middlewareGate {
 }
 
 func TestForwardedHeadersMiddlewareStripsSpoofing(t *testing.T) {
+	t.Parallel()
 	var got http.Header
 	capture := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = r.Header.Clone() })
 	r := httptest.NewRequest("GET", "http://svc/", nil)
 	r.RemoteAddr = "203.0.113.7:4000"
 	r.Header.Set("X-Forwarded-For", "1.2.3.4")
 	r.Header.Set("X-Real-IP", "1.2.3.4")
-	forwardedHeadersMiddleware(false, capture).ServeHTTP(httptest.NewRecorder(), r)
+	forwardedHeadersMiddleware(false, 0, capture).ServeHTTP(httptest.NewRecorder(), r)
 	if got.Get("X-Forwarded-For") != "203.0.113.7" || got.Get("X-Real-IP") != "" {
 		t.Errorf("untrusted: XFF=%q X-Real-IP=%q", got.Get("X-Forwarded-For"), got.Get("X-Real-IP"))
 	}
 	r = httptest.NewRequest("GET", "http://svc/", nil)
 	r.RemoteAddr = "10.0.0.9:4000"
 	r.Header.Set("X-Forwarded-For", "1.2.3.4")
-	forwardedHeadersMiddleware(true, capture).ServeHTTP(httptest.NewRecorder(), r)
+	forwardedHeadersMiddleware(true, 0, capture).ServeHTTP(httptest.NewRecorder(), r)
 	if got.Get("X-Forwarded-For") != "1.2.3.4, 10.0.0.9" {
 		t.Errorf("trusted: XFF=%q", got.Get("X-Forwarded-For"))
 	}
@@ -48,6 +49,7 @@ func TestForwardedHeadersMiddlewareStripsSpoofing(t *testing.T) {
 // A matcher-less middleware must not be skipped just because the URL ends in a
 // static extension: API routes and missing files still go through it.
 func TestMiddlewareGateStaticExtensionBypass(t *testing.T) {
+	t.Parallel()
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "secret") })
 	g := newGate(t, `export function middleware(request) { return new Response("denied", { status: 401 }); }`, false)
 	g.staticExists = func(p string) bool { return p == "/real.pdf" }
@@ -72,6 +74,7 @@ func TestMiddlewareGateStaticExtensionBypass(t *testing.T) {
 }
 
 func TestMiddlewareCompletionValueIsDiscarded(t *testing.T) {
+	t.Parallel()
 	g := newGate(t, `
 export function middleware(request) {
   return new Response("teapot", { status: 418 });

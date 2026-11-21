@@ -59,6 +59,7 @@ func postRevalidate(t *testing.T, h *revalidateHost, secret, body string) (int, 
 }
 
 func TestRevalidateHostAuth(t *testing.T) {
+	t.Parallel()
 	h := newTestRevalidateHost(t)
 	if !strings.HasPrefix(h.url, "http://127.0.0.1:") {
 		t.Fatalf("internal endpoint must be loopback-only, got %s", h.url)
@@ -94,6 +95,7 @@ func TestRevalidateHostAuth(t *testing.T) {
 }
 
 func TestSSRInternalProxyLockdown(t *testing.T) {
+	t.Parallel()
 	h := newTestRevalidateHost(t)
 	var hits []string
 	var mu sync.Mutex

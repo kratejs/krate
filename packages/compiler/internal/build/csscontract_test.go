@@ -9,6 +9,7 @@ import (
 // roles: controller types, label wiring, zero-JS pages, and the no-:has()
 // fallback.
 func TestCSSSignalContract(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name         string
 		src          string

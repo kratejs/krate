@@ -23,7 +23,7 @@ var (
 // pipeline: they are neither minified nor content-hashed.
 func (b *Builder) warnPublicStylesheets(doc string) {
 	if ds := b.publicStylesheetWarnings(doc); len(ds) > 0 {
-		printTreeWarnings(os.Stderr, ds)
+		printTreeWarnings(b.stderr(), ds)
 	}
 }
 

@@ -1,7 +1,6 @@
 package build
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,18 +30,9 @@ func buildFiles(t *testing.T, files map[string]string, tweak func(*config.Config
 	if tweak != nil {
 		tweak(cfg)
 	}
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	orig := os.Stderr
-	os.Stderr = w
-	berr := New(root, cfg).BuildAll()
-	os.Stderr = orig
-	_ = w.Close()
-	logged, _ := io.ReadAll(r)
+	logged, berr := captureBuild(New(root, cfg))
 	if berr != nil {
 		t.Fatalf("BuildAll: %v\n%s", berr, logged)
 	}
-	return root, cfg.OutDir, string(logged)
+	return root, cfg.OutDir, logged
 }

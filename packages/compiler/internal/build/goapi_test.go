@@ -53,6 +53,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 `
 
 func TestGoAPISidecarServesRequests(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}

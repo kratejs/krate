@@ -47,9 +47,27 @@ const realHintsMergedGlobal = "__krate_real_hints_all"
 // realHintNames are the react-dom exports the hints render records.
 var realHintNames = []string{"preload", "preinit", "preconnect", "prefetchDNS", "preloadModule", "preinitModule"}
 
-// realHintsCache holds the tags of each hints bundle, by its content, so pages
-// that share a real-React component render it once.
-var realHintsCache sync.Map
+// realHintsState is a builder's hints bookkeeping: cache holds the tags of
+// each hints bundle, by its content, so pages that share a real-React
+// component render it once; runs counts the runtimes hints renders ran in and
+// nanos sums their time; mergeOff runs every render alone, as
+// KRATE_NO_HINTS_MERGE does.
+type realHintsState struct {
+	cache       sync.Map
+	runs, nanos atomic.Int64
+	mergeOff    bool
+}
+
+// hints returns the builder's hints state (a Builder made without New gets a
+// fresh one).
+func (b *Builder) hints() *realHintsState {
+	b.hintsOnce.Do(func() {
+		if b.hintsSt == nil {
+			b.hintsSt = &realHintsState{}
+		}
+	})
+	return b.hintsSt
+}
 
 // realIslandHintsJob returns the job rendering the resource hints of a static
 // page's real-React island with its build-time props.
@@ -196,7 +214,9 @@ func (b *Builder) runRealHintsJobs(jobs []*roundJob) {
 // realHintsBatchSize is the most hints renders one esbuild call bundles.
 const realHintsBatchSize = 16
 
-func realHintsMergeOff() bool { return os.Getenv("KRATE_NO_HINTS_MERGE") != "" }
+func (b *Builder) realHintsMergeOff() bool {
+	return b.hints().mergeOff || os.Getenv("KRATE_NO_HINTS_MERGE") != ""
+}
 
 // runRealHintsMerged runs the renders of jobs in one runtime, from one
 // bundle that holds react-dom/server and the modules the renders share
@@ -209,7 +229,7 @@ func realHintsMergeOff() bool { return os.Getenv("KRATE_NO_HINTS_MERGE") != "" }
 // reads; a component that changes module state while it renders, in a way a
 // later render reads back, is the case this does not reproduce.
 func (b *Builder) runRealHintsMerged(opts api.BuildOptions, server string, jobs []*roundJob) []*roundJob {
-	if realHintsMergeOff() || len(jobs) < 2 {
+	if b.realHintsMergeOff() || len(jobs) < 2 {
 		return jobs
 	}
 	var entry strings.Builder
@@ -280,7 +300,7 @@ const realHintsMergedRead = `JSON.stringify(globalThis.` + realHintsMergedGlobal
 // the tags of each render that finished (nil for the others).
 func (b *Builder) runRealHintsMergedCode(code string, n int) (out []*[]string) {
 	out = make([]*[]string, n)
-	defer timeRealHints(time.Now())
+	defer b.timeRealHints(time.Now())
 	// A render that throws past its own catch stops the run: the renders
 	// after it have no result and run alone.
 	if res, ok := b.workerScript("real-hints", code, []string{realHintsMergedRead}); ok {
@@ -400,11 +420,12 @@ func (b *Builder) realHintsCode(opts api.BuildOptions, prelude string, r realHin
 // realHintsTags runs a bundled hints render, once per distinct bundle.
 func (b *Builder) realHintsTags(code string) []string {
 	key := hashContent([]byte(code))
-	if v, ok := realHintsCache.Load(key); ok {
+	cache := &b.hints().cache
+	if v, ok := cache.Load(key); ok {
 		return v.([]string)
 	}
 	tags := b.runRealHints(code)
-	realHintsCache.Store(key, tags)
+	cache.Store(key, tags)
 	return tags
 }
 
@@ -413,20 +434,17 @@ func statOK(p string) bool {
 	return err == nil
 }
 
-// realHintsRuns counts the runtimes hints renders ran in and
-// realHintsNanos sums their time.
-var realHintsRuns, realHintsNanos atomic.Int64
-
-func timeRealHints(start time.Time) {
-	realHintsRuns.Add(1)
-	realHintsNanos.Add(int64(time.Since(start)))
+func (b *Builder) timeRealHints(start time.Time) {
+	h := b.hints()
+	h.runs.Add(1)
+	h.nanos.Add(int64(time.Since(start)))
 }
 
 // realHintsRead reads the tags of a render that ran alone.
 const realHintsRead = `typeof globalThis.` + realHintsResultGlobal + ` === "string" ? globalThis.` + realHintsResultGlobal + ` : null`
 
 func (b *Builder) runRealHints(code string) []string {
-	defer timeRealHints(time.Now())
+	defer b.timeRealHints(time.Now())
 	if res, ok := b.workerScript("real-hints", code, []string{realHintsRead}); ok {
 		if res.Threw || !res.Reads[0].IsString {
 			return nil

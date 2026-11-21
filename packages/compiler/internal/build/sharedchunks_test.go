@@ -108,6 +108,7 @@ func (s *sharedSite) pageJS(t *testing.T, page string) string {
 }
 
 func TestSharedChunksHoldImportedComponentsOnce(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	site := buildSharedSite(t, root, map[string]string{
 		"src/components/Nav.tsx": sharedNav,
@@ -155,6 +156,7 @@ func TestSharedChunksHoldImportedComponentsOnce(t *testing.T) {
 // Page data never reaches the shared chunk, so editing it keeps the chunk's
 // name; only the page whose data changed gets a new page script.
 func TestSharedChunkNameIgnoresPageData(t *testing.T) {
+	t.Parallel()
 	build := func(labelsB ...string) (*sharedSite, string) {
 		root := t.TempDir()
 		site := buildSharedSite(t, root, map[string]string{
@@ -181,6 +183,7 @@ func TestSharedChunkNameIgnoresPageData(t *testing.T) {
 // template of a component only one page imports goes into that page's
 // script; a component defined in the page module stays inline.
 func TestSharedChunkInstancesAndPacking(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	site := buildSharedSite(t, root, map[string]string{
 		"src/components/Nav.tsx": sharedNav,
@@ -234,6 +237,7 @@ export default function Page() {
 
 // sharedChunks: false keeps every component scope in the page script.
 func TestSharedChunksOff(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	provideRuntime(t, root)
 	off := false

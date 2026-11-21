@@ -48,6 +48,7 @@ func realReactAsyncFiles(t *testing.T, root string) {
 // placeholder, never renders it with Preact, and the chunk it points at holds
 // real React.
 func TestRealReactInAsyncPages(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, nil)
 	withPreact(t, root)
 	realReactFixture(t, root)

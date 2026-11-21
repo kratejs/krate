@@ -181,8 +181,9 @@ func buildRealReactSite(t *testing.T) (*config.Config, string) {
 // that uses it, and the Preact alias is not applied inside it. A Preact island
 // on another page keeps the alias.
 func TestRealReactIsland(t *testing.T) {
+	t.Parallel()
 	cfg, root := buildRealReactSite(t)
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -271,6 +272,7 @@ func TestRealReactIsland(t *testing.T) {
 // TestRealReactConfigPackage: a package listed in react.islands runs on real
 // React even when it does not depend on a reconciler.
 func TestRealReactConfigPackage(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	realReactFixture(t, root)
@@ -278,7 +280,7 @@ func TestRealReactConfigPackage(t *testing.T) {
 		`{"name":"fake-canvas","version":"1.0.0","main":"index.js","peerDependencies":{"react":"^19.0.0"}}`)
 	realReactSceneFiles(t, root)
 	cfg.React.Islands = []string{"fake-canvas"}
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -296,6 +298,7 @@ func TestRealReactConfigPackage(t *testing.T) {
 // without declaring it (here through a wrapper package) cannot run on Preact;
 // the build says how to fix it instead of shipping a broken island.
 func TestReconcilerLibraryOnPreactIsland(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	realReactFixture(t, root)
@@ -310,7 +313,7 @@ func TestReconcilerLibraryOnPreactIsland(t *testing.T) {
 		import { Wrapped } from 'wrap-canvas';
 		export default function Page() { return <main><Wrapped id="cv" width={20} height={20} /></main>; }
 	`)
-	_, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	_, err := captureBuild(New(root, cfg))
 	if err == nil || !strings.Contains(err.Error(), "react: { islands:") {
 		t.Fatalf("want a build error that names react.islands, got %v", err)
 	}
@@ -368,11 +371,12 @@ export default function Page() { return <main><Scene /></main>; }
 // the action endpoint (its body and the lazily imported queue module stay on
 // the server), and a genuine built-in use still fails at its real position.
 func TestRealReactIslandServerOnlyCode(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	realReactFixture(t, root)
 	realReactServerOnlyFiles(t, root)
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -402,7 +406,7 @@ export default function Scene() {
 	return <Canvas id="cv" width={20} height={20}><Rect x={0} y={0} w={5} h={5} fill={keyOf('a')} /></Canvas>;
 }
 `)
-	_, err = captureOutput(func() error { return New(root, cfg).BuildAll() })
+	_, err = captureBuild(New(root, cfg))
 	if err == nil {
 		t.Fatal("a real-React island that calls a Node built-in must fail the build")
 	}

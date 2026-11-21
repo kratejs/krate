@@ -13,6 +13,7 @@ import (
 // action. One that captures a value in a prerendered page, or any inline
 // action in a "use client" module, is KR7001.
 func TestInlineServerActionStaticPage(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/account.tsx": `export default function Account() {
   return <main>

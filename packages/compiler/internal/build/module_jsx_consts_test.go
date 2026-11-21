@@ -6,6 +6,7 @@ import (
 )
 
 func TestModuleJSXConstants(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		files map[string]string
 		want  []string

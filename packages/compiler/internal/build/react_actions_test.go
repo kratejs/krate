@@ -45,6 +45,7 @@ export async function save(fd: FormData) { return { ok: true }; }
 }
 
 func TestReactActionFormsCompile(t *testing.T) {
+	t.Parallel()
 	html, js := buildActionsFixture(t, `import { useActionState, useOptimistic } from "react";
 import { useFormStatus } from "react-dom";
 import { addTodo, save } from "../actions/todos";

@@ -71,6 +71,7 @@ async function req(path, init) {
 }
 
 func TestCloudflarePlatformBindings(t *testing.T) {
+	t.Parallel()
 	root, cfg := serverlessProject(t, "serverless-cloudflare")
 	plan, _ := emitServerTarget(t, root, cfg, "cloudflare")
 	if !strings.HasSuffix(filepath.ToSlash(plan.WorkerModule), "src/cloudflare.ts") {
@@ -152,6 +153,7 @@ console.log(JSON.stringify(results));
 }
 
 func TestCloudflareModuleImportOnOtherTargets(t *testing.T) {
+	t.Parallel()
 	root, cfg := serverlessProject(t, "serverless-cloudflare")
 	for _, target := range []string{"node", "vercel", "netlify"} {
 		_, err := BuildServerBundle(root, cfg, target)
@@ -166,6 +168,7 @@ func TestCloudflareModuleImportOnOtherTargets(t *testing.T) {
 }
 
 func TestCloudflareWorkerModuleConfig(t *testing.T) {
+	t.Parallel()
 	root, cfg := serverlessProject(t, "serverless-cloudflare")
 	cfg.Deploy.Worker = "src/missing.ts"
 	if _, err := BuildServerBundle(root, cfg, "cloudflare"); err == nil || !strings.Contains(err.Error(), "deploy.worker") {
@@ -290,6 +293,7 @@ console.log(JSON.stringify(results));
 }
 
 func TestCloudflareEdgeCacheAndFetchHook(t *testing.T) {
+	t.Parallel()
 	probes := `
 const store = new Map();
 globalThis.caches = { default: {

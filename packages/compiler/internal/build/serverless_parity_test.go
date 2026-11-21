@@ -67,6 +67,7 @@ func setCookieNames(h http.Header) string {
 // matrix against both: status, security and cache headers, redirects and body
 // must agree.
 func TestServerlessNodeParity(t *testing.T) {
+	t.Parallel()
 	if !canStopInProcessServer {
 		t.Skip("in-process Go server needs a unix host")
 	}
