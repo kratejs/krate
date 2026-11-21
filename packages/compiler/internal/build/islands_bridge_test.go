@@ -81,6 +81,9 @@ func setupIslandProject(t *testing.T, root string, withPreact bool) *config.Conf
 	cfg.PagesDir = pagesDir
 	cfg.OutDir = filepath.Join(root, "dist")
 	cfg.Minify = false
+	// Resolve the remaining paths (public/, the entry) against the project,
+	// as config.Load does; left relative they follow the working directory.
+	cfg.Resolve(root)
 	return cfg
 }
 
