@@ -188,3 +188,11 @@ test("shards that planned from different times or partitions fail the check", ()
   assert.throws(() => checkPlans([ok[0], { ...ok[1], hash: "x" }]), /did not plan alike/);
   assert.throws(() => checkPlans([ok[0]]), /one plan from each of 2 shards/);
 });
+
+test("the list is the same whatever order go test prints the packages in", () => {
+  const ev = (pkg, out) => JSON.stringify({ Action: "output", Package: pkg, Output: out + "\n" });
+  const a = [ev("m/b", "TestB2"), ev("m/b", "TestB1"), ev("m/a", "TestA")].join("\n");
+  const b = [ev("m/a", "TestA"), ev("m/b", "TestB1"), ev("m/b", "TestB2")].join("\n");
+  assert.equal(JSON.stringify(parseListOutput(a).pkgs), JSON.stringify(parseListOutput(b).pkgs));
+  assert.deepEqual(Object.keys(parseListOutput(a).pkgs), ["m/a", "m/b"]);
+});

@@ -111,10 +111,13 @@ export function parseListOutput(text) {
       failed.push(ev.Package);
     }
   }
-  for (const p of Object.keys(pkgs)) {
-    pkgs[p] = [...new Set(pkgs[p])].sort();
+  // go test prints packages in the order their builds finish, so sort them:
+  // every shard must write the same list byte for byte.
+  const sorted = {};
+  for (const p of Object.keys(pkgs).sort()) {
+    sorted[p] = [...new Set(pkgs[p])].sort();
   }
-  return { pkgs, failed };
+  return { pkgs: sorted, failed };
 }
 
 function cmdList(opts) {
