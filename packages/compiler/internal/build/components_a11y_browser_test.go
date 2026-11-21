@@ -14,7 +14,6 @@ import (
 // a real browser (Enter/Space/Escape, focus move/trap/restore, roles and names,
 // primary-color contrast, RTL). It builds the examples project.
 func TestComponentsA11yBrowser(t *testing.T) {
-	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the components a11y browser test")
