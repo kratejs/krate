@@ -97,16 +97,18 @@ runs:
         DENO_VERSION: ${{ inputs.deno-version }}
       run: |
         set -euo pipefail
-        bin="$JS_RUNTIMES_DIR/bun-$JS_RUNTIMES_BUN"
+        dir="$JS_RUNTIMES_DIR"
         if [ "$RUNNER_OS" = Windows ]; then
-          bin=$(cygpath -w "$bin")
-          deno=$(cygpath -w "$JS_RUNTIMES_DIR/deno")
+          # GITHUB_PATH takes Windows paths; this shell's PATH takes
+          # /c/... ones (a "C:" entry splits at the colon).
+          dir=$(cygpath -u "$dir")
+          cygpath -w "$dir/bun-$JS_RUNTIMES_BUN" >> "$GITHUB_PATH"
+          cygpath -w "$dir/deno" >> "$GITHUB_PATH"
         else
-          chmod +x "$JS_RUNTIMES_DIR/bun-$JS_RUNTIMES_BUN/bun" "$JS_RUNTIMES_DIR/deno/deno"
-          deno="$JS_RUNTIMES_DIR/deno"
+          chmod +x "$dir/bun-$JS_RUNTIMES_BUN/bun" "$dir/deno/deno"
+          { echo "$dir/bun-$JS_RUNTIMES_BUN"; echo "$dir/deno"; } >> "$GITHUB_PATH"
         fi
-        { echo "$bin"; echo "$deno"; } >> "$GITHUB_PATH"
-        export PATH="$JS_RUNTIMES_DIR/bun-$JS_RUNTIMES_BUN:$JS_RUNTIMES_DIR/deno:$PATH"
+        export PATH="$dir/bun-$JS_RUNTIMES_BUN:$dir/deno:$PATH"
         got=$(bun --version)
         [ "$got" = "$BUN_VERSION" ] || { echo "::error::bun --version is $got, want $BUN_VERSION"; exit 1; }
         got=$(deno --version | head -1)
