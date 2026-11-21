@@ -183,14 +183,10 @@ jobs:
 
       # The native host-child release tests compile with bun and deno, and
       # KRATE_REQUIRE_E2E turns a missing runtime into a failure.
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Bun and Deno
+        uses: ./.github/actions/setup-bun-deno
         with:
           bun-version: 1.4.5
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v1
-        with:
           deno-version: 2.9.8
 
       - name: Install JS dependencies
@@ -406,14 +402,10 @@ jobs:
 
       # The native host-child release tests compile with bun and deno, and
       # KRATE_REQUIRE_E2E turns a missing runtime into a failure.
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Bun and Deno
+        uses: ./.github/actions/setup-bun-deno
         with:
           bun-version: 1.4.5
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v1
-        with:
           deno-version: 2.9.8
 
       - name: Install JS dependencies
@@ -551,14 +543,10 @@ jobs:
           node-version: "22"
           cache: pnpm
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Bun and Deno
+        uses: ./.github/actions/setup-bun-deno
         with:
           bun-version: 1.4.5
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v1
-        with:
           deno-version: 2.9.8
 
       # Every host runtime must be present: the host child tests need all three.
@@ -1078,14 +1066,10 @@ jobs:
           go-version-file: packages/compiler/go.mod
           cache: true
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Bun and Deno
+        uses: ./.github/actions/setup-bun-deno
         with:
           bun-version: 1.4.5
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v1
-        with:
           deno-version: 2.9.8
 
       - name: Bun action sidecar and Deno static params
