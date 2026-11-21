@@ -32,11 +32,14 @@ on:
     - cron: "37 2 * * *"
   workflow_dispatch:
 
-# A new commit cancels a pull request's run in progress. Pushes to dev and main
-# are never cancelled, so every commit that lands gets its full run.
+# A new commit cancels the run in progress (and any queued one) of a pull
+# request or of dev, so a burst of merges into dev runs CI once, on the
+# latest commit, which holds them all. Pushes to main, the nightly run and
+# manual runs are never cancelled. A release of a dev commit whose run was
+# cancelled gets a fresh full run from scripts/release-ci-gate.mjs.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/dev')) && 'latest' || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/dev') }}
 
 permissions:
   contents: read
