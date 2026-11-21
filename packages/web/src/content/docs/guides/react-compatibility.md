@@ -532,7 +532,10 @@ In a `"use client"` component of a server-rendered page (a Preact island), the
 island root is a boundary, as React's root is: a component that suspends with
 no `<Suspense>` of its own (a `lazy()` component rendered after mount) keeps
 the server HTML until it has loaded. A server render of such a component uses
-the `getServerSnapshot` argument of `useSyncExternalStore`.
+the `getServerSnapshot` argument of `useSyncExternalStore`, and so does its
+hydration, as in React: before the first paint, the components whose
+`getSnapshot()` differs (a layout saved in `localStorage`, say) re-render with
+it. A component that mounts after hydration reads `getSnapshot` directly.
 
 **`use(promise)`.** Write it as the initializer of a declaration in the
 component body:

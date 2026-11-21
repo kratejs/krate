@@ -1333,6 +1333,43 @@ __o.__r = function (vnode) {
   if (__render) __render(vnode);
 };`
 
+// preactHydrateMarkJS makes the shared preact module's hydrate() count the
+// calls in progress on options, so a hook can tell a render that adopts
+// server HTML from a client render. Preact keeps that state in diff()
+// arguments only. Island and client-boundary loaders, and compat's hydrate
+// and hydrateRoot, all call this export.
+const preactHydrateMarkJS = `
+import { hydrate as __krateHydrate, options as __krateOptions } from "preact";
+export function hydrate(vnode, parent) {
+  __krateOptions.__krateHydrating = (__krateOptions.__krateHydrating || 0) + 1;
+  try { return __krateHydrate(vnode, parent); } finally { __krateOptions.__krateHydrating--; }
+}`
+
+// preactSyncExternalStoreJS is useSyncExternalStore with React's hydration
+// semantics. preact/compat's ignores getServerSnapshot, so a component that
+// hydrated server HTML rendered with getServerSnapshot (see
+// serverSyncExternalStore) read getSnapshot instead. Preact does not patch
+// attributes or structure while hydrating, so the DOM kept the server's
+// markup while the component's state held the client value, until something
+// re-rendered it. React hydrates with getServerSnapshot, then checks
+// getSnapshot() before paint and re-renders the components whose value
+// differs. Here a component that first renders inside hydrate() reads
+// getServerSnapshot; its first layout effect, which runs before compat's,
+// ends that, so compat's own check reads getSnapshot() and re-renders it on
+// a difference. Every other render reads getSnapshot as before.
+const preactSyncExternalStoreJS = `
+import { useRef as __krateRef, useLayoutEffect as __krateLayoutEffect } from "preact/hooks";
+import { options as __krateUsesOptions } from "preact";
+import { useSyncExternalStore as __krateUses } from "preact/compat";
+export function useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot) {
+  var ref = __krateRef(null);
+  if (ref.current === null) ref.current = { hydrating: typeof getServerSnapshot == "function" && __krateUsesOptions.__krateHydrating > 0 };
+  var st = ref.current;
+  __krateLayoutEffect(function () { st.hydrating = false; }, []);
+  return __krateUses(subscribe, st.hydrating ? function () { return st.hydrating ? getServerSnapshot() : getSnapshot(); } : getSnapshot);
+}
+__compat.useSyncExternalStore = useSyncExternalStore;`
+
 // preactExternalsPlugin marks exactly the given specifiers external.
 func preactExternalsPlugin(exts []string) api.Plugin {
 	return api.Plugin{
@@ -1379,6 +1416,9 @@ func (b *Builder) ensurePreactShared() (map[string]string, error) {
 			plugins = append(plugins, preactExternalsPlugin(s.externals))
 		}
 		contents := fmt.Sprintf("export * from %q;", s.name)
+		if s.name == "preact" {
+			contents += preactHydrateMarkJS
+		}
 		if s.name == "preact/hooks" {
 			contents += preactEffectOrderJS
 		}
@@ -1393,7 +1433,7 @@ export { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, use
 // A star export never carries the default export, but classic code does
 // "import React from 'react'" (recharts, headlessui, many design systems).
 import __compat from "preact/compat";
-export default __compat;`
+export default __compat;` + preactSyncExternalStoreJS
 		}
 		result := esbuildBuild(api.BuildOptions{
 			Stdin: &api.StdinOptions{

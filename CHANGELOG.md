@@ -598,6 +598,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)` in a Preact island or client component
+  hydrates with `getServerSnapshot`, then re-renders before paint the components whose `getSnapshot()`
+  differs, as React does. It used to hydrate with `getSnapshot` over HTML rendered from
+  `getServerSnapshot`, and Preact keeps the server's attributes and structure while hydrating, so a
+  saved value (the Genesis builder's 2D/3D/split layout in `localStorage`) left a wrong switch and a
+  broken work area until the next store change.
 - `await import()` of a CommonJS package in client code now resolves to the package's named exports, as
   it does on Next and in an unsplit build. Island chunks are code-split, so the package became a chunk
   whose only export was `default` (`module.exports`), and `const { readPsd } = await import("ag-psd")`
