@@ -606,6 +606,9 @@ host code runs in the native process. Names and options may change between relea
   `TooltipProvider`"). The page scripts and server bundles that name an entry are renamed or rewritten with
   it. Each page also carries its build id (`<meta name="krate-build">`), and the SPA router loads a page of
   another build with a full navigation, as Next.js does, instead of running two builds' modules together.
+  The renaming reads each output once, names files in dependency order and writes each changed file once
+  (`build:content-names` in `krate build --profile`): about 0.2 s on an app with 520 islands, where the first
+  version, which rescanned every output for every name, added a minute to each build.
 - Preact islands and client components: a component's passive effects (`useEffect`) no longer run before
   its insertion and layout effects when a portal re-renders later in the same render. Krate's effect-order
   shims took the portal's commit (compat's `createPortal` commits while its parent is still rendering) for
