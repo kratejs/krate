@@ -383,6 +383,11 @@ export const createStore = (
       if (viewport.dpr > 0) gl.setPixelRatio?.(viewport.dpr);
       const updateStyle = typeof HTMLCanvasElement !== 'undefined' && gl.domElement instanceof HTMLCanvasElement;
       gl.setSize?.(size.width, size.height, updateStyle);
+      // setSize cleared the drawing buffer. The loop redraws "always" and
+      // "demand" roots in the next frame; with "never" nothing would until the
+      // app calls advance(), so draw the current state (no time passes) now.
+      const current = rootStore.getState();
+      if (current.frameloop === 'never' && current.internal.active && typeof gl.render === 'function') advance(current.clock.elapsedTime, false, current);
     }
     // The viewport depends on the camera.
     if (camera !== oldCamera) {

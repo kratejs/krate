@@ -276,6 +276,22 @@ describe('components and hooks', () => {
     expect(width()).toBe(300);
   });
 
+  it('redraws a frameloop "never" root at its new size at once, with no time passing', async () => {
+    const { store, gl } = await mount(() => [h('mesh', { name: 'm' })]);
+    store.getState().advance(1);
+    const clock = store.getState().clock.elapsedTime;
+    gl.render.mockClear();
+    gl.setSize.mockClear();
+    store.getState().setSize(300, 200);
+    // setSize clears the drawing buffer and nothing else draws a "never" root.
+    expect(gl.setSize).toHaveBeenCalledWith(300, 200, true);
+    expect(gl.render).toHaveBeenCalledTimes(1);
+    expect(store.getState().clock.elapsedTime).toBe(clock);
+    // A move without a size change does not redraw.
+    store.getState().setSize(300, 200, 10, 10);
+    expect(gl.render).toHaveBeenCalledTimes(1);
+  });
+
   it('throws when hooks are used outside a scene', () => {
     expect(() => useThree()).toThrow(/within the Canvas/);
   });
