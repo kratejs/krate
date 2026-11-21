@@ -46,6 +46,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
           cache: true
 
       - name: Enable pnpm
@@ -258,6 +259,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
           cache: true
 
       - name: Enable pnpm
@@ -307,6 +309,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
           cache: true
 
       - name: Enable pnpm
@@ -1084,6 +1087,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
           cache: true
 
       - name: Set up Node
@@ -1105,6 +1109,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
           cache: true
 
       - name: Set up Bun
@@ -1131,6 +1136,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
           cache: true
 
       - name: Run benchmarks (informational)
@@ -1148,6 +1154,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
           cache: true
 
       - name: Fuzz lexer
@@ -1176,6 +1183,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
           cache: true
 
       - name: Enable pnpm
@@ -1257,6 +1265,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
           cache: true
 
       - name: Enable pnpm

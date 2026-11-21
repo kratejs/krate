@@ -53,6 +53,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
           cache: true
 
       - name: Enable pnpm
