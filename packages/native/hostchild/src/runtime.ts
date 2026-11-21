@@ -71,7 +71,7 @@ function parseEndpoint(addr: string): Endpoint {
     let rest = addr.slice("tcp:".length);
     let token = "";
     const q = rest.indexOf("?");
-    if (q >= 0) {
+    if (q !== -1) {
       token = new URLSearchParams(rest.slice(q + 1)).get("token") ?? "";
       rest = rest.slice(0, q);
     }

@@ -118,7 +118,7 @@ describe('SPA navigation', () => {
     expect(location.pathname).toBe('/about');
     expect(document.querySelector('#root h1')!.textContent).toBe('About');
     expect(document.title).toBe('About');
-    expect(nav.length).toBe(1);
+    expect(nav).toHaveLength(1);
     expect(document.getElementById('__krate-route-announcer')!.textContent).toBe('About');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -265,7 +265,7 @@ describe('islands across a swap', () => {
     expect(share.handle.unmount).not.toHaveBeenCalled();
     expect(share.handle.update).not.toHaveBeenCalled();
     expect(mountIslands()).toEqual([]);
-    expect(document.querySelectorAll('[role="dialog"]').length).toBe(1);
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
   });
 
   it('router.replace to the same page keeps a focused input of an island, re-rendering it with new props', async () => {
@@ -337,7 +337,7 @@ describe('islands across a swap', () => {
     await settle();
     expect(share.handle.unmount).toHaveBeenCalledTimes(1);
     expect(share.connectedAtUnmount).toBe(true);
-    expect(document.querySelectorAll('[role="dialog"]').length).toBe(0);
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(0);
     expect(document.querySelector('#root h1')!.textContent).toBe('About');
   });
 

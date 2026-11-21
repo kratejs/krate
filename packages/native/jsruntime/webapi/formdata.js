@@ -13,7 +13,7 @@
       if (parts !== undefined && parts !== null) {
         for (var p of parts) {
           if (p instanceof Blob) list.push(p._b);
-          else { var b = toBytes(p); list.push(b ? b : utf8Encode(String(p))); }
+          else { var b = toBytes(p); list.push(b || utf8Encode(String(p))); }
         }
       }
       Object.defineProperty(this, '_b', { value: concatBytes(list), writable: true, enumerable: false });

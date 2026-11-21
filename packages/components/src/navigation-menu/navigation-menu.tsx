@@ -1,5 +1,5 @@
 import './navigation-menu.css';
-import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+import { createScope, createCSSGroup } from '@krate/runtime';
 
 const NavigationMenuCtx = createScope<string | null>();
 

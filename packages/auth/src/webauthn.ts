@@ -163,7 +163,7 @@ function modPow(base: bigint, exponent: bigint, modulus: bigint): bigint {
   return result;
 }
 
-const SHA256_DIGEST_INFO = Uint8Array.from([0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20]);
+const SHA256_DIGEST_INFO = Uint8Array.from([0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20]);
 
 function verifyRsa(n: Uint8Array, e: Uint8Array, data: Uint8Array, signature: Uint8Array): boolean {
   const modulus = bytesToBigInt(n);
@@ -175,7 +175,7 @@ function verifyRsa(n: Uint8Array, e: Uint8Array, data: Uint8Array, signature: Ui
   const em = new Uint8Array(k);
   let rest = m;
   for (let i = k - 1; i >= 0; i--) {
-    em[i] = Number(rest & 0xffn);
+    em[i] = Number(rest & 0xFFn);
     rest >>= 8n;
   }
   const digest = sha256Bytes(data);
@@ -183,7 +183,7 @@ function verifyRsa(n: Uint8Array, e: Uint8Array, data: Uint8Array, signature: Ui
   if (k < tLength + 11) return false;
   const expected = new Uint8Array(k);
   expected[1] = 0x01;
-  expected.fill(0xff, 2, k - tLength - 1);
+  expected.fill(0xFF, 2, k - tLength - 1);
   expected.set(concat(SHA256_DIGEST_INFO, digest), k - tLength);
   return timingSafeEqual(em, expected);
 }

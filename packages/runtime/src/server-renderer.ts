@@ -13,7 +13,6 @@ import {
   createSSRCore,
   MemoryIsrStore,
   type ManifestPage,
-  type RegionMeta,
   type RenderRequest,
   type ServerManifest,
 } from "./ssr-core.js";
@@ -274,7 +273,7 @@ const { findPage, renderPage, renderRegion, renderPageRegion } = core;
 // ISR cache persistence - survives renderer restarts so a bounce doesn't
 // cold-render every ISR variant. Written debounced (coalesced) to the build
 // output dir (.krate/isr-cache.json), overridable via KRATE_ISR_CACHE.
-let isrCacheFile = process.env.KRATE_ISR_CACHE || "";
+const isrCacheFile = process.env.KRATE_ISR_CACHE || "";
 let persistTimer: NodeJS.Timeout | null = null;
 
 function isrCachePath(): string {

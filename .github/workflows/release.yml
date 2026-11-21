@@ -88,6 +88,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -150,6 +151,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
+          cache-dependency-path: packages/*/go.sum
 
       - name: Set up Node
         uses: actions/setup-node@v4

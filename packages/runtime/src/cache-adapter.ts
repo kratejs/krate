@@ -226,7 +226,7 @@ type AdapterFactory = (options: Record<string, unknown> & { url?: string; prefix
 /** Resolves a spec to an adapter, or null for the default in-process caches. */
 export async function loadCacheAdapter(spec: CacheSpec | undefined): Promise<CacheAdapter | null> {
   if (!spec || !spec.adapter || spec.adapter === 'memory') return null;
-  const opts = { ...(spec.options || {}), url: spec.url, prefix: spec.prefix, timeoutMs: spec.timeoutMs };
+  const opts = { ...spec.options, url: spec.url, prefix: spec.prefix, timeoutMs: spec.timeoutMs };
   if (spec.adapter === 'redis') {
     const { RedisAdapter } = await import('./cache-redis.js');
     if (!spec.url) throw new Error('cache.adapter "redis" needs cache.url (redis://host:6379)');

@@ -242,7 +242,7 @@ function remapLocation(map: DecodedMap, line: number, col: number): { source: st
 
 /** Rewrites each mappable frame of a stack trace to its original location. */
 export async function symbolicateStack(stack: string): Promise<string> {
-  if (!stack || stack.indexOf('.js') === -1) return stack;
+  if (!stack || !stack.includes('.js')) return stack;
   const lines = stack.split('\n');
   const out = await Promise.all(
     lines.map(async (line) => {
@@ -1020,7 +1020,7 @@ class KrateDev {
     this.seen.add(key);
     const win = (globalThis as any).__KRATE_WINDOW__;
     if (typeof win === 'string' && win) payload.window = win;
-    if (!payload.stack || payload.stack.indexOf('.js') === -1) {
+    if (!payload.stack || !payload.stack.includes('.js')) {
       this.send(payload);
       return;
     }

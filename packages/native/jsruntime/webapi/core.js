@@ -88,7 +88,7 @@
       if (isLazy(name)) {
         if (hasOwn.call(vals, name)) return vals[name];
         try { delete G[name]; } catch (_) {}
-        return undefined;
+        return;
       }
       return G[name];
     };
@@ -200,21 +200,21 @@
       c = str.charCodeAt(i);
       if (c < 0x80) len += 1;
       else if (c < 0x800) len += 2;
-      else if (c >= 0xd800 && c <= 0xdbff && i + 1 < n && (str.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { len += 4; i++; }
+      else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n && (str.charCodeAt(i + 1) & 0xFC00) === 0xDC00) { len += 4; i++; }
       else len += 3;
     }
     var out = new Uint8Array(len), o = 0;
     for (i = 0; i < n; i++) {
       c = str.charCodeAt(i);
-      if (c >= 0xd800 && c <= 0xdbff && i + 1 < n && (str.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
-        c = 0x10000 + ((c & 0x3ff) << 10) + (str.charCodeAt(++i) & 0x3ff);
-      } else if (c >= 0xd800 && c <= 0xdfff) {
-        c = 0xfffd;
+      if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n && (str.charCodeAt(i + 1) & 0xFC00) === 0xDC00) {
+        c = 0x10000 + ((c & 0x3FF) << 10) + (str.charCodeAt(++i) & 0x3FF);
+      } else if (c >= 0xD800 && c <= 0xDFFF) {
+        c = 0xFFFD;
       }
       if (c < 0x80) out[o++] = c;
-      else if (c < 0x800) { out[o++] = 0xc0 | (c >> 6); out[o++] = 0x80 | (c & 63); }
-      else if (c < 0x10000) { out[o++] = 0xe0 | (c >> 12); out[o++] = 0x80 | ((c >> 6) & 63); out[o++] = 0x80 | (c & 63); }
-      else { out[o++] = 0xf0 | (c >> 18); out[o++] = 0x80 | ((c >> 12) & 63); out[o++] = 0x80 | ((c >> 6) & 63); out[o++] = 0x80 | (c & 63); }
+      else if (c < 0x800) { out[o++] = 0xC0 | (c >> 6); out[o++] = 0x80 | (c & 63); }
+      else if (c < 0x10000) { out[o++] = 0xE0 | (c >> 12); out[o++] = 0x80 | ((c >> 6) & 63); out[o++] = 0x80 | (c & 63); }
+      else { out[o++] = 0xF0 | (c >> 18); out[o++] = 0x80 | ((c >> 12) & 63); out[o++] = 0x80 | ((c >> 6) & 63); out[o++] = 0x80 | (c & 63); }
     }
     return out;
   }
@@ -224,30 +224,30 @@
     var parts = [], units = [], i = 0, n = u8.length;
     function bad() {
       if (fatal) throw new TypeError('The encoded data was not valid for encoding utf-8');
-      units.push(0xfffd);
+      units.push(0xFFFD);
     }
     while (i < n) {
-      var b = u8[i], need = 0, cp = 0, lo = 0x80, hi = 0xbf;
+      var b = u8[i], need = 0, cp = 0, lo = 0x80, hi = 0xBF;
       if (b < 0x80) { units.push(b); i++; }
       else {
-        if (b >= 0xc2 && b <= 0xdf) { need = 1; cp = b & 0x1f; }
-        else if (b >= 0xe0 && b <= 0xef) { need = 2; cp = b & 0xf; if (b === 0xe0) lo = 0xa0; if (b === 0xed) hi = 0x9f; }
-        else if (b >= 0xf0 && b <= 0xf4) { need = 3; cp = b & 7; if (b === 0xf0) lo = 0x90; if (b === 0xf4) hi = 0x8f; }
+        if (b >= 0xC2 && b <= 0xDF) { need = 1; cp = b & 0x1F; }
+        else if (b >= 0xE0 && b <= 0xEF) { need = 2; cp = b & 0xF; if (b === 0xE0) lo = 0xA0; if (b === 0xED) hi = 0x9F; }
+        else if (b >= 0xF0 && b <= 0xF4) { need = 3; cp = b & 7; if (b === 0xF0) lo = 0x90; if (b === 0xF4) hi = 0x8F; }
         else { bad(); i++; continue; }
         var j = i + 1, ok = true, got = 0;
         while (got < need) {
           if (j >= n) { ok = null; break; }
           var cb = u8[j];
           if (cb < lo || cb > hi) { ok = false; break; }
-          lo = 0x80; hi = 0xbf;
-          cp = (cp << 6) | (cb & 0x3f); j++; got++;
+          lo = 0x80; hi = 0xBF;
+          cp = (cp << 6) | (cb & 0x3F); j++; got++;
         }
         if (ok === null) {
           if (stream) { if (state) state.rest = n - i; i = n; break; }
           bad(); i = n; break;
         }
         if (!ok) { bad(); i = j; continue; }
-        if (cp >= 0x10000) { cp -= 0x10000; units.push(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff)); }
+        if (cp >= 0x10000) { cp -= 0x10000; units.push(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF)); }
         else units.push(cp);
         i = j;
       }

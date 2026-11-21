@@ -523,7 +523,7 @@ describe('more instance semantics', () => {
       list(items, (i) => i, (i: () => string) => h('group', { name: () => 'row-' + i() })),
       h('group', { name: 'z' }),
     ]);
-    const names = (): string => scene.children.map((c) => c.name).join();
+    const names = (): string => scene.children.map((c) => c.name).join(",");
     expect(names()).toBe('a,p1,p2,row-x,z');
     setShow(true);
     setItems(['y', 'x']);

@@ -614,7 +614,7 @@ async function linuxSign() {
   const victim = signed[0];
   const copy = path.join(work, 'tampered-' + path.basename(victim));
   const data = fs.readFileSync(victim);
-  data[data.length >> 1] ^= 0xff;
+  data[data.length >> 1] ^= 0xFF;
   fs.writeFileSync(copy, data);
   const bad = run('gpg', ['--batch', '--verify', `${victim}.asc`, copy], { env, allowFail: true });
   if (bad.status === 0) fail('gpg verified a tampered package');

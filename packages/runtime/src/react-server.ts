@@ -22,7 +22,7 @@ export function useLayoutEffect(_effect: () => unknown, _deps?: readonly unknown
 export function useInsertionEffect(_effect: () => unknown, _deps?: readonly unknown[] | null): void {}
 
 export function createElement(type: any, props?: Record<string, any> | null, ...children: unknown[]): unknown {
-  const p: Record<string, any> = { ...(props || {}) };
+  const p: Record<string, any> = { ...props };
   delete p.key;
   delete p.ref;
   if (children.length === 1) p.children = children[0];

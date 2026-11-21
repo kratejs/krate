@@ -18,7 +18,6 @@
  */
 
 import type {
-  DocsLayoutProps,
   DocsSearchOptions,
   DocsSidebarItem,
   DocsThemeDescriptor,

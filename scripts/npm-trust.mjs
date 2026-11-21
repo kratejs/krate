@@ -151,7 +151,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
   const otpAt = args.indexOf('--otp');
-  if (otpAt >= 0) {
+  if (otpAt !== -1) {
     otp = args[otpAt + 1] ?? '';
     if (!/^\d{6,8}$/.test(otp)) {
       console.error('npm-trust: --otp needs the code from your authenticator app');

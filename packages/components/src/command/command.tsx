@@ -42,7 +42,7 @@ export function Command(props: CommandProps) {
     for (var i = 0; i < list.length; i++) {
       var it = list[i];
       var hay = (it.label + " " + (it.keywords || "") + " " + it.value).toLowerCase();
-      if (hay.indexOf(q) >= 0) out.push(it);
+      if (hay.includes(q)) out.push(it);
     }
     return out;
   }

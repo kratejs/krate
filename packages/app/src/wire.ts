@@ -12,7 +12,7 @@
 // is always plain, whatever its keys are.
 
 const TAGS = ["$b", "$d", "$m", "$s"];
-const ESCAPED = TAGS.map((t) => t + "$");
+const ESCAPED = new Set(TAGS.map((t) => t + "$"));
 
 export interface EncodeCtx {
   blobs: Uint8Array[];
@@ -110,7 +110,7 @@ function enc(v: unknown, ctx: EncodeCtx, root: string, path: string, stack: obje
     if (keys.length === 1 && out[keys[0]] !== undefined) {
       const k = keys[0];
       if (TAGS.includes(k)) return { [k + "$"]: out };
-      if (ESCAPED.includes(k)) return { [k]: out };
+      if (ESCAPED.has(k)) return { [k]: out };
     }
     return out;
   } finally {
@@ -119,7 +119,7 @@ function enc(v: unknown, ctx: EncodeCtx, root: string, path: string, stack: obje
 }
 
 export function buildFrame(tree: unknown, blobs: Uint8Array[]): Uint8Array {
-  if (blobs.length > 0xffff) throw new TypeError(`too many binary values in one frame (${blobs.length} > 65535)`);
+  if (blobs.length > 0xFFFF) throw new TypeError(`too many binary values in one frame (${blobs.length} > 65535)`);
   const json = te.encode(JSON.stringify(tree));
   let size = 4 + json.length + 2;
   for (const b of blobs) size += 4 + b.length;
@@ -178,7 +178,7 @@ function dec(t: unknown, blobs: Uint8Array[]): unknown {
       if (!Array.isArray(v)) throw new Error("bad $s value");
       return new Set(v.map((x) => dec(x, blobs)));
     }
-    if (ESCAPED.includes(k)) {
+    if (ESCAPED.has(k)) {
       if (v === null || typeof v !== "object" || Array.isArray(v)) throw new Error(`bad ${k} wrapper`);
       const inner: Record<string, unknown> = {};
       for (const ik of Object.keys(v)) setOwn(inner, ik, dec((v as Record<string, unknown>)[ik], blobs));

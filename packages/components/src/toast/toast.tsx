@@ -1,5 +1,5 @@
 import './toast.css';
-import { createScope, createScopeFlags, createCSSToggle, type CSSScope } from '@krate/runtime';
+import { createScope, createCSSToggle } from '@krate/runtime';
 
 const ToastCtx = createScope<boolean>();
 

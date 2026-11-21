@@ -39,11 +39,11 @@ export function base32Decode(input: string): Uint8Array {
   let value = 0;
   for (const ch of clean) {
     const idx = ALPHABET.indexOf(ch);
-    if (idx < 0) throw new Error("invalid base32 input");
+    if (idx === -1) throw new Error("invalid base32 input");
     value = (value << 5) | idx;
     bits += 5;
     if (bits >= 8) {
-      out.push((value >>> (bits - 8)) & 0xff);
+      out.push((value >>> (bits - 8)) & 0xFF);
       bits -= 8;
       value &= (1 << bits) - 1;
     }
@@ -69,8 +69,8 @@ export function hotp(secret: Uint8Array, counter: number, options: Pick<TotpOpti
     c = Math.floor(c / 256);
   }
   const digest = hmac(HASHES[options.algorithm], secret, message);
-  const offset = digest[digest.length - 1]! & 0x0f;
-  const binary = ((digest[offset]! & 0x7f) << 24) | (digest[offset + 1]! << 16) | (digest[offset + 2]! << 8) | digest[offset + 3]!;
+  const offset = digest[digest.length - 1]! & 0x0F;
+  const binary = ((digest[offset]! & 0x7F) << 24) | (digest[offset + 1]! << 16) | (digest[offset + 2]! << 8) | digest[offset + 3]!;
   return String(binary % 10 ** options.digits).padStart(options.digits, "0");
 }
 

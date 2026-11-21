@@ -1,5 +1,6 @@
 // Host-side signals for TS host code (marked @host).
 import type { HostSignal } from "./types.js";
+
 export type { HostSignal, ReadonlyHostSignal } from "./types.js";
 
 export function hostSignal<T>(initial: T): HostSignal<T> {

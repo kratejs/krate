@@ -140,7 +140,7 @@ export function matchMetaRoute(routes: MetaRoute[] | undefined, p: string): stri
     const suffix = r.suffix || "";
     if (p.length <= prefix.length + suffix.length || !p.startsWith(prefix) || !p.endsWith(suffix)) continue;
     const id = p.slice(prefix.length, p.length - suffix.length);
-    if (/[\/\\]/.test(id) || id === "." || id === "..") continue;
+    if (/[/\\]/.test(id) || id === "." || id === "..") continue;
     return r.key.replace(/\[id\]$/, "") + id;
   }
   return "";
@@ -314,7 +314,7 @@ export function ruleHeaderPairs(h: Record<string, string> | Array<{ key: string;
   const out: Array<[string, string]> = [];
   for (const { key, value } of h) {
     const at = out.findIndex(([k]) => k.toLowerCase() === String(key).toLowerCase());
-    if (at >= 0) out.splice(at, 1);
+    if (at !== -1) out.splice(at, 1);
     out.push([String(key), String(value)]);
   }
   return out;
@@ -723,15 +723,15 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   function applyRewrite(rs: ReqState, target: string): void {
     const i = target.indexOf("://");
-    if (i >= 0) {
+    if (i !== -1) {
       const rest = target.slice(i + 3);
       const j = rest.indexOf("/");
-      target = j >= 0 ? rest.slice(j) : "/";
+      target = j !== -1 ? rest.slice(j) : "/";
     }
     let p = target;
     let q = "";
     const qi = target.indexOf("?");
-    if (qi >= 0) {
+    if (qi !== -1) {
       p = target.slice(0, qi);
       q = target.slice(qi + 1);
     }
@@ -891,7 +891,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const p = rs.path;
     if (slashMode !== "never" || p.length < 2 || !p.endsWith("/") || p.startsWith("/__krate") || p === "/healthz" || p === "/readyz" || notFoundPageURL(p)) return null;
     // "//evil.example/" must not become a scheme-relative Location.
-    const target = "/" + rs.rawPath.replace(/\/+$/, "").replace(/^[\/\\]+/, "");
+    const target = "/" + rs.rawPath.replace(/\/+$/, "").replace(/^[/\\]+/, "");
     if (target === "/") return null;
     rs.res.set("Location", target + (rs.search || ""));
     return finish(rs, 308, null);
@@ -1118,7 +1118,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     outOfOrder: boolean,
     segmentStatus = 0,
   ): Promise<Response | null> {
-    let shell = shellInfo.shell;
+    const shell = shellInfo.shell;
     // A segment page renders for the URL that missed, not for its own route.
     const renderReq: RenderRequest = { route, url: segmentStatus ? rs.path : route, method: "GET", headers, params, query };
     const pending = startRegionRenders(page, route, shellInfo, renderReq);
@@ -1371,7 +1371,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
         let rewritten = buildDestination(rule.destination, m);
         let rewrittenQuery = "";
         const q = rewritten.indexOf("?");
-        if (q >= 0) {
+        if (q !== -1) {
           rewrittenQuery = rewritten.slice(q);
           rewritten = rewritten.slice(0, q);
         }
@@ -1414,7 +1414,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       const rest = k.slice(prefix.length);
       const i = rest.indexOf("/");
       // A name can be both a route file and a directory ([id].ts next to [id]/download.ts).
-      if (i < 0) out.set(rest + "\0f", false);
+      if (i === -1) out.set(rest + "\0f", false);
       else out.set(rest.slice(0, i) + "\0d", true);
     }
     return [...out.keys()]
@@ -1491,11 +1491,6 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       if (seg.startsWith("[") && seg.endsWith("]") && i < pathSegs.length) params[seg.slice(1, -1)] = pathSegs[i];
     }
     return params;
-  }
-
-  function jsonResponse(rs: ReqState, status: number, obj: unknown): Response {
-    rs.res.set("Content-Type", "application/json");
-    return finish(rs, status, JSON.stringify(obj));
   }
 
   function apiFailure(rs: ReqState, status: number, allow?: string[]): Response {
@@ -1892,8 +1887,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   function safeActionRedirect(value: unknown): string {
     if (typeof value !== "string") return "";
     const to = value.trim();
-    if (!to || to.charAt(0) !== "/" || to.charAt(1) === "/" || to.indexOf("\\") !== -1) return "";
-    if (/[\u0000-\u001f\u007f]/.test(to)) return "";
+    if (!to || to.charAt(0) !== "/" || to.charAt(1) === "/" || to.includes("\\")) return "";
+    if (/[\u0000-\u001F\u007F]/.test(to)) return "";
     return to;
   }
 
@@ -1901,7 +1896,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   // (the OAuth redirect of @krate/auth signIn()). A redirect returned in an
   // action's result is never external.
   function safeExternalRedirect(value: unknown): string {
-    if (typeof value !== "string" || /[\u0000-\u001f\u007f\\]/.test(value)) return "";
+    if (typeof value !== "string" || /[\u0000-\u001F\u007F\\]/.test(value)) return "";
     try {
       const u = new URL(value.trim());
       return u.protocol === "https:" || u.protocol === "http:" ? u.href : "";
@@ -1913,7 +1908,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   function sanitizeActionReturn(value: string, rs: ReqState): string {
     value = value.trim();
     if (!value) return "";
-    if (value.startsWith("/") && !value.startsWith("//") && !/[\\\r\n]/.test(value) && !/[\u0000-\u001f\u007f]/.test(value)) return value;
+    if (value.startsWith("/") && !value.startsWith("//") && !/[\\\r\n]/.test(value) && !/[\u0000-\u001F\u007F]/.test(value)) return value;
     let u: URL;
     try {
       u = new URL(value);

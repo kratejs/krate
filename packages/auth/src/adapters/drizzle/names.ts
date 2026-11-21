@@ -20,5 +20,5 @@ export const defaultTableNames: TableNames = {
 
 export function resolveTableNames(overrides?: Partial<TableNames>): TableNames {
   const declared = (readDeclarative().adapter?.tables ?? {}) as Partial<TableNames>;
-  return { ...defaultTableNames, ...declared, ...(overrides ?? {}) };
+  return { ...defaultTableNames, ...declared, ...overrides };
 }

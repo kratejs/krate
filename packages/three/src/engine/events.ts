@@ -303,7 +303,7 @@ export function createEvents(store: RootStore): { handlePointer: (name: string) 
               if (!capturesForPointer || capturesForPointer.has(hit.eventObject)) {
                 raycastEvent.stopped = localState.stopped = true;
                 // A hovered object that stops propagation unhovers the ones below it.
-                if (internal.hovered.size && Array.from(internal.hovered.values()).find((i) => i.eventObject === hit.eventObject)) {
+                if (internal.hovered.size && Array.from(internal.hovered.values()).some((i) => i.eventObject === hit.eventObject)) {
                   const higher = intersections.slice(0, intersections.indexOf(hit));
                   cancelPointer([...higher, hit]);
                 }
@@ -326,7 +326,7 @@ export function createEvents(store: RootStore): { handlePointer: (name: string) 
     for (const hoveredObj of internal.hovered.values()) {
       if (
         !intersections.length ||
-        !intersections.find(
+        !intersections.some(
           (hit) => hit.object === hoveredObj.object && hit.index === hoveredObj.index && hit.instanceId === hoveredObj.instanceId,
         )
       ) {

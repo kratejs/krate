@@ -34,7 +34,7 @@ describe("codec round trips", () => {
     const out = rt(v) as typeof v;
     expect(Array.from(out.a)).toEqual([1, 2, 3]);
     expect(out.b[0]).toBeInstanceOf(Uint8Array);
-    expect(out.b[0].length).toBe(0);
+    expect(out.b[0]).toHaveLength(0);
     expect(Array.from(out.b[1])).toEqual([255]);
   });
 
@@ -53,7 +53,7 @@ describe("codec round trips", () => {
 describe("decode errors", () => {
   it("truncated frames", () => {
     const b = encodeFrame({ a: new Uint8Array([1, 2, 3]) });
-    expect(() => decodeFrame(b.subarray(0, b.length - 1))).toThrow("truncated");
+    expect(() => decodeFrame(b.subarray(0, -1))).toThrow("truncated");
     expect(() => decodeFrame(b.subarray(0, 2))).toThrow("truncated");
   });
 });

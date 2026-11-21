@@ -181,7 +181,7 @@ ${END}`;
 const readmeText = fs.readFileSync(readme, "utf8");
 const a = readmeText.indexOf(START);
 const b = readmeText.indexOf(END);
-if (a < 0 || b < a) {
+if (a === -1 || b < a) {
   console.error(`README.md has no ${START} ... ${END} block`);
   process.exit(1);
 }

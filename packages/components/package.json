@@ -86,7 +86,7 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node ../../node_modules/typescript7/bin/tsc --noEmit"
   },
   "peerDependencies": {
     "@krate/runtime": "^0.1.0"

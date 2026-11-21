@@ -621,7 +621,7 @@ func ssrInternalProxy(host *revalidateHost, ssrPort int) http.HandlerFunc {
 			_, _ = io.WriteString(w, `{"error":"forbidden: internal SSR endpoint"}`)
 			return
 		}
-		ssrURL := fmt.Sprintf("http://localhost:%d%s", ssrPort, r.URL.Path)
+		ssrURL := fmt.Sprintf("http://127.0.0.1:%d%s", ssrPort, r.URL.Path)
 		proxyReq, _ := http.NewRequest(r.Method, ssrURL, r.Body)
 		proxyReq.Header = r.Header
 		resp, err := sidecarClient.Do(proxyReq)

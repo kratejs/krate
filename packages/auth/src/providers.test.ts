@@ -2,7 +2,7 @@ import { generateKeyPairSync, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { b64urlDecode, b64urlDecodeString } from "./bytes";
 import { catalog, apple, discord, github, gitlab, google, mastodon, microsoftEntraId, notion, reddit, twitter, workos, yandex } from "./providers/catalog";
 import { appleClientSecret } from "./providers/apple-secret";

@@ -156,7 +156,6 @@ function tarMode(tgz, name) {
     if (entry === name) return parseInt(tar.toString("utf8", at + 100, at + 108), 8);
     at += 512 + Math.ceil(size / 512) * 512;
   }
-  return undefined;
 }
 const packRoot = path.join(root, "node_modules", ".cache", "krate-check-release");
 for (const target of platforms.filter((t) => t.os !== "win32")) {
@@ -241,7 +240,7 @@ if (!fs.existsSync(path.join(root, ".github", "workflows", trustedPublisher.work
 }
 if (!/^\s*id-token:\s*write\s*$/m.test(release)) fail("release workflow does not grant id-token: write, so npm trusted publishing cannot authenticate");
 const registered = release.indexOf("publish-packages.mjs --check-registered");
-if (registered < 0) fail("release workflow does not check that every package is on npm (publish-packages.mjs --check-registered)");
+if (registered === -1) fail("release workflow does not check that every package is on npm (publish-packages.mjs --check-registered)");
 else if (registered > release.indexOf("- name: Install JS dependencies")) fail("release workflow checks that every package is on npm only after it starts building");
 const repoURL = (u) => (u ?? "").replace(/^git\+/, "").replace(/\.git$/, "").replace(/^https:\/\/github\.com\//, "");
 for (const dir of releasePackages) {

@@ -704,7 +704,7 @@ function setupSpeculationRules(): void {
     // A CSP sent as a header cannot be read from here: when it blocks the
     // inline script, drop it and leave prefetching to the JS path.
     const onViolation = (e: any): void => {
-      if (e && e.blockedURI === 'inline' && /^script-src/.test(String(e.effectiveDirective || e.violatedDirective || ''))) {
+      if (e && e.blockedURI === 'inline' && String(e.effectiveDirective || e.violatedDirective || '').startsWith('script-src')) {
         script.remove();
         document.removeEventListener('securitypolicyviolation', onViolation);
       }
@@ -810,7 +810,7 @@ function settledOrTimeout(pending: Promise<void>[]): Promise<void> {
   const timeout = new Promise<void>((resolve) => {
     timer = setTimeout(resolve, ASSET_TIMEOUT_MS);
   });
-  return Promise.race([Promise.all(pending).then(() => undefined), timeout]).then(() => clearTimeout(timer));
+  return Promise.race([Promise.all(pending).then(() => {}), timeout]).then(() => clearTimeout(timer));
 }
 
 interface StylesheetPlan {

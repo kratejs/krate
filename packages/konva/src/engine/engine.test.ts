@@ -211,11 +211,11 @@ describe('regions and lists', () => {
     const { layer } = mount(() => [
       h('Layer', null, h('Rect', { name: 'a' }), h(Pair, null), () => show() && h('Group', { name: 'cond' }, h('Rect', { name: 'inner' })), list(items, (i) => i, (i: () => string) => h('Rect', { get name() { return 'row-' + i(); } })), h('Rect', { name: 'z' })),
     ]);
-    expect(names(layer()).join()).toBe('a,p1,p2,row-x,z');
+    expect(names(layer()).join(",")).toBe('a,p1,p2,row-x,z');
     setShow(true);
     setItems(['y', 'x']);
     await flush();
-    expect(names(layer()).join()).toBe('a,p1,p2,cond,row-y,row-x,z');
+    expect(names(layer()).join(",")).toBe('a,p1,p2,cond,row-y,row-x,z');
     expect(names(layer().children[3] as Konva.Group)).toEqual(['inner']);
   });
 
