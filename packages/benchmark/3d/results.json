@@ -1,0 +1,1702 @@
+{
+  "machine": {
+    "cpu": "AMD EPYC-Rome Processor",
+    "cores": 12,
+    "ramGB": 31,
+    "loadavg": [
+      7.02,
+      7.02,
+      7.32
+    ],
+    "node": "v24.22.2",
+    "kernel": "6.12.113+deb13-amd64",
+    "gitSha": "ba47cb89",
+    "chromiumVersion": "156.0.8078.4"
+  },
+  "config": {
+    "runs": 3,
+    "warmupFrames": 120,
+    "measuredFrames": 600,
+    "scene": {
+      "width": 1280,
+      "height": 720,
+      "fov": 50,
+      "camera": [
+        0,
+        26,
+        30
+      ],
+      "target": [
+        0,
+        0,
+        0
+      ],
+      "gridX": 40,
+      "gridZ": 25,
+      "ringCount": 100,
+      "ringRadius": 12,
+      "ringY": 4,
+      "directional": 2,
+      "ambient": 0.5
+    },
+    "glArgs": [
+      "--use-angle=swiftshader",
+      "--enable-unsafe-swiftshader",
+      "--ignore-gpu-blocklist",
+      "--disable-gpu-vsync",
+      "--disable-frame-rate-limit"
+    ]
+  },
+  "variants": {
+    "filament": {
+      "pages": {
+        "static": {
+          "runs": [
+            {
+              "startup": {
+                "domContentLoadedMs": 91.39999985694885,
+                "loadMs": 118.20000004768372,
+                "engineAssetsEndMs": 323,
+                "createdMs": 90.89999985694885,
+                "readyMs": 321,
+                "firstFrameMs": 321.59999990463257
+              },
+              "frame": {
+                "frames": 607,
+                "engineFrames": 607,
+                "fps": 61.50759471835876,
+                "intervalMedianMs": 17.5,
+                "intervalP95Ms": 20.200000047683716,
+                "intervalMeanMs": 16.26782178209953,
+                "mainThreadTaskMsPerFrame": 0.630838550247117,
+                "scriptMsPerFrame": 0.38028995057660625,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 0.9884678747940694,
+                "gpuProcessCpuMsPerFrame": 137.06754530477758
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 6.482635498046875,
+                "jsHeapTotalMBBeforeGC": 10.31640625,
+                "jsHeapUsedMB": 3.9306411743164062,
+                "jsHeapTotalMB": 4.81640625,
+                "wasmMemoryMB": 38.625,
+                "rendererRssMB": 152.56640625,
+                "rendererPssMB": 109.15625,
+                "rendererHwmMB": 170.6953125,
+                "gpuRssMB": 138.71484375,
+                "gpuPssMB": 100.619140625,
+                "gpuHwmMB": 138.71484375,
+                "browserRssMB": 96.03125,
+                "totalRssMB": 544.29296875,
+                "totalPssMB": 302.2666015625
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 51.700000047683716,
+                "loadMs": 69.30000019073486,
+                "engineAssetsEndMs": 238.60000014305115,
+                "createdMs": 51,
+                "readyMs": 237.80000019073486,
+                "firstFrameMs": 238.40000009536743
+              },
+              "frame": {
+                "frames": 602,
+                "engineFrames": 602,
+                "fps": 62.479891230092285,
+                "intervalMedianMs": 17.59999990463257,
+                "intervalP95Ms": 20.299999952316284,
+                "intervalMeanMs": 16.004991680532445,
+                "mainThreadTaskMsPerFrame": 0.6100299003322258,
+                "scriptMsPerFrame": 0.4097558139534884,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 0.9800664451827245,
+                "gpuProcessCpuMsPerFrame": 135.73089700996678
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 6.475490570068359,
+                "jsHeapTotalMBBeforeGC": 10.31640625,
+                "jsHeapUsedMB": 3.9242820739746094,
+                "jsHeapTotalMB": 4.81640625,
+                "wasmMemoryMB": 38.625,
+                "rendererRssMB": 151.671875,
+                "rendererPssMB": 108.83984375,
+                "rendererHwmMB": 172.1171875,
+                "gpuRssMB": 140.24609375,
+                "gpuPssMB": 102.34765625,
+                "gpuHwmMB": 140.24609375,
+                "browserRssMB": 95.21484375,
+                "totalRssMB": 543.5,
+                "totalPssMB": 303.537109375
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 50.299999952316284,
+                "loadMs": 71.90000009536743,
+                "engineAssetsEndMs": 248.79999995231628,
+                "createdMs": 49.90000009536743,
+                "readyMs": 247.79999995231628,
+                "firstFrameMs": 248.29999995231628
+              },
+              "frame": {
+                "frames": 611,
+                "engineFrames": 611,
+                "fps": 62.1345400925408,
+                "intervalMedianMs": 17.59999990463257,
+                "intervalP95Ms": 20.300000190734863,
+                "intervalMeanMs": 16.09016393442623,
+                "mainThreadTaskMsPerFrame": 0.5984582651391163,
+                "scriptMsPerFrame": 0.373949263502455,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 0.9983633387888708,
+                "gpuProcessCpuMsPerFrame": 139.86906710310967
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 6.435356140136719,
+                "jsHeapTotalMBBeforeGC": 10.56640625,
+                "jsHeapUsedMB": 3.9281959533691406,
+                "jsHeapTotalMB": 4.81640625,
+                "wasmMemoryMB": 38.625,
+                "rendererRssMB": 150.88671875,
+                "rendererPssMB": 108.3564453125,
+                "rendererHwmMB": 169.1953125,
+                "gpuRssMB": 145.80078125,
+                "gpuPssMB": 107.67578125,
+                "gpuHwmMB": 145.80078125,
+                "browserRssMB": 96.13671875,
+                "totalRssMB": 549.078125,
+                "totalPssMB": 308.58984375
+              },
+              "errors": []
+            }
+          ],
+          "payload": {
+            "files": [
+              {
+                "path": "/static/index.html",
+                "bytes": 852,
+                "gzip": 486,
+                "brotli": 333,
+                "kind": "html"
+              },
+              {
+                "path": "/chunks/runtime.o97drv.js",
+                "bytes": 63755,
+                "gzip": 21334,
+                "brotli": 19252,
+                "kind": "appJs"
+              },
+              {
+                "path": "/static/index.l2681a.js",
+                "bytes": 72508,
+                "gzip": 16076,
+                "brotli": 12146,
+                "kind": "appJs"
+              },
+              {
+                "path": "/assets/3d/filament-1.53.4/filament.js",
+                "bytes": 218482,
+                "gzip": 52668,
+                "brotli": 46103,
+                "kind": "engineJs"
+              },
+              {
+                "path": "/assets/3d/filament-1.53.4/filament.wasm",
+                "bytes": 3562806,
+                "gzip": 1968781,
+                "brotli": 1730513,
+                "kind": "wasm"
+              },
+              {
+                "path": "/assets/3d/materials-1.53.4/standard.filamat",
+                "bytes": 83993,
+                "gzip": 20394,
+                "brotli": 16574,
+                "kind": "materials"
+              }
+            ],
+            "appJs": {
+              "bytes": 136263,
+              "gzip": 37410,
+              "brotli": 31398
+            },
+            "engineJs": {
+              "bytes": 218482,
+              "gzip": 52668,
+              "brotli": 46103
+            },
+            "wasm": {
+              "bytes": 3562806,
+              "gzip": 1968781,
+              "brotli": 1730513
+            },
+            "materials": {
+              "bytes": 83993,
+              "gzip": 20394,
+              "brotli": 16574
+            },
+            "html": {
+              "bytes": 852,
+              "gzip": 486,
+              "brotli": 333
+            },
+            "total": {
+              "bytes": 4002396,
+              "gzip": 2079739,
+              "brotli": 1824921
+            }
+          },
+          "glRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+          "canvas": [
+            1280,
+            720
+          ],
+          "counts": {
+            "frames": 64,
+            "glCallsPerFrame": 298,
+            "drawCallsPerFrame": 138.38,
+            "drawsByName": {
+              "drawElementsInstanced": 138.38
+            }
+          },
+          "errors": [],
+          "median": {
+            "startup": {
+              "domContentLoadedMs": 51.7,
+              "loadMs": 71.9,
+              "engineAssetsEndMs": 248.8,
+              "createdMs": 51,
+              "readyMs": 247.8,
+              "firstFrameMs": 248.3
+            },
+            "frame": {
+              "frames": 607,
+              "engineFrames": 607,
+              "fps": 62.135,
+              "intervalMedianMs": 17.6,
+              "intervalP95Ms": 20.3,
+              "intervalMeanMs": 16.09,
+              "mainThreadTaskMsPerFrame": 0.61,
+              "scriptMsPerFrame": 0.38,
+              "layoutMsPerFrame": 0,
+              "rendererCpuMsPerFrame": 0.988,
+              "gpuProcessCpuMsPerFrame": 137.068
+            },
+            "memory": {
+              "jsHeapUsedMBBeforeGC": 6.475,
+              "jsHeapTotalMBBeforeGC": 10.316,
+              "jsHeapUsedMB": 3.928,
+              "jsHeapTotalMB": 4.816,
+              "wasmMemoryMB": 38.625,
+              "rendererRssMB": 151.672,
+              "rendererPssMB": 108.84,
+              "rendererHwmMB": 170.695,
+              "gpuRssMB": 140.246,
+              "gpuPssMB": 102.348,
+              "gpuHwmMB": 140.246,
+              "browserRssMB": 96.031,
+              "totalRssMB": 544.293,
+              "totalPssMB": 303.537
+            }
+          },
+          "runErrors": []
+        },
+        "animated": {
+          "runs": [
+            {
+              "startup": {
+                "domContentLoadedMs": 72.60000014305115,
+                "loadMs": 90.60000014305115,
+                "engineAssetsEndMs": 267.90000009536743,
+                "createdMs": 71.60000014305115,
+                "readyMs": 265.90000009536743,
+                "firstFrameMs": 266.90000009536743
+              },
+              "frame": {
+                "frames": 612,
+                "engineFrames": 612,
+                "fps": 63.37699994822141,
+                "intervalMedianMs": 17.09999990463257,
+                "intervalP95Ms": 19.59999990463257,
+                "intervalMeanMs": 15.775941080430526,
+                "mainThreadTaskMsPerFrame": 1.0192336601307188,
+                "scriptMsPerFrame": 0.7365947712418303,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 1.5196078431372546,
+                "gpuProcessCpuMsPerFrame": 137.82679738562095
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 11.524368286132812,
+                "jsHeapTotalMBBeforeGC": 17.06640625,
+                "jsHeapUsedMB": 4.684440612792969,
+                "jsHeapTotalMB": 5.56640625,
+                "wasmMemoryMB": 38.625,
+                "rendererRssMB": 154.4140625,
+                "rendererPssMB": 111.2841796875,
+                "rendererHwmMB": 177.84375,
+                "gpuRssMB": 141.83984375,
+                "gpuPssMB": 104.083984375,
+                "gpuHwmMB": 141.83984375,
+                "browserRssMB": 95.6171875,
+                "totalRssMB": 548.94921875,
+                "totalPssMB": 307.8896484375
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 54.59999990463257,
+                "loadMs": 70.69999980926514,
+                "engineAssetsEndMs": 258.5,
+                "createdMs": 53.69999980926514,
+                "readyMs": 257,
+                "firstFrameMs": 258.19999980926514
+              },
+              "frame": {
+                "frames": 601,
+                "engineFrames": 601,
+                "fps": 62.41237862817384,
+                "intervalMedianMs": 17.100000143051147,
+                "intervalP95Ms": 20.09999990463257,
+                "intervalMeanMs": 16.025166666507722,
+                "mainThreadTaskMsPerFrame": 1.0745324459234609,
+                "scriptMsPerFrame": 0.7906805324459234,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 1.6306156405990018,
+                "gpuProcessCpuMsPerFrame": 136.73876871880196
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 10.921215057373047,
+                "jsHeapTotalMBBeforeGC": 15.81640625,
+                "jsHeapUsedMB": 4.637866973876953,
+                "jsHeapTotalMB": 5.56640625,
+                "wasmMemoryMB": 38.625,
+                "rendererRssMB": 154.8984375,
+                "rendererPssMB": 112.2841796875,
+                "rendererHwmMB": 176.828125,
+                "gpuRssMB": 140.921875,
+                "gpuPssMB": 102.126953125,
+                "gpuHwmMB": 140.921875,
+                "browserRssMB": 95.3125,
+                "totalRssMB": 546.3671875,
+                "totalPssMB": 306.296875
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 50.5,
+                "loadMs": 66.90000009536743,
+                "engineAssetsEndMs": 225.10000014305115,
+                "createdMs": 49.60000014305115,
+                "readyMs": 214.29999995231628,
+                "firstFrameMs": 215
+              },
+              "frame": {
+                "frames": 604,
+                "engineFrames": 604,
+                "fps": 62.669253676523404,
+                "intervalMedianMs": 17.09999990463257,
+                "intervalP95Ms": 20,
+                "intervalMeanMs": 15.963349917239416,
+                "mainThreadTaskMsPerFrame": 1.029754966887417,
+                "scriptMsPerFrame": 0.7722880794701987,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 1.539735099337748,
+                "gpuProcessCpuMsPerFrame": 137.3841059602649
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 11.55841064453125,
+                "jsHeapTotalMBBeforeGC": 16.81640625,
+                "jsHeapUsedMB": 4.685699462890625,
+                "jsHeapTotalMB": 5.56640625,
+                "wasmMemoryMB": 38.625,
+                "rendererRssMB": 156.71875,
+                "rendererPssMB": 113.6953125,
+                "rendererHwmMB": 179.53515625,
+                "gpuRssMB": 136.5625,
+                "gpuPssMB": 97.9521484375,
+                "gpuHwmMB": 136.5625,
+                "browserRssMB": 95.0703125,
+                "totalRssMB": 545.19140625,
+                "totalPssMB": 303.3486328125
+              },
+              "errors": []
+            }
+          ],
+          "payload": {
+            "files": [
+              {
+                "path": "/animated/index.html",
+                "bytes": 856,
+                "gzip": 485,
+                "brotli": 334,
+                "kind": "html"
+              },
+              {
+                "path": "/chunks/runtime.o97drv.js",
+                "bytes": 63755,
+                "gzip": 21334,
+                "brotli": 19252,
+                "kind": "appJs"
+              },
+              {
+                "path": "/animated/index.g2lf1j.js",
+                "bytes": 84487,
+                "gzip": 17645,
+                "brotli": 12534,
+                "kind": "appJs"
+              },
+              {
+                "path": "/assets/3d/filament-1.53.4/filament.js",
+                "bytes": 218482,
+                "gzip": 52668,
+                "brotli": 46103,
+                "kind": "engineJs"
+              },
+              {
+                "path": "/assets/3d/filament-1.53.4/filament.wasm",
+                "bytes": 3562806,
+                "gzip": 1968781,
+                "brotli": 1730513,
+                "kind": "wasm"
+              },
+              {
+                "path": "/assets/3d/materials-1.53.4/standard.filamat",
+                "bytes": 83993,
+                "gzip": 20394,
+                "brotli": 16574,
+                "kind": "materials"
+              }
+            ],
+            "appJs": {
+              "bytes": 148242,
+              "gzip": 38979,
+              "brotli": 31786
+            },
+            "engineJs": {
+              "bytes": 218482,
+              "gzip": 52668,
+              "brotli": 46103
+            },
+            "wasm": {
+              "bytes": 3562806,
+              "gzip": 1968781,
+              "brotli": 1730513
+            },
+            "materials": {
+              "bytes": 83993,
+              "gzip": 20394,
+              "brotli": 16574
+            },
+            "html": {
+              "bytes": 856,
+              "gzip": 485,
+              "brotli": 334
+            },
+            "total": {
+              "bytes": 4014379,
+              "gzip": 2081307,
+              "brotli": 1825310
+            }
+          },
+          "glRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+          "canvas": [
+            1280,
+            720
+          ],
+          "counts": {
+            "frames": 64,
+            "glCallsPerFrame": 298,
+            "drawCallsPerFrame": 138.38,
+            "drawsByName": {
+              "drawElementsInstanced": 138.38
+            }
+          },
+          "errors": [],
+          "median": {
+            "startup": {
+              "domContentLoadedMs": 54.6,
+              "loadMs": 70.7,
+              "engineAssetsEndMs": 258.5,
+              "createdMs": 53.7,
+              "readyMs": 257,
+              "firstFrameMs": 258.2
+            },
+            "frame": {
+              "frames": 604,
+              "engineFrames": 604,
+              "fps": 62.669,
+              "intervalMedianMs": 17.1,
+              "intervalP95Ms": 20,
+              "intervalMeanMs": 15.963,
+              "mainThreadTaskMsPerFrame": 1.03,
+              "scriptMsPerFrame": 0.772,
+              "layoutMsPerFrame": 0,
+              "rendererCpuMsPerFrame": 1.54,
+              "gpuProcessCpuMsPerFrame": 137.384
+            },
+            "memory": {
+              "jsHeapUsedMBBeforeGC": 11.524,
+              "jsHeapTotalMBBeforeGC": 16.816,
+              "jsHeapUsedMB": 4.684,
+              "jsHeapTotalMB": 5.566,
+              "wasmMemoryMB": 38.625,
+              "rendererRssMB": 154.898,
+              "rendererPssMB": 112.284,
+              "rendererHwmMB": 177.844,
+              "gpuRssMB": 140.922,
+              "gpuPssMB": 102.127,
+              "gpuHwmMB": 140.922,
+              "browserRssMB": 95.313,
+              "totalRssMB": 546.367,
+              "totalPssMB": 306.297
+            }
+          },
+          "runErrors": []
+        },
+        "empty": {
+          "runs": [],
+          "payload": {
+            "files": [
+              {
+                "path": "/empty/index.html",
+                "bytes": 763,
+                "gzip": 435,
+                "brotli": 301,
+                "kind": "html"
+              },
+              {
+                "path": "/chunks/runtime.o97drv.js",
+                "bytes": 63755,
+                "gzip": 21334,
+                "brotli": 19252,
+                "kind": "appJs"
+              },
+              {
+                "path": "/empty/index.2g6pjw.js",
+                "bytes": 29457,
+                "gzip": 11217,
+                "brotli": 9862,
+                "kind": "appJs"
+              },
+              {
+                "path": "/assets/3d/filament-1.53.4/filament.js",
+                "bytes": 218482,
+                "gzip": 52668,
+                "brotli": 46103,
+                "kind": "engineJs"
+              },
+              {
+                "path": "/assets/3d/filament-1.53.4/filament.wasm",
+                "bytes": 3562806,
+                "gzip": 1968781,
+                "brotli": 1730513,
+                "kind": "wasm"
+              }
+            ],
+            "appJs": {
+              "bytes": 93212,
+              "gzip": 32551,
+              "brotli": 29114
+            },
+            "engineJs": {
+              "bytes": 218482,
+              "gzip": 52668,
+              "brotli": 46103
+            },
+            "wasm": {
+              "bytes": 3562806,
+              "gzip": 1968781,
+              "brotli": 1730513
+            },
+            "materials": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "html": {
+              "bytes": 763,
+              "gzip": 435,
+              "brotli": 301
+            },
+            "total": {
+              "bytes": 3875263,
+              "gzip": 2054435,
+              "brotli": 1806031
+            }
+          }
+        }
+      },
+      "build": {
+        "buildMs": 1140,
+        "canvasFallbackWarning": false
+      }
+    },
+    "three-compiled": {
+      "pages": {
+        "static": {
+          "runs": [
+            {
+              "startup": {
+                "domContentLoadedMs": 173.60000014305115,
+                "loadMs": 173.60000014305115,
+                "engineAssetsEndMs": null,
+                "createdMs": 118.5,
+                "readyMs": 118.5,
+                "firstFrameMs": 170.40000009536743
+              },
+              "frame": {
+                "frames": 827,
+                "engineFrames": 827,
+                "fps": 160.97010277471023,
+                "intervalMedianMs": 0.3000001907348633,
+                "intervalP95Ms": 81.29999995231628,
+                "intervalMeanMs": 6.1102905567852694,
+                "mainThreadTaskMsPerFrame": 6.0335247883917775,
+                "scriptMsPerFrame": 4.962625151148731,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 0.6408706166868197,
+                "gpuProcessCpuMsPerFrame": 64.08706166868198
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 5.311088562011719,
+                "jsHeapTotalMBBeforeGC": 7.56640625,
+                "jsHeapUsedMB": 4.070278167724609,
+                "jsHeapTotalMB": 4.56640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 120.91015625,
+                "rendererPssMB": 78.1279296875,
+                "rendererHwmMB": 124.640625,
+                "gpuRssMB": 169.44140625,
+                "gpuPssMB": 131.583984375,
+                "gpuHwmMB": 200.28125,
+                "browserRssMB": 95.89453125,
+                "totalRssMB": 543.22265625,
+                "totalPssMB": 302.681640625
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 165.90000009536743,
+                "loadMs": 165.90000009536743,
+                "engineAssetsEndMs": null,
+                "createdMs": 113.30000019073486,
+                "readyMs": 113.30000019073486,
+                "firstFrameMs": 163.90000009536743
+              },
+              "frame": {
+                "frames": 834,
+                "engineFrames": 834,
+                "fps": 160.0460564191134,
+                "intervalMedianMs": 0.40000009536743164,
+                "intervalP95Ms": 82.20000004768372,
+                "intervalMeanMs": 6.157863145258103,
+                "mainThreadTaskMsPerFrame": 5.824960431654673,
+                "scriptMsPerFrame": 5.447580335731415,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 0.7194244604316546,
+                "gpuProcessCpuMsPerFrame": 63.15347721822544
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 5.348827362060547,
+                "jsHeapTotalMBBeforeGC": 7.56640625,
+                "jsHeapUsedMB": 4.079372406005859,
+                "jsHeapTotalMB": 4.81640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 117.75390625,
+                "rendererPssMB": 75.27734375,
+                "rendererHwmMB": 122.64453125,
+                "gpuRssMB": 161.578125,
+                "gpuPssMB": 124.1240234375,
+                "gpuHwmMB": 245.7265625,
+                "browserRssMB": 95.203125,
+                "totalRssMB": 531.390625,
+                "totalPssMB": 291.875
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 160,
+                "loadMs": 160,
+                "engineAssetsEndMs": null,
+                "createdMs": 111,
+                "readyMs": 111,
+                "firstFrameMs": 157.10000014305115
+              },
+              "frame": {
+                "frames": 893,
+                "engineFrames": 893,
+                "fps": 176.5205874844831,
+                "intervalMedianMs": 0.39999985694885254,
+                "intervalP95Ms": 40.89999985694885,
+                "intervalMeanMs": 5.668946188394265,
+                "mainThreadTaskMsPerFrame": 5.309675251959687,
+                "scriptMsPerFrame": 5.140417693169093,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 0.6159014557670772,
+                "gpuProcessCpuMsPerFrame": 57.56998880179168
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 5.351692199707031,
+                "jsHeapTotalMBBeforeGC": 7.06640625,
+                "jsHeapUsedMB": 4.081584930419922,
+                "jsHeapTotalMB": 4.81640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 119.97265625,
+                "rendererPssMB": 77.4267578125,
+                "rendererHwmMB": 124.7734375,
+                "gpuRssMB": 168.46484375,
+                "gpuPssMB": 130.7939453125,
+                "gpuHwmMB": 191.8984375,
+                "browserRssMB": 94.6015625,
+                "totalRssMB": 539.66796875,
+                "totalPssMB": 300.021484375
+              },
+              "errors": []
+            }
+          ],
+          "payload": {
+            "files": [
+              {
+                "path": "/static/index.html",
+                "bytes": 984,
+                "gzip": 517,
+                "brotli": 362,
+                "kind": "html"
+              },
+              {
+                "path": "/chunks/runtime.oy8cat.js",
+                "bytes": 83799,
+                "gzip": 28156,
+                "brotli": 25283,
+                "kind": "appJs"
+              },
+              {
+                "path": "/static/index.nmtbey.js",
+                "bytes": 847273,
+                "gzip": 215831,
+                "brotli": 175261,
+                "kind": "appJs"
+              }
+            ],
+            "appJs": {
+              "bytes": 931072,
+              "gzip": 243987,
+              "brotli": 200544
+            },
+            "engineJs": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "wasm": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "materials": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "html": {
+              "bytes": 984,
+              "gzip": 517,
+              "brotli": 362
+            },
+            "total": {
+              "bytes": 932056,
+              "gzip": 244504,
+              "brotli": 200906
+            }
+          },
+          "glRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+          "canvas": [
+            1280,
+            720
+          ],
+          "counts": {
+            "frames": 442,
+            "glCallsPerFrame": 39,
+            "drawCallsPerFrame": 7,
+            "drawsByName": {
+              "drawElements": 5,
+              "drawElementsInstanced": 2
+            }
+          },
+          "errors": [],
+          "median": {
+            "startup": {
+              "domContentLoadedMs": 165.9,
+              "loadMs": 165.9,
+              "createdMs": 113.3,
+              "readyMs": 113.3,
+              "firstFrameMs": 163.9
+            },
+            "frame": {
+              "frames": 834,
+              "engineFrames": 834,
+              "fps": 160.97,
+              "intervalMedianMs": 0.4,
+              "intervalP95Ms": 81.3,
+              "intervalMeanMs": 6.11,
+              "mainThreadTaskMsPerFrame": 5.825,
+              "scriptMsPerFrame": 5.14,
+              "layoutMsPerFrame": 0,
+              "rendererCpuMsPerFrame": 0.641,
+              "gpuProcessCpuMsPerFrame": 63.153
+            },
+            "memory": {
+              "jsHeapUsedMBBeforeGC": 5.349,
+              "jsHeapTotalMBBeforeGC": 7.566,
+              "jsHeapUsedMB": 4.079,
+              "jsHeapTotalMB": 4.816,
+              "wasmMemoryMB": 0,
+              "rendererRssMB": 119.973,
+              "rendererPssMB": 77.427,
+              "rendererHwmMB": 124.641,
+              "gpuRssMB": 168.465,
+              "gpuPssMB": 130.794,
+              "gpuHwmMB": 200.281,
+              "browserRssMB": 95.203,
+              "totalRssMB": 539.668,
+              "totalPssMB": 300.021
+            }
+          },
+          "runErrors": []
+        },
+        "animated": {
+          "runs": [
+            {
+              "startup": {
+                "domContentLoadedMs": 169.90000009536743,
+                "loadMs": 169.90000009536743,
+                "engineAssetsEndMs": null,
+                "createdMs": 109.79999995231628,
+                "readyMs": 109.79999995231628,
+                "firstFrameMs": 162.20000004768372
+              },
+              "frame": {
+                "frames": 820,
+                "engineFrames": 820,
+                "fps": 156.27977892128837,
+                "intervalMedianMs": 0.39999985694885254,
+                "intervalP95Ms": 80.39999985694885,
+                "intervalMeanMs": 6.3002442000695345,
+                "mainThreadTaskMsPerFrame": 6.014482926829263,
+                "scriptMsPerFrame": 5.758706097560975,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 0.8170731707317072,
+                "gpuProcessCpuMsPerFrame": 56.707317073170735
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 6.248477935791016,
+                "jsHeapTotalMBBeforeGC": 15.31640625,
+                "jsHeapUsedMB": 4.283000946044922,
+                "jsHeapTotalMB": 5.31640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 126.58203125,
+                "rendererPssMB": 83.240234375,
+                "rendererHwmMB": 136.390625,
+                "gpuRssMB": 156.703125,
+                "gpuPssMB": 117.7314453125,
+                "gpuHwmMB": 197.6484375,
+                "browserRssMB": 97.5625,
+                "totalRssMB": 537.20703125,
+                "totalPssMB": 294.0947265625
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 205.70000004768372,
+                "loadMs": 205.70000004768372,
+                "engineAssetsEndMs": null,
+                "createdMs": 139.5,
+                "readyMs": 139.5,
+                "firstFrameMs": 200.39999985694885
+              },
+              "frame": {
+                "frames": 838,
+                "engineFrames": 838,
+                "fps": 156.3987234239053,
+                "intervalMedianMs": 0.40000009536743164,
+                "intervalP95Ms": 79.59999990463257,
+                "intervalMeanMs": 6.281600955851474,
+                "mainThreadTaskMsPerFrame": 6.167688544152745,
+                "scriptMsPerFrame": 5.586545346062052,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 0.8591885441527449,
+                "gpuProcessCpuMsPerFrame": 66.27684964200473
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 6.8340606689453125,
+                "jsHeapTotalMBBeforeGC": 15.31640625,
+                "jsHeapUsedMB": 4.300453186035156,
+                "jsHeapTotalMB": 5.06640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 127.46484375,
+                "rendererPssMB": 83.8115234375,
+                "rendererHwmMB": 136.7109375,
+                "gpuRssMB": 177.65625,
+                "gpuPssMB": 139.01953125,
+                "gpuHwmMB": 203.57421875,
+                "browserRssMB": 95.82421875,
+                "totalRssMB": 558.203125,
+                "totalPssMB": 315.009765625
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 191.20000004768372,
+                "loadMs": 191.20000004768372,
+                "engineAssetsEndMs": null,
+                "createdMs": 135.10000014305115,
+                "readyMs": 135.10000014305115,
+                "firstFrameMs": 186.90000009536743
+              },
+              "frame": {
+                "frames": 905,
+                "engineFrames": 905,
+                "fps": 175.53387512687507,
+                "intervalMedianMs": 0.39999985694885254,
+                "intervalP95Ms": 41.700000047683716,
+                "intervalMeanMs": 5.593362831963902,
+                "mainThreadTaskMsPerFrame": 5.53690828729282,
+                "scriptMsPerFrame": 4.048896132596686,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 0.8066298342541439,
+                "gpuProcessCpuMsPerFrame": 58.773480662983424
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 5.6271514892578125,
+                "jsHeapTotalMBBeforeGC": 15.06640625,
+                "jsHeapUsedMB": 4.280975341796875,
+                "jsHeapTotalMB": 5.06640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 126.15234375,
+                "rendererPssMB": 83.2734375,
+                "rendererHwmMB": 135.50390625,
+                "gpuRssMB": 173.80859375,
+                "gpuPssMB": 135.18359375,
+                "gpuHwmMB": 234.54296875,
+                "browserRssMB": 95.125,
+                "totalRssMB": 551.69921875,
+                "totalPssMB": 310.310546875
+              },
+              "errors": []
+            }
+          ],
+          "payload": {
+            "files": [
+              {
+                "path": "/animated/index.html",
+                "bytes": 988,
+                "gzip": 517,
+                "brotli": 367,
+                "kind": "html"
+              },
+              {
+                "path": "/chunks/runtime.oy8cat.js",
+                "bytes": 83799,
+                "gzip": 28156,
+                "brotli": 25283,
+                "kind": "appJs"
+              },
+              {
+                "path": "/animated/index.2sc3dd.js",
+                "bytes": 843430,
+                "gzip": 215353,
+                "brotli": 174647,
+                "kind": "appJs"
+              }
+            ],
+            "appJs": {
+              "bytes": 927229,
+              "gzip": 243509,
+              "brotli": 199930
+            },
+            "engineJs": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "wasm": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "materials": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "html": {
+              "bytes": 988,
+              "gzip": 517,
+              "brotli": 367
+            },
+            "total": {
+              "bytes": 928217,
+              "gzip": 244026,
+              "brotli": 200297
+            }
+          },
+          "glRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+          "canvas": [
+            1280,
+            720
+          ],
+          "counts": {
+            "frames": 292,
+            "glCallsPerFrame": 41,
+            "drawCallsPerFrame": 7,
+            "drawsByName": {
+              "drawElements": 5,
+              "drawElementsInstanced": 2
+            }
+          },
+          "errors": [],
+          "median": {
+            "startup": {
+              "domContentLoadedMs": 191.2,
+              "loadMs": 191.2,
+              "createdMs": 135.1,
+              "readyMs": 135.1,
+              "firstFrameMs": 186.9
+            },
+            "frame": {
+              "frames": 838,
+              "engineFrames": 838,
+              "fps": 156.399,
+              "intervalMedianMs": 0.4,
+              "intervalP95Ms": 79.6,
+              "intervalMeanMs": 6.282,
+              "mainThreadTaskMsPerFrame": 6.014,
+              "scriptMsPerFrame": 5.587,
+              "layoutMsPerFrame": 0,
+              "rendererCpuMsPerFrame": 0.817,
+              "gpuProcessCpuMsPerFrame": 58.773
+            },
+            "memory": {
+              "jsHeapUsedMBBeforeGC": 6.248,
+              "jsHeapTotalMBBeforeGC": 15.316,
+              "jsHeapUsedMB": 4.283,
+              "jsHeapTotalMB": 5.066,
+              "wasmMemoryMB": 0,
+              "rendererRssMB": 126.582,
+              "rendererPssMB": 83.273,
+              "rendererHwmMB": 136.391,
+              "gpuRssMB": 173.809,
+              "gpuPssMB": 135.184,
+              "gpuHwmMB": 203.574,
+              "browserRssMB": 95.824,
+              "totalRssMB": 551.699,
+              "totalPssMB": 310.311
+            }
+          },
+          "runErrors": []
+        },
+        "empty": {
+          "runs": [],
+          "payload": {
+            "files": [
+              {
+                "path": "/empty/index.html",
+                "bytes": 895,
+                "gzip": 479,
+                "brotli": 325,
+                "kind": "html"
+              },
+              {
+                "path": "/chunks/runtime.oy8cat.js",
+                "bytes": 83799,
+                "gzip": 28156,
+                "brotli": 25283,
+                "kind": "appJs"
+              },
+              {
+                "path": "/empty/index.1838zf.js",
+                "bytes": 792521,
+                "gzip": 206941,
+                "brotli": 169715,
+                "kind": "appJs"
+              }
+            ],
+            "appJs": {
+              "bytes": 876320,
+              "gzip": 235097,
+              "brotli": 194998
+            },
+            "engineJs": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "wasm": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "materials": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "html": {
+              "bytes": 895,
+              "gzip": 479,
+              "brotli": 325
+            },
+            "total": {
+              "bytes": 877215,
+              "gzip": 235576,
+              "brotli": 195323
+            }
+          }
+        }
+      },
+      "build": {
+        "buildMs": 4751,
+        "canvasFallbackWarning": false
+      }
+    },
+    "three-runtime": {
+      "pages": {
+        "static": {
+          "runs": [
+            {
+              "startup": {
+                "domContentLoadedMs": 405.90000009536743,
+                "loadMs": 405.90000009536743,
+                "engineAssetsEndMs": null,
+                "createdMs": 209.5,
+                "readyMs": 209.5,
+                "firstFrameMs": 382.7000000476837
+              },
+              "frame": {
+                "frames": 604,
+                "engineFrames": 604,
+                "fps": 19.039933423164676,
+                "intervalMedianMs": 32.700000047683716,
+                "intervalP95Ms": 170.70000004768372,
+                "intervalMeanMs": 52.59386401310884,
+                "mainThreadTaskMsPerFrame": 52.03514735099338,
+                "scriptMsPerFrame": 51.50260099337749,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 12.268211920529799,
+                "gpuProcessCpuMsPerFrame": 504.6026490066226
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 26.78948974609375,
+                "jsHeapTotalMBBeforeGC": 30.06640625,
+                "jsHeapUsedMB": 25.21408462524414,
+                "jsHeapTotalMB": 26.06640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 148.0859375,
+                "rendererPssMB": 105.064453125,
+                "rendererHwmMB": 198.23828125,
+                "gpuRssMB": 252.78515625,
+                "gpuPssMB": 215.4208984375,
+                "gpuHwmMB": 255.85546875,
+                "browserRssMB": 95.05859375,
+                "totalRssMB": 651.984375,
+                "totalPssMB": 411.3369140625
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 404.5,
+                "loadMs": 404.5,
+                "engineAssetsEndMs": null,
+                "createdMs": 202.79999995231628,
+                "readyMs": 202.79999995231628,
+                "firstFrameMs": 381.90000009536743
+              },
+              "frame": {
+                "frames": 603,
+                "engineFrames": 603,
+                "fps": 20.204998642851006,
+                "intervalMedianMs": 26.549999952316284,
+                "intervalP95Ms": 156.79999995231628,
+                "intervalMeanMs": 49.42973421895227,
+                "mainThreadTaskMsPerFrame": 49.04772968490879,
+                "scriptMsPerFrame": 48.54561691542289,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 11.2106135986733,
+                "gpuProcessCpuMsPerFrame": 482.9850746268657
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 26.695587158203125,
+                "jsHeapTotalMBBeforeGC": 29.31640625,
+                "jsHeapUsedMB": 25.167903900146484,
+                "jsHeapTotalMB": 25.81640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 148.74609375,
+                "rendererPssMB": 106.130859375,
+                "rendererHwmMB": 197.484375,
+                "gpuRssMB": 255.52734375,
+                "gpuPssMB": 217.640625,
+                "gpuHwmMB": 264.60546875,
+                "browserRssMB": 95.06640625,
+                "totalRssMB": 655.39453125,
+                "totalPssMB": 416.2529296875
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 416.2000000476837,
+                "loadMs": 416.2000000476837,
+                "engineAssetsEndMs": null,
+                "createdMs": 223.59999990463257,
+                "readyMs": 223.59999990463257,
+                "firstFrameMs": 393.7000000476837
+              },
+              "frame": {
+                "frames": 602,
+                "engineFrames": 602,
+                "fps": 19.28479672467018,
+                "intervalMedianMs": 22.5,
+                "intervalP95Ms": 178.70000004768372,
+                "intervalMeanMs": 51.72745424261109,
+                "mainThreadTaskMsPerFrame": 51.4188073089701,
+                "scriptMsPerFrame": 50.8487292358804,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 11.710963455149503,
+                "gpuProcessCpuMsPerFrame": 503.8870431893688
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 26.246517181396484,
+                "jsHeapTotalMBBeforeGC": 29.81640625,
+                "jsHeapUsedMB": 25.209110260009766,
+                "jsHeapTotalMB": 26.06640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 149.234375,
+                "rendererPssMB": 106.64453125,
+                "rendererHwmMB": 199.1796875,
+                "gpuRssMB": 248.91796875,
+                "gpuPssMB": 210.9853515625,
+                "gpuHwmMB": 259.5234375,
+                "browserRssMB": 97.2109375,
+                "totalRssMB": 651.890625,
+                "totalPssMB": 411.1064453125
+              },
+              "errors": []
+            }
+          ],
+          "payload": {
+            "files": [
+              {
+                "path": "/static/index.html",
+                "bytes": 984,
+                "gzip": 518,
+                "brotli": 362,
+                "kind": "html"
+              },
+              {
+                "path": "/chunks/runtime.agmdsa.js",
+                "bytes": 90760,
+                "gzip": 30684,
+                "brotli": 27490,
+                "kind": "appJs"
+              },
+              {
+                "path": "/static/index.4n1zbz.js",
+                "bytes": 813780,
+                "gzip": 213521,
+                "brotli": 173881,
+                "kind": "appJs"
+              }
+            ],
+            "appJs": {
+              "bytes": 904540,
+              "gzip": 244205,
+              "brotli": 201371
+            },
+            "engineJs": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "wasm": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "materials": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "html": {
+              "bytes": 984,
+              "gzip": 518,
+              "brotli": 362
+            },
+            "total": {
+              "bytes": 905524,
+              "gzip": 244723,
+              "brotli": 201733
+            }
+          },
+          "glRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+          "canvas": [
+            1280,
+            720
+          ],
+          "counts": {
+            "frames": 63,
+            "glCallsPerFrame": 3332,
+            "drawCallsPerFrame": 1105,
+            "drawsByName": {
+              "drawElements": 1105
+            }
+          },
+          "errors": [],
+          "median": {
+            "startup": {
+              "domContentLoadedMs": 405.9,
+              "loadMs": 405.9,
+              "createdMs": 209.5,
+              "readyMs": 209.5,
+              "firstFrameMs": 382.7
+            },
+            "frame": {
+              "frames": 603,
+              "engineFrames": 603,
+              "fps": 19.285,
+              "intervalMedianMs": 26.55,
+              "intervalP95Ms": 170.7,
+              "intervalMeanMs": 51.727,
+              "mainThreadTaskMsPerFrame": 51.419,
+              "scriptMsPerFrame": 50.849,
+              "layoutMsPerFrame": 0,
+              "rendererCpuMsPerFrame": 11.711,
+              "gpuProcessCpuMsPerFrame": 503.887
+            },
+            "memory": {
+              "jsHeapUsedMBBeforeGC": 26.696,
+              "jsHeapTotalMBBeforeGC": 29.816,
+              "jsHeapUsedMB": 25.209,
+              "jsHeapTotalMB": 26.066,
+              "wasmMemoryMB": 0,
+              "rendererRssMB": 148.746,
+              "rendererPssMB": 106.131,
+              "rendererHwmMB": 198.238,
+              "gpuRssMB": 252.785,
+              "gpuPssMB": 215.421,
+              "gpuHwmMB": 259.523,
+              "browserRssMB": 95.066,
+              "totalRssMB": 651.984,
+              "totalPssMB": 411.337
+            }
+          },
+          "runErrors": []
+        },
+        "animated": {
+          "runs": [
+            {
+              "startup": {
+                "domContentLoadedMs": 433.7999999523163,
+                "loadMs": 433.7999999523163,
+                "engineAssetsEndMs": null,
+                "createdMs": 240.19999980926514,
+                "readyMs": 240.19999980926514,
+                "firstFrameMs": 411.69999980926514
+              },
+              "frame": {
+                "frames": 602,
+                "engineFrames": 602,
+                "fps": 17.17061372104206,
+                "intervalMedianMs": 25.200000047683716,
+                "intervalP95Ms": 202.90000009536743,
+                "intervalMeanMs": 58.16788685539995,
+                "mainThreadTaskMsPerFrame": 57.75784219269103,
+                "scriptMsPerFrame": 57.10318604651162,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 12.641196013289035,
+                "gpuProcessCpuMsPerFrame": 555.5813953488372
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 30.437145233154297,
+                "jsHeapTotalMBBeforeGC": 32.31640625,
+                "jsHeapUsedMB": 25.27386474609375,
+                "jsHeapTotalMB": 25.81640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 148.4296875,
+                "rendererPssMB": 106.169921875,
+                "rendererHwmMB": 200.46875,
+                "gpuRssMB": 253.60546875,
+                "gpuPssMB": 215.576171875,
+                "gpuHwmMB": 260.3515625,
+                "browserRssMB": 94.7265625,
+                "totalRssMB": 652.2421875,
+                "totalPssMB": 413.27734375
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 426,
+                "loadMs": 426,
+                "engineAssetsEndMs": null,
+                "createdMs": 237,
+                "readyMs": 237,
+                "firstFrameMs": 406.09999990463257
+              },
+              "frame": {
+                "frames": 604,
+                "engineFrames": 604,
+                "fps": 18.844495472841015,
+                "intervalMedianMs": 20.899999856948853,
+                "intervalP95Ms": 178.29999995231628,
+                "intervalMeanMs": 53.015091210455445,
+                "mainThreadTaskMsPerFrame": 52.572228476821195,
+                "scriptMsPerFrame": 52.03937913907284,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 12.549668874172186,
+                "gpuProcessCpuMsPerFrame": 504.45364238410593
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 29.04627227783203,
+                "jsHeapTotalMBBeforeGC": 31.56640625,
+                "jsHeapUsedMB": 25.267311096191406,
+                "jsHeapTotalMB": 25.81640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 149.71875,
+                "rendererPssMB": 106.447265625,
+                "rendererHwmMB": 202.765625,
+                "gpuRssMB": 257.28125,
+                "gpuPssMB": 218.7802734375,
+                "gpuHwmMB": 262.64453125,
+                "browserRssMB": 94.6484375,
+                "totalRssMB": 657.0625,
+                "totalPssMB": 416.8466796875
+              },
+              "errors": []
+            },
+            {
+              "startup": {
+                "domContentLoadedMs": 397.5,
+                "loadMs": 397.5,
+                "engineAssetsEndMs": null,
+                "createdMs": 209.09999990463257,
+                "readyMs": 209.09999990463257,
+                "firstFrameMs": 378.7000000476837
+              },
+              "frame": {
+                "frames": 607,
+                "engineFrames": 607,
+                "fps": 20.126795495873832,
+                "intervalMedianMs": 21.59999990463257,
+                "intervalP95Ms": 169.70000004768372,
+                "intervalMeanMs": 49.73366336657269,
+                "mainThreadTaskMsPerFrame": 49.380388797364084,
+                "scriptMsPerFrame": 48.90331301482702,
+                "layoutMsPerFrame": 0,
+                "rendererCpuMsPerFrame": 11.696869851729819,
+                "gpuProcessCpuMsPerFrame": 484.3163097199341
+              },
+              "memory": {
+                "jsHeapUsedMBBeforeGC": 37.00127029418945,
+                "jsHeapTotalMBBeforeGC": 89.81640625,
+                "jsHeapUsedMB": 25.401599884033203,
+                "jsHeapTotalMB": 26.06640625,
+                "wasmMemoryMB": 0,
+                "rendererRssMB": 148.57421875,
+                "rendererPssMB": 105.375,
+                "rendererHwmMB": 215.58203125,
+                "gpuRssMB": 259.72265625,
+                "gpuPssMB": 221.5458984375,
+                "gpuHwmMB": 264.33984375,
+                "browserRssMB": 95.43359375,
+                "totalRssMB": 660.65625,
+                "totalPssMB": 419.1689453125
+              },
+              "errors": []
+            }
+          ],
+          "payload": {
+            "files": [
+              {
+                "path": "/animated/index.html",
+                "bytes": 988,
+                "gzip": 518,
+                "brotli": 367,
+                "kind": "html"
+              },
+              {
+                "path": "/chunks/runtime.agmdsa.js",
+                "bytes": 90760,
+                "gzip": 30684,
+                "brotli": 27490,
+                "kind": "appJs"
+              },
+              {
+                "path": "/animated/index.qeou53.js",
+                "bytes": 812254,
+                "gzip": 213127,
+                "brotli": 173188,
+                "kind": "appJs"
+              }
+            ],
+            "appJs": {
+              "bytes": 903014,
+              "gzip": 243811,
+              "brotli": 200678
+            },
+            "engineJs": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "wasm": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "materials": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "html": {
+              "bytes": 988,
+              "gzip": 518,
+              "brotli": 367
+            },
+            "total": {
+              "bytes": 904002,
+              "gzip": 244329,
+              "brotli": 201045
+            }
+          },
+          "glRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+          "canvas": [
+            1280,
+            720
+          ],
+          "counts": {
+            "frames": 65,
+            "glCallsPerFrame": 3332,
+            "drawCallsPerFrame": 1105,
+            "drawsByName": {
+              "drawElements": 1105
+            }
+          },
+          "errors": [],
+          "median": {
+            "startup": {
+              "domContentLoadedMs": 426,
+              "loadMs": 426,
+              "createdMs": 237,
+              "readyMs": 237,
+              "firstFrameMs": 406.1
+            },
+            "frame": {
+              "frames": 604,
+              "engineFrames": 604,
+              "fps": 18.844,
+              "intervalMedianMs": 21.6,
+              "intervalP95Ms": 178.3,
+              "intervalMeanMs": 53.015,
+              "mainThreadTaskMsPerFrame": 52.572,
+              "scriptMsPerFrame": 52.039,
+              "layoutMsPerFrame": 0,
+              "rendererCpuMsPerFrame": 12.55,
+              "gpuProcessCpuMsPerFrame": 504.454
+            },
+            "memory": {
+              "jsHeapUsedMBBeforeGC": 30.437,
+              "jsHeapTotalMBBeforeGC": 32.316,
+              "jsHeapUsedMB": 25.274,
+              "jsHeapTotalMB": 25.816,
+              "wasmMemoryMB": 0,
+              "rendererRssMB": 148.574,
+              "rendererPssMB": 106.17,
+              "rendererHwmMB": 202.766,
+              "gpuRssMB": 257.281,
+              "gpuPssMB": 218.78,
+              "gpuHwmMB": 262.645,
+              "browserRssMB": 94.727,
+              "totalRssMB": 657.063,
+              "totalPssMB": 416.847
+            }
+          },
+          "runErrors": []
+        },
+        "empty": {
+          "runs": [],
+          "payload": {
+            "files": [
+              {
+                "path": "/empty/index.html",
+                "bytes": 895,
+                "gzip": 477,
+                "brotli": 324,
+                "kind": "html"
+              },
+              {
+                "path": "/chunks/runtime.agmdsa.js",
+                "bytes": 90760,
+                "gzip": 30684,
+                "brotli": 27490,
+                "kind": "appJs"
+              },
+              {
+                "path": "/empty/index.psd4js.js",
+                "bytes": 792532,
+                "gzip": 206947,
+                "brotli": 169947,
+                "kind": "appJs"
+              }
+            ],
+            "appJs": {
+              "bytes": 883292,
+              "gzip": 237631,
+              "brotli": 197437
+            },
+            "engineJs": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "wasm": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "materials": {
+              "bytes": 0,
+              "gzip": 0,
+              "brotli": 0
+            },
+            "html": {
+              "bytes": 895,
+              "gzip": 477,
+              "brotli": 324
+            },
+            "total": {
+              "bytes": 884187,
+              "gzip": 238108,
+              "brotli": 197761
+            }
+          }
+        }
+      },
+      "build": {
+        "buildMs": 4440,
+        "canvasFallbackWarning": false
+      }
+    }
+  }
+}
