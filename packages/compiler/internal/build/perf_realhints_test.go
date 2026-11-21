@@ -156,7 +156,7 @@ type metaBuild struct {
 
 // chunkHashRe matches the content hashes of chunk names, which depend on the
 // project directory.
-var chunkHashRe = regexp.MustCompile(`\.[0-9a-z]{6}\.js|island_[0-9a-f]{12}`)
+var chunkHashRe = regexp.MustCompile(`island_[0-9a-f]{12}(\.[0-9a-f]{10})?|\.[0-9a-z]{6}\.js|krate-build"? content="?[0-9a-f]{16}`)
 
 // compareHeads compares the heads of two builds of one project made in
 // different directories.

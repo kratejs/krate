@@ -253,7 +253,8 @@ function capture(captureHead) {
     head.push("title " + JSON.stringify(document.title));
     for (const m of document.head.querySelectorAll("meta[name],meta[property]")) {
       const key = m.getAttribute("name") || m.getAttribute("property");
-      if (key === "viewport" || key === "generator") continue;
+      // The framework's own: the viewport default, generator and the build id.
+      if (key === "viewport" || key === "generator" || key === "krate-build") continue;
       head.push("meta " + key + "=" + JSON.stringify(m.getAttribute("content")));
     }
     for (const l of document.head.querySelectorAll("link[rel=canonical],link[rel=author],link[rel=alternate]")) {

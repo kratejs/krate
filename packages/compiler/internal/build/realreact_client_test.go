@@ -107,7 +107,7 @@ func TestRealReactUseClientModule(t *testing.T) {
 		return all
 	}
 	// Sync pages are static: the island carries its fallback and a real chunk.
-	srcRe := regexp.MustCompile(`chunks/(island_[0-9a-f]+)\.js`)
+	srcRe := regexp.MustCompile(`chunks/(island_[0-9a-f]+(?:\.[0-9a-f]+)?)\.js`)
 	for _, c := range []struct{ page, fallback string }{{"usync", "Loading usync"}, {"upanelsync", ""}} {
 		html := readBuilt(t, filepath.Join(b.Cfg.OutDir, c.page, "index.html"))
 		if strings.Contains(html, "<canvas") {

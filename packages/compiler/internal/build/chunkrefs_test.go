@@ -84,7 +84,7 @@ export default async function Page() {
 	}
 	// The pages do reference the icons' boundary chunk.
 	refs := map[string]bool{}
-	cbRe := regexp.MustCompile(`__krateCB\("[^"]+", "Wallet", "(/chunks/island_[0-9a-f]+\.js)"`)
+	cbRe := regexp.MustCompile(`__krateCB\("[^"]+", "Wallet", "(/chunks/island_[0-9a-f]+(?:\.[0-9a-f]+)?\.js)"`)
 	_ = filepath.Walk(filepath.Join(b.Cfg.OutDir, ".krate", "server-bundles"), func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(p, ".mjs") {
 			return nil

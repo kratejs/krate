@@ -196,7 +196,7 @@ func TestRealReactIsland(t *testing.T) {
 		t.Fatalf("the island must carry its fallback markup:\n%s", index)
 	}
 
-	chunkRe := regexp.MustCompile(`chunks/(island_[0-9a-f]+|isr-[0-9a-z]+)\.js`)
+	chunkRe := regexp.MustCompile(`chunks/(island_[0-9a-f]+(?:\.[0-9a-f]+)?|isr-[0-9a-z]+)\.js`)
 	pageChunks := func(dir string) []string {
 		var found []string
 		files, _ := filepath.Glob(filepath.Join(cfg.OutDir, dir, "*.js"))
