@@ -71,7 +71,8 @@ export default defineConfig({
     }
   ],
   "sourcemap": false,
-  "trailingSlash": "always"
+  "trailingSlash": "always",
+  "viewTransitions": "off"
 });
 `
 	if got := configBody(t, rep); got != want {
@@ -244,7 +245,8 @@ export default defineConfig({
   "pagesDir": "src/pages",
   "publicDir": "public",
   "sourcemap": false,
-  "trailingSlash": "never"
+  "trailingSlash": "never",
+  "viewTransitions": "off"
 });
 `
 	body := configBody(t, rep)

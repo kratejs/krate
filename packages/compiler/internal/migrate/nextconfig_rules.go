@@ -650,6 +650,8 @@ func experimentalNotes(file string, v ast.Expr, notes *nextConfigNotes) {
 		switch p.Key {
 		case "authInterrupts":
 			// forbidden() and unauthorized() always work in Krate.
+		case "viewTransition":
+			// Read by readNextConfig: it leaves Krate's View Transitions on.
 		case "ppr":
 			notes.Manual = append(notes.Manual, ManualItem{Source: file, Reason: "experimental.ppr is not translated", Hint: "set ppr in krate.config.ts (see Partial prerendering in the config reference)"})
 		case "serverComponentsExternalPackages":
