@@ -210,6 +210,8 @@ func (s *scope) isGetter(name string) bool {
 type reactCtx struct {
 	imports map[string]string // local name -> React API name
 	alias   string            // namespace/default alias for `React`
+	// hoisted numbers the bindings hoistInlineGetterHooks declares.
+	hoisted int
 	// domAlias is the namespace/default alias for `react-dom` (ReactDOM).
 	domAlias string
 	// fragmentNames holds local bindings (including the React alias) that

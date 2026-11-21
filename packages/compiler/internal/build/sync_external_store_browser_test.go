@@ -73,6 +73,14 @@ export default function Ids() {
   return <div><label id="lbl" htmlFor={id}>name</label><input id="in" data-id={id} /><button id="rerender" onClick={() => setN(n + 1)}>{n}</button></div>;
 }
 `,
+	"src/components/Hooked.tsx": `'use client';
+import { useMemo, useSyncExternalStore } from 'react';
+import { subscribe, read, serverRead } from '../store';
+export default function Hooked() {
+  const m = useSyncExternalStore(subscribe, read, serverRead);
+  return <span id="hooked" data-hooked={m}>{m}{useMemo(() => '!' + m, [m])}</span>;
+}
+`,
 	"src/components/RealMode.tsx": `'use client';
 import { useSyncExternalStore } from 'react';
 import { Canvas, Rect } from 'fake-canvas';
@@ -91,9 +99,22 @@ import Switch from '../components/Switch';
 import Pair from '../components/Pair';
 import NoServer from '../components/NoServer';
 import Ids from '../components/Ids';
+import Hooked from '../components/Hooked';
 export default async function Page() {
   await Promise.resolve();
-  return <main><Switch /><Mode /><Pair /><NoServer /><Ids /></main>;
+  return <main><Switch /><Mode /><Pair /><NoServer /><Ids /><Hooked /></main>;
+}
+`,
+	// The same components on a synchronous page are compiled to Krate's own
+	// runtime, which lowers a hook called inline in JSX like a declared one.
+	"src/pages/compiled.tsx": `import Mode from '../components/Mode';
+import Switch from '../components/Switch';
+import Pair from '../components/Pair';
+import NoServer from '../components/NoServer';
+import Ids from '../components/Ids';
+import Hooked from '../components/Hooked';
+export default function Page() {
+  return <main><Switch /><Mode /><Pair /><NoServer /><Ids /><Hooked /></main>;
 }
 `,
 	// The same components from a package on a synchronous page: Preact
@@ -144,12 +165,14 @@ export default function Page() { return <main><RealMode /></main>; }
 `,
 }
 
-// TestUseClientIslandBrowserSyncExternalStore loads each page with "b" saved
-// and checks, at the first frame after hydration and after a re-render, that
-// the DOM shows "b", that a reader mounted after hydration agrees, that a
-// store without getServerSnapshot still reads getSnapshot while hydrating,
-// that useId keeps the server's ids, and that a real-React island behaves as
-// React does.
+// TestUseClientIslandBrowserSyncExternalStore loads each page with "b" saved:
+// Preact client boundaries, Preact package islands, the same components
+// compiled to Krate's runtime, and a real-React island. On the Preact pages
+// every frame after hydration must show "b". It also checks that a reader
+// mounted after hydration agrees, that a store without getServerSnapshot
+// still reads getSnapshot while hydrating, that useId keeps the server's ids,
+// that hooks called inline in JSX work on Krate's runtime, and that the real-
+// React island behaves as React does.
 func TestUseClientIslandBrowserSyncExternalStore(t *testing.T) {
 	t.Parallel()
 	e2eEnv(t)

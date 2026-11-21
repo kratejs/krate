@@ -168,6 +168,9 @@ func (c *reactCtx) rewriteFnBody(body *[]ast.Stmt, sc *scope, kind frameKind, pa
 		c.declareHookParams(body, sc, params)
 	}
 	stmts := *body
+	if kind == frameComponent {
+		stmts = c.hoistInlineGetterHooks(stmts)
+	}
 	plan := planRenderBody(stmts)
 	drop := map[ast.Stmt]bool{}
 	for i, stmt := range stmts {

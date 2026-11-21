@@ -54,7 +54,11 @@ const init = () => {
 };
 
 try {
-  for (const path of ["/", "/islands"]) {
+  // "/compiled" runs the components on Krate's own runtime: no Preact island
+  // markers to wait for, and dynamic attributes are set by the client.
+  for (const path of ["/", "/islands", "/compiled"]) {
+    const compiled = path === "/compiled";
+    const hooked = path !== "/islands";
     const context = await browser.newContext();
     await context.addInitScript(init);
     const page = await context.newPage();
@@ -63,9 +67,10 @@ try {
     page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
     const html = await (await page.request.get(base + path)).text();
     // The server renders getServerSnapshot's value.
-    if (!/data-mode="?a/.test(html) || !/id="?sw-a"?[^>]*aria-checked="?true/.test(html)) fail(p0(path) + "the server did not render getServerSnapshot's value: " + (html.match(/<main[\s\S]{0,600}/) || [html.slice(0, 600)])[0]);
+    if (!/data-mode="?a/.test(html) || (!compiled && !/id="?sw-a"?[^>]*aria-checked="?true/.test(html)) || (hooked && !/id="?hooked"?[^>]*>a!a</.test(html.replace(/<!--[^>]*-->/g, "")))) fail(p0(path) + "the server did not render getServerSnapshot's value: " + (html.match(/<main[\s\S]{0,600}/) || [html.slice(0, 600)])[0]);
     await page.goto(base + path);
-    for (const sel of ["#mode", "#sw-a", "#early", "#noserver", "#in"]) await step(page, path + " hydrate " + sel, () => waitHydrated(page, sel));
+    if (compiled) await step(page, path + " hydrate", () => page.waitForFunction(() => document.getElementById("early")?.textContent === "b", null, { timeout: 15000 }));
+    else for (const sel of ["#mode", "#sw-a", "#early", "#noserver", "#in"]) await step(page, path + " hydrate " + sel, () => waitHydrated(page, sel));
     await step(page, path + " #late", () => page.waitForSelector("#late"));
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     const state = await page.evaluate(() => ({
@@ -76,10 +81,11 @@ try {
       early: document.getElementById("early").textContent,
       late: document.getElementById("late").textContent,
       noserver: document.getElementById("noserver").textContent,
+      hooked: document.getElementById("hooked") && document.getElementById("hooked").getAttribute("data-hooked") + ":" + document.getElementById("hooked").textContent,
     }));
     const p = path + ": ";
     const frames = state.frames;
-    if (!frames.some((f) => f.mode) || !frames.some((f) => f.sw)) fail(p + "no frame was recorded after hydration: " + JSON.stringify(frames.slice(0, 5)));
+    if (!compiled && (!frames.some((f) => f.mode) || !frames.some((f) => f.sw))) fail(p + "no frame was recorded after hydration: " + JSON.stringify(frames.slice(0, 5)));
     for (const f of frames) {
       if (f.mode && f.mode !== "SECTION:b:1") { fail(p + "a frame showed the server's mode after hydration: " + f.mode); break; }
       if (f.sw && f.sw !== "false/true") { fail(p + "a frame showed the server's switch after hydration: " + f.sw); break; }
@@ -90,6 +96,8 @@ try {
     if (state.early !== "b" || state.late !== "b") fail(p + "the hydrated reader and the one mounted later disagree: " + state.early + " / " + state.late);
     // Without getServerSnapshot the hydrating render reads getSnapshot, as before.
     if (state.noserver !== "b") fail(p + "a store without getServerSnapshot: " + state.noserver);
+    // useMemo called inline in JSX, over the store value.
+    if (hooked && state.hooked !== "b:b!b") fail(p + "inline useMemo: " + state.hooked);
 
     // useId: the server's ids survive hydration and a re-render.
     const serverId = (html.match(/id="?in"? data-id="?([^"\s>]+)/) || [])[1];
@@ -104,8 +112,9 @@ try {
     const after = await page.evaluate(() => ({
       mode: document.getElementById("mode").tagName, sw: document.getElementById("sw-a").getAttribute("aria-checked"),
       early: document.getElementById("early").textContent, late: document.getElementById("late").textContent,
+      hooked: document.getElementById("hooked") && document.getElementById("hooked").textContent,
     }));
-    if (after.mode !== "DIV" || after.sw !== "true" || after.early !== "a" || after.late !== "a") fail(p + "after choosing A: " + JSON.stringify(after));
+    if (after.mode !== "DIV" || after.sw !== "true" || after.early !== "a" || after.late !== "a" || (hooked && after.hooked !== "a!a")) fail(p + "after choosing A: " + JSON.stringify(after));
     if (errors.length) fail(p + errors.join("\n"));
     results[path] = { frames: frames.length, ...state, frames: undefined, ids };
     await context.close();
