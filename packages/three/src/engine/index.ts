@@ -66,7 +66,7 @@ export { useStore, useThree, useFrame, useGraph, useLoader, useInstanceHandle } 
 export type { LoaderResult, Extensions } from './hooks.js';
 export { createThree, createFrame, createLoader, createGraph } from './primitives.js';
 export type { Accessor, MaybeAccessor, LoaderAccessor } from './primitives.js';
-export { mountCanvas } from './canvas.js';
+export { mountCanvas, debounced } from './canvas.js';
 export { SceneNode, SCENE_NS, createSceneRoot, createPortalRoot, commitSceneProps } from './host.js';
 export { createPortalState } from './reconciler.js';
 export { setRef } from './runtime.js';

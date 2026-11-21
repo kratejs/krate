@@ -598,6 +598,21 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Preact islands and client components: a component's passive effects (`useEffect`) no longer run before
+  its insertion and layout effects when a portal re-renders later in the same render. Krate's effect-order
+  shims took the portal's commit (compat's `createPortal` commits while its parent is still rendering) for
+  the end of the render. motion's `useEffect` then animated from props its `useInsertionEffect` had not
+  handed over yet, so on the Genesis sidebar the labels stayed hidden after the sidebar expanded or a rail
+  link was clicked while a Radix tooltip was open or closing.
+- `@krate/three`: a resized canvas never shows a blank frame. The container's size reached the renderer
+  from the ResizeObserver callback, after the frame's render and before its paint, and `gl.setSize`
+  cleared the drawing buffer, so a divider drag flickered. Sizes now arrive in a task of their own, as with
+  @react-three/fiber (whose size goes through React state), and a `frameloop="never"` canvas redraws its
+  current state at the new size at once.
+- `krate migrate nextjs` writes `viewTransitions: "off"` unless `next.config` sets
+  `experimental.viewTransition`: Next.js navigates without a View Transition, and inside one Chromium showed
+  a `backdrop-filter` surface (the Genesis glass sidebar) darker for a frame. Add the key to a config
+  migrated earlier.
 - `useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)` in a Preact island or client component
   hydrates with `getServerSnapshot`, then re-renders before paint the components whose `getSnapshot()`
   differs, as React does. It used to hydrate with `getSnapshot` over HTML rendered from

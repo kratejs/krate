@@ -69,8 +69,46 @@ function measure(el: HTMLElement, offsetSize?: boolean): Size {
   return { width: rect.width, height: rect.height, top: rect.top, left: rect.left };
 }
 
-function debounced(fn: () => void, ms: number): (() => void) & { cancel: () => void } {
-  if (!ms) return Object.assign(fn, { cancel: () => {} });
+/**
+ * Calls fn in a task of its own (a MessageChannel message), once for any
+ * number of calls made before it runs.
+ *
+ * A resize must not reach the renderer from a ResizeObserver callback: those
+ * run after the frame's requestAnimationFrame callbacks and before its paint,
+ * and gl.setSize clears the drawing buffer, so the browser painted the cleared
+ * canvas before the next frame drew it (blank frames while the Genesis builder's
+ * split divider is dragged). @react-three/fiber gets the size from
+ * react-use-measure, whose observer sets React state, and React renders that
+ * update in a scheduler task: after the paint, before the next frame's render.
+ */
+function inTask(fn: () => void): (() => void) & { cancel: () => void } {
+  if (typeof MessageChannel === 'undefined') return debounced(fn, 1);
+  let pending = false;
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => {
+    pending = false;
+    fn();
+  };
+  const run = (): void => {
+    if (pending) return;
+    pending = true;
+    channel.port2.postMessage(null);
+  };
+  return Object.assign(run, {
+    cancel: () => {
+      pending = false;
+      channel.port1.onmessage = null;
+      channel.port1.close();
+    },
+  });
+}
+
+/**
+ * fn after ms of quiet, or (ms 0, the resize default) in a task of its own
+ * (see inTask). Shared by the island Canvas.
+ */
+export function debounced(fn: () => void, ms: number): (() => void) & { cancel: () => void } {
+  if (!ms) return inTask(fn);
   let t: ReturnType<typeof setTimeout> | undefined;
   const run = (): void => {
     if (t) clearTimeout(t);

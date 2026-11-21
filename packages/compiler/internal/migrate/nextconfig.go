@@ -59,6 +59,10 @@ type nextConfigData struct {
 	// NoCompress is set by `compress: false`. Next.js compresses responses by
 	// default; the migrated config precompresses assets at build time instead.
 	NoCompress bool `json:"-"`
+	// ViewTransition is set by `experimental: { viewTransition: true }`.
+	// Without it Next.js swaps pages with no View Transition, so the migrated
+	// config turns Krate's (on by default) off.
+	ViewTransition bool `json:"-"`
 	// Preamble holds next.config's top-level statements; the ones the code
 	// pieces need are copied into krate.config.ts.
 	Preamble *preambleSource `json:"-"`
@@ -177,6 +181,11 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 	if v := prop(obj, "compress"); v != nil {
 		if on, ok := boolValue(v); ok {
 			out.NoCompress = !on
+		}
+	}
+	if exp, ok := prop(obj, "experimental").(*ast.ObjectExpr); ok {
+		if on, ok := boolValue(prop(exp, "viewTransition")); ok && on {
+			out.ViewTransition = true
 		}
 	}
 	if v := prop(obj, "redirects"); v != nil {
@@ -444,6 +453,12 @@ func configJSON(entry string, next nextConfigData) []byte {
 	}
 	if v := compressValue(next); v != nil {
 		opts["compress"] = v
+	}
+	if !next.ViewTransition {
+		// Next.js navigates without a View Transition unless
+		// experimental.viewTransition is on; Krate wraps every client
+		// navigation in one by default.
+		opts["viewTransitions"] = "off"
 	}
 	if next.BasePath != "" {
 		opts["basePath"] = next.BasePath

@@ -294,6 +294,12 @@ The first pass:
   gzip: true }` (Next.js compresses responses unless `next.config` sets
   `compress: false`): `krate build` writes `.br` and best-ratio `.gz` siblings
   of the assets, which `krate start` sends, instead of gzipping on the fly;
+- writes `viewTransitions: "off"` into `krate.config.ts`, unless `next.config`
+  sets `experimental: { viewTransition: true }`: Next.js changes pages without
+  a View Transition, and Krate wraps every client navigation in one by
+  default. A transition snapshots the page, and a `backdrop-filter` surface
+  (frosted glass) can flash darker or lighter for a frame while it runs. An app
+  migrated before this, which has no `viewTransitions` key, can add the line;
 - keeps `NextRequest` features in route handlers: the `Request` has
   `request.cookies` (`get`, `getAll`, `has`, read-only) and `request.nextUrl`
   (a `URL` with `searchParams`, `pathname`, `basePath` and `clone()`; the

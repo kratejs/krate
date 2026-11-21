@@ -238,18 +238,6 @@ function measure(el: HTMLElement, offsetSize?: boolean): engine.Size {
   return { width: rect.width, height: rect.height, top: rect.top, left: rect.left };
 }
 
-function debounced(fn: () => void, ms: number): (() => void) & { cancel: () => void } {
-  if (!ms) return Object.assign(fn, { cancel: () => {} });
-  let t: ReturnType<typeof setTimeout> | undefined;
-  return Object.assign(
-    () => {
-      if (t) clearTimeout(t);
-      t = setTimeout(fn, ms);
-    },
-    { cancel: () => t && clearTimeout(t) },
-  );
-}
-
 const sameSize = (a: engine.Size | null, b: engine.Size): boolean =>
   !!a && a.width === b.width && a.height === b.height && a.top === b.top && a.left === b.left;
 
@@ -297,8 +285,10 @@ function CanvasImpl(props: CanvasProps & { forwardedRef?: unknown }, context: un
       const next = measure(el, resize.offsetSize);
       setSize((prev) => (sameSize(prev, next) ? prev : next));
     };
-    const onResize = debounced(update, typeof debounce === 'number' ? debounce : debounce.resize);
-    const onScroll = debounced(update, typeof debounce === 'number' ? debounce : debounce.scroll);
+    // A resize reaches the renderer in a task of its own, never from the
+    // ResizeObserver callback (see debounced in the engine).
+    const onResize = engine.debounced(update, typeof debounce === 'number' ? debounce : debounce.resize);
+    const onScroll = engine.debounced(update, typeof debounce === 'number' ? debounce : debounce.scroll);
     const RO = resize.polyfill ?? (typeof ResizeObserver !== 'undefined' ? ResizeObserver : undefined);
     const observer = RO ? new RO(() => onResize()) : null;
     observer?.observe(el);
