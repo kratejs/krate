@@ -187,3 +187,41 @@ func checkEntryRefs(t *testing.T, outDir string) {
 		return nil
 	})
 }
+
+// TestIslandEntriesNamedByContentSourceMaps: with source maps on, a page
+// script renamed because it imports an entry keeps its map next to it, under
+// the name its sourceMappingURL comment gives.
+func TestIslandEntriesNamedByContentSourceMaps(t *testing.T) {
+	t.Parallel()
+	ensureRuntimeDist(t)
+	b, root := scProject(t, islandHashFiles)
+	b.Cfg.Sourcemap = true
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := captureBuild(b); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	checkEntryRefs(t, b.Cfg.OutDir)
+	maps := 0
+	_ = filepath.WalkDir(b.Cfg.OutDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".js.map") || isUnderKrateDir(b.Cfg.OutDir, p) {
+			return nil
+		}
+		js := strings.TrimSuffix(p, ".map")
+		data, err := os.ReadFile(js)
+		if err != nil {
+			t.Errorf("%s has no file next to it", p)
+			return nil
+		}
+		if !strings.Contains(string(data), "sourceMappingURL="+filepath.Base(p)) {
+			t.Errorf("%s does not name its map %s", filepath.Base(js), filepath.Base(p))
+		}
+		maps++
+		return nil
+	})
+	if maps == 0 {
+		t.Errorf("the build wrote no source maps")
+	}
+}

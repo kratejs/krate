@@ -1640,30 +1640,31 @@ func (b *Builder) BuildAll() error {
 	bl.Lap("tools")
 
 	// Island entries get names from their content now that every file naming
-	// them is written (see contentHashIslandEntries). Dev builds keep the
-	// stable names: they are never cached.
-	var outputRenames map[string]string
+	// them is written (see nameOutputsByContent). Dev builds keep the stable
+	// names: they are never cached.
+	var names *outputNames
 	if !b.DevMode {
 		if earlyPrecompress != nil {
 			<-earlyPrecompress
 		}
-		renames, err := contentHashIslandEntries(b.Cfg.OutDir, publicFiles)
+		stopNames := b.phase("build:content-names")
+		n, err := nameOutputsByContent(b.Cfg.OutDir, publicFiles)
+		stopNames()
 		if err != nil {
 			failOutput(fmt.Errorf("naming the island entries under %s by their content: %w", filepath.Join(b.Cfg.OutDir, "chunks"), err))
 		}
-		outputRenames = renames
+		names = n
 	}
-	manifest.HashedAssets = collectHashedAssets(b.Cfg.OutDir, publicFiles)
-	if !b.DevMode {
-		if err := stampBuildID(b.Cfg.OutDir, publicFiles, manifest.HashedAssets); err != nil {
-			failOutput(fmt.Errorf("writing the build id into the documents under %s: %w", b.Cfg.OutDir, err))
-		}
+	if names != nil {
+		manifest.HashedAssets = names.hashed
+	} else {
+		manifest.HashedAssets = collectHashedAssets(b.Cfg.OutDir, publicFiles)
 	}
 	if err := WriteManifest(manifest, b.Cfg.OutDir, serverBundles); err != nil {
 		failOutput(fmt.Errorf("writing the build manifest under %s: %w", ServerOutPath(b.Cfg.OutDir), err))
 	}
-	// The manifest was written from the names the build used before.
-	if err := applyOutputRenames(ServerOutPath(b.Cfg.OutDir), outputRenames); err != nil {
+	// The manifests were written from the names the build used before.
+	if err := names.patch(ManifestPath(b.Cfg.OutDir), ServerOutPath(b.Cfg.OutDir, "server-manifest.json")); err != nil {
 		failOutput(fmt.Errorf("updating the build manifest under %s: %w", ServerOutPath(b.Cfg.OutDir), err))
 	}
 
