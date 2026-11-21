@@ -84,7 +84,6 @@ type analyzer struct {
 
 	statics    []*staticMesh
 	dynStmts   []ast.Stmt
-	matEffects []ast.Stmt
 	lightStmts []ast.Stmt
 	extraStmts []ast.Stmt
 	slots      int

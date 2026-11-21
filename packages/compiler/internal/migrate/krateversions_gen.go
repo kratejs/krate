@@ -5,6 +5,7 @@ package migrate
 // krateReleases lists every @krate package a release publishes, with its
 // directory under packages/ and its version in this checkout.
 var krateReleases = []krateRelease{
+	{Name: "@krate/3d", Dir: "3d", Version: "0.1.0"},
 	{Name: "@krate/app", Dir: "app", Version: "0.1.0"},
 	{Name: "@krate/auth", Dir: "auth", Version: "0.1.0"},
 	{Name: "@krate/base-docs-theme", Dir: "base-docs-theme", Version: "0.1.0"},

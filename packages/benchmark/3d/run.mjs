@@ -139,7 +139,12 @@ function procs(rootPattern) {
   const mine = new Set([...all].filter(([, v]) => v.cmd.some((c) => c.includes(rootPattern))).map(([k]) => k));
   for (let grew = true; grew; ) {
     grew = false;
-    for (const [pid, v] of all) if (!mine.has(pid) && mine.has(v.ppid)) (mine.add(pid), (grew = true));
+    for (const [pid, v] of all) {
+      if (!mine.has(pid) && mine.has(v.ppid)) {
+        mine.add(pid);
+        grew = true;
+      }
+    }
   }
   return [...mine].map((pid) => {
     // Forked children rewrite their argv into one space-joined string.
@@ -465,7 +470,7 @@ function medianOf(runs) {
 }
 
 function machine() {
-  let chromiumVersion = null;
+  const chromiumVersion = null;
   const cpus = os.cpus();
   let gitSha = "";
   try {
@@ -520,7 +525,7 @@ async function run() {
   for (const v of variants)
     for (const p of pages) {
       const e = result.variants[v].pages[p];
-      e.median = medianOf(e.runs.map(({ errors, ...rest }) => rest));
+      e.median = medianOf(e.runs.map(({ errors: _errors, ...rest }) => rest));
       e.runErrors = e.runs.flatMap((x) => x.errors);
     }
   fs.writeFileSync(resultsPath, JSON.stringify(result, null, 2));

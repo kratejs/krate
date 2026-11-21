@@ -102,7 +102,9 @@ func staticMatrices(out string) [][16]float64 {
 		var m [16]float64
 		nums := strings.Split(rest[j+1:k], ",")
 		for n, s := range nums {
-			fmt.Sscan(strings.TrimSpace(s), &m[n])
+			if _, err := fmt.Sscan(strings.TrimSpace(s), &m[n]); err != nil {
+				panic(fmt.Sprintf("matrix element %q: %v", s, err))
+			}
 		}
 		res = append(res, m)
 		rest = rest[k:]

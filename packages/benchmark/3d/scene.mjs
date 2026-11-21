@@ -103,7 +103,7 @@ function frameHooks(engine) {
 
 export function page(variant, animated, opts = {}) {
   const variantMap = !!opts.map;
-  const { pkg, compile } = VARIANTS[variant];
+  const { compile } = VARIANTS[variant];
   const engine = variant === "filament" ? "filament" : "three";
   const imports =
     engine === "filament"
