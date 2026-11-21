@@ -28,6 +28,12 @@ export interface CanvasProps extends Omit<RenderProps<HTMLCanvasElement>, 'size'
   children?: unknown;
   /** Canvas element ref */
   ref?: unknown;
+  /**
+   * `false` keeps the whole scene on the runtime reconciler: the compiler does
+   * not share geometries and materials, fold static matrices, instance repeated
+   * meshes or write reactive transforms directly.
+   */
+  compile?: boolean;
   /** Canvas fallback content, similar to img's alt prop */
   fallback?: unknown;
   /** Options for measuring the container */

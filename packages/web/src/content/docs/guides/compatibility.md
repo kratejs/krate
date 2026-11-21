@@ -55,6 +55,7 @@ for usage.
 | Island hydration control (client:visible, client:idle) | n/a | Supported | n/a | Astro-style directives |
 | Real-React islands (react-reconciler libraries) | n/a | Supported | n/a | Opt-in real React |
 | @krate/three (react-three-fiber API) | Supported | n/a | Partial | @react-three/fiber 9 API without React |
+| @krate/3d (Google Filament) | Supported | n/a | Partial | Three.js-style JSX scenes on Filament |
 | @react-three/fiber | n/a | Partial | n/a | Real-React island |
 | @react-three/drei | n/a | Partial | n/a | Real-React island |
 | @krate/konva (react-konva API) | Supported | n/a | Partial | react-konva 19 API without React |
@@ -475,7 +476,7 @@ Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`, `TestRealReactCon
 
 **Source:** Supported - **Islands:** n/a - **SSR:** Partial
 
-@krate/three renders three.js scenes from JSX compiled with the page: Canvas (an @renderer component), every three class as an element with args, attach, pierced props and primitives, reactive props that update objects in place, conditionals and keyed lists, pointer events with raycasting, bubbling and capture, useFrame, useThree, useLoader with Suspense, the Krate-style createFrame, createThree, createLoader and createGraph accessors, portals, extend, createRoot and the frame loop exports. @krate/three/drei provides drei's OrbitControls, Environment (Lightformer children or a map) and useGLTF. In a "use client" component of a server-rendered page (a Preact island) the build resolves @krate/three to its island build, the same React-style API rendered by Preact; TestBrowserThreeIsland checks it in Chromium (model, picking, orbit, zoom, pause, error boundary, no React chunk). React-style and Krate-style (createSignal) scenes are checked in Chromium with WebGL by TestBrowserThree; the engine has Vitest coverage in packages/three.
+@krate/three renders three.js scenes from JSX compiled with the page: Canvas (an @renderer component), every three class as an element with args, attach, pierced props and primitives, reactive props that update objects in place, conditionals and keyed lists, pointer events with raycasting, bubbling and capture, useFrame, useThree, useLoader with Suspense, the Krate-style createFrame, createThree, createLoader and createGraph accessors, portals, extend, createRoot and the frame loop exports. @krate/three/drei provides drei's OrbitControls, Environment (Lightformer children or a map) and useGLTF. In a "use client" component of a server-rendered page (a Preact island) the build resolves @krate/three to its island build, the same React-style API rendered by Preact; TestBrowserThreeIsland checks it in Chromium (model, picking, orbit, zoom, pause, error boundary, no React chunk). React-style and Krate-style (createSignal) scenes are checked in Chromium with WebGL by TestBrowserThree; the engine has Vitest coverage in packages/three. The compiler optimizes the provably static parts of a Canvas (shared geometry and materials, static matrices, InstancedMesh, direct reactive writes, shader warm-up; Canvas compile={false} turns it off): TestThreeCompiledBuild and TestBrowserThreeCompiled.
 
 Known limits:
 
@@ -483,7 +484,23 @@ Known limits:
 - Other libraries built on @react-three/fiber, and drei beyond OrbitControls, Environment (no HDR files, presets or ground), Lightformer and useGLTF, need the real-React island instead (row react-three-fiber).
 - In a Preact island the Krate-style create* primitives are not available (use the hooks), and a mounted subtree that suspends again is unmounted and remounted (preact/compat Suspense) rather than hidden.
 
-Evidence: `TestBrowserThree`, `TestBrowserThreeIsland`, `TestMigrateReactThreeFiberToKrateThree`, `fixture:packages/compiler/internal/build/testdata/three`, `fixture:packages/compiler/internal/build/testdata/three-island`
+Evidence: `TestBrowserThree`, `TestBrowserThreeCompiled`, `TestThreeCompiledBuild`, `TestBrowserThreeIsland`, `TestMigrateReactThreeFiberToKrateThree`, `fixture:packages/compiler/internal/build/testdata/three`, `fixture:packages/compiler/internal/build/testdata/threecompiled`, `fixture:packages/compiler/internal/build/testdata/three-island`
+
+### @krate/3d (Google Filament)
+
+**Source:** Supported - **Islands:** n/a - **SSR:** Partial
+
+@krate/3d compiles the JSX scene of a Canvas imported from @krate/3d at build time: static group and mesh transforms are flattened into world matrices, meshes with reactive transforms get typed-array slots and one effect per reactive prop, identical geometries and materials are shared, repeated static meshes (written out or mapped over a module-level constant array) become one instanced call, colors and light units are converted, and a shaderMaterial is compiled with matc into a hashed .filamat asset. A scene the compiler cannot analyse runs on the runtime component path and reports KR8701. The compile pass has Go unit tests, including drift tests against the runtime's calibration and color tables; TestScene3DCompiledBuild builds a fixture page and checks the emitted engine calls, the copied engine and material assets and the .filamat asset; TestBrowserScene3D renders a compiled page on the real Filament engine in a browser with WebGL 2 and checks pixels, picking and reactive transforms; the runtime has Vitest coverage in packages/3d.
+
+Known limits:
+
+- Only the canvas wrapper is server-rendered; the scene mounts in the browser.
+- A reactive group transform, a conditional or list over a signal inside the Canvas, and components inside the Canvas use the runtime path without the compile-time optimisations (KR8701).
+- shaderMaterial needs Filament's matc, downloaded on first use (KRATE_FILAMENT_MATC to use your own, KRATE_OFFLINE=1 to forbid the download), and works only on the compiled path.
+- Instanced meshes are separate draw calls that share one geometry and one material instance: Filament 1.53.4's JavaScript bindings have no InstanceBuffer, so there is no hardware instancing.
+- The engine is loaded from filament.js and filament.wasm that the build copies out of the app's filament package (1.53.4); without it the build warns (KR8702) and the scene cannot start.
+
+Evidence: `TestScene3DCompiledBuild`, `TestScene3DMissingFilament`, `TestBrowserScene3D`, `TestStaticFlatteningNestedGroups`, `TestAutoInstancingForOverConstArray`, `TestShaderMaterialCompilesAndCaches`, `TestFallbacks`, `TestCalibrationMatchesRuntime`, `fixture:packages/compiler/internal/build/testdata/scene3d`
 
 ### @react-three/fiber
 

@@ -1,0 +1,28 @@
+// Uber-material for meshBasicMaterial.
+material {
+    name : unlit,
+    shadingModel : unlit,
+    blending : opaque,
+    requires : [ uv0 ],
+    parameters : [
+        { type : float4, name : baseColor },
+        { type : float, name : opacity },
+        { type : float, name : useBaseColorMap },
+        { type : sampler2d, name : baseColorMap, precision : medium }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        vec4 base = materialParams.baseColor;
+        if (materialParams.useBaseColorMap > 0.5) {
+            base *= texture(materialParams_baseColorMap, getUV0());
+        }
+        material.baseColor = base;
+#if defined(KRATE_TRANSPARENT)
+        material.baseColor.a *= materialParams.opacity;
+        material.baseColor.rgb *= material.baseColor.a;
+#endif
+    }
+}

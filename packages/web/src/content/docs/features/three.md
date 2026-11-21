@@ -152,6 +152,7 @@ where `@krate/three` turns the elements into three objects:
 | `performance` | Adaptive performance: `{ current, min, max, debounce }` | `{ current: 1, min: 0.5, max: 1, debounce: 200 }` |
 | `onCreated` | Called with the root state once the scene is set up | |
 | `onPointerMissed` | Called for clicks that hit nothing | |
+| `compile` | `false` keeps the whole scene on the runtime path (see [Compile-time optimizations](#compile-time-optimizations)) | `true` |
 | `fallback` | Content of the `<canvas>` element, shown when WebGL is unavailable | |
 | `ref` | Receives the `<canvas>` element | |
 | `id`, `class`, `style`, ... | Attributes of the wrapper div | |
@@ -521,6 +522,73 @@ around it (a Radix menu next to the canvas is bundled once) instead of
 shipping React for it. A scene error thrown inside `<Canvas>` reaches the error
 boundary around it, as in R3F. The Krate-style `create*` primitives read Krate
 signals and are not available in an island; use the hooks there.
+
+## Compile-time optimizations
+
+The compiler reads the scene you write, so it can do part of the work the
+runtime would otherwise do on every page load and every frame. It optimizes the
+parts of a `<Canvas>` it can prove safe and leaves the rest exactly as written,
+on the runtime path described above. There is nothing to turn on, and no
+warning when only part of a scene (or none of it) qualifies.
+
+What it does for the parts that qualify:
+
+- **Shared geometry and materials.** Identical `<boxGeometry args>` and
+  `<meshStandardMaterial color roughness ...>` elements with constant props
+  create one geometry and one material that every compiled mesh in the canvas
+  uses, instead of one per mesh.
+- **Static matrices.** A group or mesh whose own transform is constant gets its
+  matrix computed at build time and `matrixAutoUpdate = false`, so three.js does
+  not recompose it each frame. When every ancestor up to the scene is constant
+  too (the subtree sits directly in the `<Canvas>`), its world matrix is also
+  precomputed and `matrixWorldAutoUpdate = false`. `position`, `rotation` and
+  `scale` still hold the values you wrote.
+- **Instancing.** Two or more static meshes with the same geometry and material
+  become one `THREE.InstancedMesh` (one draw call), written out or produced by
+  `{LIST.map(...)}` over a module-level constant array. Meshes with a `name`, an
+  event handler or a transparent material stay separate objects.
+- **Direct writes for reactive transforms.** A reactive `position`, `rotation`
+  or `scale` (`rotation={[0, angle(), 0]}`) compiles to an effect that sets the
+  object directly, without diffing props. For a `.map()` over a constant array
+  of meshes whose transform reads a signal, each item's effect writes its matrix
+  into the `InstancedMesh` buffer in place, and only the changed range is
+  uploaded.
+- **Shader warm-up.** The scene's shaders are compiled with
+  `renderer.compileAsync` (`renderer.compile` on older three) as soon as the
+  scene is built, before the first frame.
+
+A `<group>` or `<mesh>` is compiled only if everything about it is known at
+build time:
+
+- Only `position`, `rotation`, `scale`, `name`, `visible`, `castShadow`,
+  `receiveShadow`, `renderOrder` and `frustumCulled` props, and (on meshes)
+  pointer event handlers. Transform props may read signals; the others must be
+  constants.
+- Exactly one geometry (`boxGeometry`, `sphereGeometry`, `planeGeometry`,
+  `cylinderGeometry`, `torusGeometry` or `circleGeometry`, with constant
+  `args`) and one material (`meshStandardMaterial`, `meshPhysicalMaterial`,
+  `meshBasicMaterial`, `meshLambertMaterial` or `meshPhongMaterial`) with
+  constant scalar, color and boolean props.
+- No `ref`, spread props, `attach`, `dispose`, `<primitive>`, maps or other
+  non-constant material props, components (your own or drei's) inside it, or
+  list expressions over signals. Lights, `OrbitControls` and the like are not
+  compiled; they stay beside the compiled objects.
+
+A mesh with a `ref` stays a normal element while its siblings are compiled.
+Compiled meshes with handlers receive pointer events like any other (`onClick`,
+`onPointerOver`, ...); because instancing changes the `instanceId` semantics,
+a mesh with a handler is never instanced. `useFrame`, `useThree` and other
+components in the same canvas work unchanged, and compiled objects live in the
+same scene.
+
+Compiled objects have no per-object reconciler instance, repeated meshes
+without a `name` are instances of one object rather than separate objects, and
+a static object's matrix is fixed: code that moves a compiled static object
+(`mesh.position.x += 1`) has no effect unless it also sets
+`matrixAutoUpdate = true`. Use `<Canvas compile={false}>` to keep the whole scene
+on the runtime path, for example to compare behavior or when you move the
+`scene` itself (the world matrices of a compiled subtree are frozen against an
+untransformed scene).
 
 ## Rendering on demand and by hand
 

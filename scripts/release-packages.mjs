@@ -25,6 +25,7 @@ export const releasePackages = [
   'auth',
   'three',
   'konva',
+  '3d',
   'app',
   'create-krate-app',
   'create-krate-docs',

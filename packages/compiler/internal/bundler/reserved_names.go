@@ -285,6 +285,19 @@ func renamableNames(prog *ast.Program, match func(string) bool) map[string]bool 
 			noteParams(x.Params)
 		case *ast.ClassDecl:
 			note(x.Name)
+			for _, m := range x.Members {
+				if m != nil {
+					noteParams(m.Params)
+				}
+			}
+		case *ast.ClassExpr:
+			if x.Class != nil {
+				for _, m := range x.Class.Members {
+					if m != nil {
+						noteParams(m.Params)
+					}
+				}
+			}
 		case *ast.VarStmt:
 			for _, d := range x.Decls {
 				if d == nil {
@@ -373,6 +386,19 @@ func applyRenames(prog *ast.Program, names map[string]string) {
 			renameParams(x.Params)
 		case *ast.ClassDecl:
 			x.Name = rn(x.Name)
+			for _, m := range x.Members {
+				if m != nil {
+					renameParams(m.Params)
+				}
+			}
+		case *ast.ClassExpr:
+			if x.Class != nil {
+				for _, m := range x.Class.Members {
+					if m != nil {
+						renameParams(m.Params)
+					}
+				}
+			}
 		case *ast.VarStmt:
 			for _, d := range x.Decls {
 				if d == nil {
@@ -407,6 +433,20 @@ func applyRenames(prog *ast.Program, names map[string]string) {
 			visitParamTargets(x.Params, rn)
 		case *ast.ArrowFn:
 			visitParamTargets(x.Params, rn)
+		case *ast.ClassDecl:
+			for _, m := range x.Members {
+				if m != nil {
+					visitParamTargets(m.Params, rn)
+				}
+			}
+		case *ast.ClassExpr:
+			if x.Class != nil {
+				for _, m := range x.Class.Members {
+					if m != nil {
+						visitParamTargets(m.Params, rn)
+					}
+				}
+			}
 		}
 		return true
 	})

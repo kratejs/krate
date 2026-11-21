@@ -137,18 +137,14 @@ function sceneH(tag: unknown, props: Record<string, unknown> | null, ...children
  * providers of the subtree visible to context reads.
  */
 export function evaluate<T>(store: RootStore, fn: () => T, contexts: ContextEntry[] = []): T {
-  const g = globalThis as unknown as {
-    h?: unknown;
-    krateWithContexts?: <R>(entries: ContextEntry[], fn: () => R) => R;
-  };
-  const prevH = g.h;
+  const prevH = globalThis.h;
   const prevStore = currentStore;
-  g.h = sceneH;
+  globalThis.h = sceneH as typeof globalThis.h;
   currentStore = store;
   try {
-    return contexts.length && typeof g.krateWithContexts === 'function' ? g.krateWithContexts(contexts, fn) : fn();
+    return contexts.length && typeof globalThis.krateWithContexts === 'function' ? globalThis.krateWithContexts(contexts, fn) : fn();
   } finally {
-    g.h = prevH;
+    globalThis.h = prevH;
     currentStore = prevStore;
   }
 }
@@ -674,8 +670,7 @@ function mountBoundary(mount: () => void, slot: Slot, parent: Instance, retry: (
 }
 
 function isSuspense(type: unknown): boolean {
-  const g = globalThis as { Suspense?: unknown };
-  return typeof type === 'function' && (type === g.Suspense || (type as { __krateThreeSuspense?: boolean }).__krateThreeSuspense === true);
+  return typeof type === 'function' && (type === (globalThis as { Suspense?: unknown }).Suspense || (type as { __krateThreeSuspense?: boolean }).__krateThreeSuspense === true);
 }
 
 function mountComponent(node: ComponentNode, parent: Instance, slot: Slot, ctx: Ctx): void {

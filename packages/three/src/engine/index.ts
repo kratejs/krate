@@ -84,8 +84,7 @@ export const context = {
  */
 export function flushSync<R>(fn: () => R): R {
   const result = fn();
-  const g = globalThis as { krateFlushSync?: () => void };
-  if (typeof g.krateFlushSync === 'function') g.krateFlushSync();
+  if (typeof globalThis.krateFlushSync === 'function') globalThis.krateFlushSync();
   return result;
 }
 
@@ -96,8 +95,7 @@ export function flushSync<R>(fn: () => R): R {
 export async function act<T>(fn: () => T | Promise<T>): Promise<T> {
   const result = await fn();
   for (let i = 0; i < 4; i++) {
-    const g = globalThis as { krateFlushSync?: () => void };
-    if (typeof g.krateFlushSync === 'function') g.krateFlushSync();
+    if (typeof globalThis.krateFlushSync === 'function') globalThis.krateFlushSync();
     await new Promise<void>((r) => setTimeout(r, 0));
   }
   return result;

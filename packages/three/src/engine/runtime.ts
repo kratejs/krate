@@ -19,22 +19,45 @@ export interface KrateRuntime {
   h: (tag: unknown, props: Record<string, unknown> | null, ...children: unknown[]) => unknown;
 }
 
+// The build ships only the runtime exports page code names, and it sees a
+// name only as a literal global member, so each one is read as globalThis.x
+// here rather than through an alias or a computed key.
+function readRuntime(): Partial<KrateRuntime> {
+  return {
+    createSignal: globalThis.createSignal,
+    createEffect: globalThis.createEffect,
+    createRoot: globalThis.createRoot,
+    onCleanup: globalThis.onCleanup,
+    untrack: globalThis.untrack,
+    krateDerived: globalThis.krateDerived,
+    krateWithOwner: globalThis.krateWithOwner,
+    krateUnmount: globalThis.krateUnmount,
+    krateGetOwner: globalThis.krateGetOwner,
+    krateSetOwner: globalThis.krateSetOwner,
+    krateSetRef: globalThis.krateSetRef,
+    h: globalThis.h,
+  };
+}
+
 const REQUIRED = ['createSignal', 'createEffect', 'createRoot', 'onCleanup', 'untrack'] as const;
+let cached: KrateRuntime | null = null;
 
 /** Returns the page's Krate runtime, or throws when it is not loaded. */
 export function rt(): KrateRuntime {
-  const g = globalThis as unknown as KrateRuntime;
+  if (cached && cached.createEffect === globalThis.createEffect) return cached;
+  const g = readRuntime();
   for (const name of REQUIRED) {
-    if (typeof (g as unknown as Record<string, unknown>)[name] !== 'function') {
+    if (typeof g[name] !== 'function') {
       throw new Error(`@krate/three: the Krate runtime is not loaded (missing ${name}). @krate/three runs in the browser inside a Krate page.`);
     }
   }
-  return g;
+  cached = g as KrateRuntime;
+  return cached;
 }
 
 /** True when the Krate runtime is available (a browser page, or a test that installed it). */
 export function hasRuntime(): boolean {
-  return typeof (globalThis as Record<string, unknown>).createEffect === 'function';
+  return typeof globalThis.createEffect === 'function';
 }
 
 /** Reads without subscribing the current effect. */
@@ -45,8 +68,8 @@ export function untrack<T>(fn: () => T): T {
 /** Attaches `value` to a ref (object or callback) and returns the detach function. */
 export function setRef(ref: unknown, value: unknown): () => void {
   if (ref == null) return () => {};
-  const g = globalThis as unknown as Partial<KrateRuntime>;
-  if (typeof g.krateSetRef === 'function') return g.krateSetRef(ref, value);
+  const set = globalThis.krateSetRef;
+  if (typeof set === 'function') return set(ref, value);
   if (typeof ref === 'function') {
     const cleanup = (ref as (v: unknown) => unknown)(value);
     return () => {
@@ -58,4 +81,22 @@ export function setRef(ref: unknown, value: unknown): () => void {
   return () => {
     if ((ref as { current: unknown }).current === value) (ref as { current: unknown }).current = null;
   };
+}
+
+declare global {
+  // The page runtime's globals the engine reads (see readRuntime).
+  var createSignal: KrateRuntime['createSignal'] | undefined;
+  var createEffect: KrateRuntime['createEffect'] | undefined;
+  var createRoot: KrateRuntime['createRoot'] | undefined;
+  var onCleanup: KrateRuntime['onCleanup'] | undefined;
+  var untrack: KrateRuntime['untrack'] | undefined;
+  var krateDerived: KrateRuntime['krateDerived'] | undefined;
+  var krateWithOwner: KrateRuntime['krateWithOwner'] | undefined;
+  var krateUnmount: KrateRuntime['krateUnmount'] | undefined;
+  var krateGetOwner: KrateRuntime['krateGetOwner'] | undefined;
+  var krateSetOwner: KrateRuntime['krateSetOwner'] | undefined;
+  var krateSetRef: KrateRuntime['krateSetRef'] | undefined;
+  var h: KrateRuntime['h'] | undefined;
+  var krateWithContexts: (<R>(entries: unknown[], fn: () => R) => R) | undefined;
+  var krateFlushSync: (() => void) | undefined;
 }

@@ -38,6 +38,7 @@
     "examples/native-tasks/src/lib/build.host.ts",
     "examples/src/pages/decorators.tsx",
     "packages/three/src/canvas.tsx",
+    "packages/3d/src/runtime/canvas.tsx",
     "packages/konva/src/stage.tsx",
     "examples/src/pages/syntax-robustness.tsx",
     "examples/src/pages/edge-cases.tsx"
