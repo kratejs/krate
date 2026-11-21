@@ -117,6 +117,15 @@ func factoryInitial(name string, call *ast.CallExpr) ast.Expr {
 			}
 		}
 	case "createExternalStore":
+		// A named getServerSnapshot is called at build time, as React's server
+		// render calls it; without this the build rendered getSnapshot (an
+		// inline arrow) or nothing. One that cannot run at build time leaves
+		// the value to the client.
+		if len(call.Args) > 2 {
+			if id, ok := call.Args[2].(*ast.Identifier); ok {
+				return &ast.CallExpr{Position: call.Position, Callee: id}
+			}
+		}
 		for _, i := range []int{2, 1} {
 			if len(call.Args) > i {
 				if arrow, ok := call.Args[i].(*ast.ArrowFn); ok && len(arrow.Params) == 0 {
