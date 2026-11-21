@@ -540,12 +540,15 @@
       "islands": "n/a",
       "ssr": "partial",
       "target": "@react-three/fiber 9 API without React",
-      "summary": "@krate/three renders three.js scenes from JSX compiled with the page: Canvas (an @renderer component), every three class as an element with args, attach, pierced props and primitives, reactive props that update objects in place, conditionals and keyed lists, pointer events with raycasting, bubbling and capture, useFrame, useThree, useLoader with Suspense, the Krate-style createFrame, createThree, createLoader and createGraph accessors, portals, extend, createRoot and the frame loop exports. @krate/three/drei provides drei's OrbitControls, Environment (Lightformer children or a map) and useGLTF. In a \"use client\" component of a server-rendered page (a Preact island) the build resolves @krate/three to its island build, the same React-style API rendered by Preact; TestBrowserThreeIsland checks it in Chromium (model, picking, orbit, zoom, pause, error boundary, no React chunk). React-style and Krate-style (createSignal) scenes are checked in Chromium with WebGL by TestBrowserThree; the engine has Vitest coverage in packages/three.",
+      "summary": "@krate/three renders three.js scenes from JSX compiled with the page: Canvas (an @renderer component), every three class as an element with args, attach, pierced props and primitives, reactive props that update objects in place, conditionals and keyed lists, pointer events with raycasting, bubbling and capture, useFrame, useThree, useLoader with Suspense, the Krate-style createFrame, createThree, createLoader and createGraph accessors, portals, extend, createRoot and the frame loop exports. @krate/three/drei provides drei's OrbitControls, Environment (Lightformer children or a map) and useGLTF. In a \"use client\" component of a server-rendered page (a Preact island) the build resolves @krate/three to its island build, the same React-style API rendered by Preact; TestBrowserThreeIsland checks it in Chromium (model, picking, orbit, zoom, pause, error boundary, no React chunk). React-style and Krate-style (createSignal) scenes are checked in Chromium with WebGL by TestBrowserThree; the engine has Vitest coverage in packages/three. The compiler optimizes the provably static parts of a Canvas (shared geometry and materials, static matrices, InstancedMesh, direct reactive writes, shader warm-up; Canvas compile={false} turns it off): TestThreeCompiledBuild and TestBrowserThreeCompiled.",
       "tests": [
         "TestBrowserThree",
+        "TestBrowserThreeCompiled",
+        "TestThreeCompiledBuild",
         "TestBrowserThreeIsland",
         "TestMigrateReactThreeFiberToKrateThree",
         "fixture:packages/compiler/internal/build/testdata/three",
+        "fixture:packages/compiler/internal/build/testdata/threecompiled",
         "fixture:packages/compiler/internal/build/testdata/three-island"
       ],
       "roadmap": false,

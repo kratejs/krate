@@ -979,13 +979,17 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	}
 	_, actionChanged := b.rewriteActionImports(prog, abs)
 	actionChanged = actionChanged || inlineChanged
-	sceneModule := scene3d.Mentions(src) && !strings.Contains(filepath.ToSlash(abs), "/node_modules/")
-	if sceneModule {
+	inApp := !strings.Contains(filepath.ToSlash(abs), "/node_modules/")
+	sceneModule := (scene3d.Mentions(src) || scene3d.MentionsThree(src)) && inApp
+	if sceneModule && scene3d.Mentions(src) {
 		_, sceneDiags, err := scene3d.Rewrite(prog, scene3d.Options{File: path, Source: src, Shader: b.scene3dShader, Assets: b.scene3dAssets})
 		if err != nil {
 			return err
 		}
 		reactDiags = append(reactDiags, sceneDiags...)
+	}
+	if sceneModule && scene3d.MentionsThree(src) {
+		scene3d.RewriteThree(prog)
 	}
 
 	if err := checkTierConflicts(prog, path, src, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs); err != nil {

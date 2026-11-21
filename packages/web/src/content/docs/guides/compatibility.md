@@ -476,7 +476,7 @@ Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`, `TestRealReactCon
 
 **Source:** Supported - **Islands:** n/a - **SSR:** Partial
 
-@krate/three renders three.js scenes from JSX compiled with the page: Canvas (an @renderer component), every three class as an element with args, attach, pierced props and primitives, reactive props that update objects in place, conditionals and keyed lists, pointer events with raycasting, bubbling and capture, useFrame, useThree, useLoader with Suspense, the Krate-style createFrame, createThree, createLoader and createGraph accessors, portals, extend, createRoot and the frame loop exports. @krate/three/drei provides drei's OrbitControls, Environment (Lightformer children or a map) and useGLTF. In a "use client" component of a server-rendered page (a Preact island) the build resolves @krate/three to its island build, the same React-style API rendered by Preact; TestBrowserThreeIsland checks it in Chromium (model, picking, orbit, zoom, pause, error boundary, no React chunk). React-style and Krate-style (createSignal) scenes are checked in Chromium with WebGL by TestBrowserThree; the engine has Vitest coverage in packages/three.
+@krate/three renders three.js scenes from JSX compiled with the page: Canvas (an @renderer component), every three class as an element with args, attach, pierced props and primitives, reactive props that update objects in place, conditionals and keyed lists, pointer events with raycasting, bubbling and capture, useFrame, useThree, useLoader with Suspense, the Krate-style createFrame, createThree, createLoader and createGraph accessors, portals, extend, createRoot and the frame loop exports. @krate/three/drei provides drei's OrbitControls, Environment (Lightformer children or a map) and useGLTF. In a "use client" component of a server-rendered page (a Preact island) the build resolves @krate/three to its island build, the same React-style API rendered by Preact; TestBrowserThreeIsland checks it in Chromium (model, picking, orbit, zoom, pause, error boundary, no React chunk). React-style and Krate-style (createSignal) scenes are checked in Chromium with WebGL by TestBrowserThree; the engine has Vitest coverage in packages/three. The compiler optimizes the provably static parts of a Canvas (shared geometry and materials, static matrices, InstancedMesh, direct reactive writes, shader warm-up; Canvas compile={false} turns it off): TestThreeCompiledBuild and TestBrowserThreeCompiled.
 
 Known limits:
 
@@ -484,7 +484,7 @@ Known limits:
 - Other libraries built on @react-three/fiber, and drei beyond OrbitControls, Environment (no HDR files, presets or ground), Lightformer and useGLTF, need the real-React island instead (row react-three-fiber).
 - In a Preact island the Krate-style create* primitives are not available (use the hooks), and a mounted subtree that suspends again is unmounted and remounted (preact/compat Suspense) rather than hidden.
 
-Evidence: `TestBrowserThree`, `TestBrowserThreeIsland`, `TestMigrateReactThreeFiberToKrateThree`, `fixture:packages/compiler/internal/build/testdata/three`, `fixture:packages/compiler/internal/build/testdata/three-island`
+Evidence: `TestBrowserThree`, `TestBrowserThreeCompiled`, `TestThreeCompiledBuild`, `TestBrowserThreeIsland`, `TestMigrateReactThreeFiberToKrateThree`, `fixture:packages/compiler/internal/build/testdata/three`, `fixture:packages/compiler/internal/build/testdata/threecompiled`, `fixture:packages/compiler/internal/build/testdata/three-island`
 
 ### @krate/3d (Google Filament)
 
