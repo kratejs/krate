@@ -44,13 +44,14 @@ function mockSignal(name) {
   }
   if (typeof v === "function") throw new KrateError("not_found", `mock ${name} is a function, not a signal`);
   const read = (() => v);
-  read.subscribe = () => () => {};
+  read.subscribe = () => () => {
+  };
   return read;
 }
 
 // ../../app/src/wire.ts
 var TAGS = ["$b", "$d", "$m", "$s"];
-var ESCAPED = TAGS.map((t) => t + "$");
+var ESCAPED = new Set(TAGS.map((t) => t + "$"));
 var te = new TextEncoder();
 var td = new TextDecoder("utf-8", { fatal: true });
 function fail(root, path, msg) {
@@ -134,7 +135,7 @@ function enc(v, ctx, root, path, stack) {
     if (keys.length === 1 && out[keys[0]] !== void 0) {
       const k = keys[0];
       if (TAGS.includes(k)) return { [k + "$"]: out };
-      if (ESCAPED.includes(k)) return { [k]: out };
+      if (ESCAPED.has(k)) return { [k]: out };
     }
     return out;
   } finally {
@@ -197,7 +198,7 @@ function dec(t, blobs) {
       if (!Array.isArray(v)) throw new Error("bad $s value");
       return new Set(v.map((x) => dec(x, blobs)));
     }
-    if (ESCAPED.includes(k)) {
+    if (ESCAPED.has(k)) {
       if (v === null || typeof v !== "object" || Array.isArray(v)) throw new Error(`bad ${k} wrapper`);
       const inner = {};
       for (const ik of Object.keys(v)) setOwn(inner, ik, dec(v[ik], blobs));
@@ -304,7 +305,8 @@ var FrameReader = class {
   async cancel() {
     try {
       await this.reader.cancel();
-    } catch {}
+    } catch {
+    }
   }
 };
 
@@ -342,8 +344,10 @@ function createClient(options = {}) {
         method: "POST",
         headers: { ...hdr, "content-type": CT },
         body: encodeFrame(body)
-      }).catch(() => {});
-    } catch {}
+      }).catch(() => {
+      });
+    } catch {
+    }
   }
   function detach(w) {
     if (w.signal && w.onAbort) w.signal.removeEventListener("abort", w.onAbort);
@@ -463,7 +467,8 @@ function createClient(options = {}) {
             const f = await new FrameReader(res.body).next();
             const err = f?.value?.error;
             if (err) e = toKrateError(err);
-          } catch {}
+          } catch {
+          }
         }
         failAll(recs, e);
         return;
@@ -602,7 +607,8 @@ function createClient(options = {}) {
       },
       next() {
         const p = chain.then(step);
-        chain = p.catch(() => {});
+        chain = p.catch(() => {
+        });
         return p;
       },
       return() {
@@ -712,7 +718,8 @@ function createClient(options = {}) {
           apply(m.sig, m.v);
         }
       }
-    } catch {}
+    } catch {
+    }
     if (my !== sigGen || closed) return;
     sigTimer = setTimeout(() => void connect(), backoff);
     backoff = Math.min(backoff * 2, 5e3);
@@ -887,7 +894,8 @@ function errInfo(e) {
       try {
         const d = JSON.stringify(x.data);
         if (d !== void 0) o.data = JSON.parse(d);
-      } catch {}
+      } catch {
+      }
     } else {
       o.message = String(e);
     }
@@ -1079,8 +1087,10 @@ async function handleStream(req, res, id) {
     st.ac.abort();
     streams.delete(st.id);
     try {
-      void Promise.resolve(it?.return?.()).catch(() => {});
-    } catch {}
+      void Promise.resolve(it?.return?.()).catch(() => {
+      });
+    } catch {
+    }
   };
   res.on("close", () => {
     if (!res.writableFinished) stop();
@@ -1147,7 +1157,8 @@ function handleSignals(req, res, url) {
     for (const u of unsubs) {
       try {
         u();
-      } catch {}
+      } catch {
+      }
     }
   });
   for (const name of names) {
@@ -1159,7 +1170,8 @@ function handleSignals(req, res, url) {
     try {
       const un = sig.subscribe((v) => push(name, v));
       if (typeof un === "function") unsubs.push(un);
-      else unsubs.push(() => {});
+      else unsubs.push(() => {
+      });
       push(name, sig.get());
     } catch (e) {
       res.write(errFrame({ sig: name }, e));
@@ -1213,11 +1225,13 @@ function shutdown(socket, code) {
   try {
     server?.closeAllConnections?.();
     server?.close();
-  } catch {}
+  } catch {
+  }
   if (socket) {
     try {
       unlinkSync(socket);
-    } catch {}
+    } catch {
+    }
   }
   process.exit(code);
 }
@@ -1245,7 +1259,8 @@ function start() {
   } else {
     try {
       unlinkSync(socket);
-    } catch {}
+    } catch {
+    }
   }
   server = createServer(route);
   server.on("error", (e) => {

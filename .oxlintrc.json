@@ -32,6 +32,7 @@
     "**/.krate/**",
     "packages/compiler/internal/kratedocs/docs/**",
     "packages/compiler/internal/build/assets/**",
+    "packages/native/hostchild/hostchild.mjs",
     "**/testdata/**",
     "packages/benchmark/fixtures/**",
     "examples/native-tasks/src/lib/build.host.ts",
