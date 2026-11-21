@@ -12,8 +12,15 @@ name: CI
 #   - the repeated GUI pass (a flake check): nightly and manual runs.
 #   - the two arm64 native runners run a thin smoke set on pull requests and
 #     everything on full runs.
-#   - go test reuses cached results on pull requests (go-cache-restore gives
-#     files content-derived mtimes); full runs pass -count=1.
+#   - the Go tests run in shards (.github/scripts/go-test-shards.mjs), so test
+#     results are not reused across runs; compiled packages still come from
+#     the shared build cache saved by shard 0. Full runs pass -count=1.
+#
+# Go test shard counts: Linux race 3 (go-test), Windows 2 and macOS 1
+# (go-matrix). They are sized for the GitHub Free plan's 20 concurrent jobs, 5
+# of them macOS: more shards queue behind each other and make a run slower.
+# Raise them in those two matrices (shard indexes and the shards value) once
+# the concurrency limit is raised.
 
 on:
   pull_request:
@@ -131,10 +138,24 @@ jobs:
       - name: JS unit tests (Vitest)
         run: pnpm run test:js
 
-  # The Go tests on Linux, with the race detector.
+  # The Go tests on Linux, with the race detector, split into shards by the
+  # recorded test times (.github/scripts/go-test-shards.mjs). Every shard
+  # picks the same recorded times, lists the tests, plans the same partition
+  # and runs its part; go-test-summary checks the shards agreed and ran every
+  # listed test exactly once.
   go-test:
-    name: Go (ubuntu-latest, race)
+    name: Go (ubuntu-latest, race, ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    # actions: read lists the caches to pick the recorded test times.
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Shard count: see the header comment.
+        shards: [3]
+        shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@v4
 
@@ -171,14 +192,10 @@ jobs:
 
       # The native host-child release tests compile with bun and deno, and
       # KRATE_REQUIRE_E2E turns a missing runtime into a failure.
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Bun and Deno
+        uses: ./.github/actions/setup-bun-deno
         with:
           bun-version: 1.4.5
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v1
-        with:
           deno-version: 2.9.8
 
       - name: Install JS dependencies
@@ -190,25 +207,52 @@ jobs:
       - name: Build JS packages
         run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
 
+      # Every shard picks the same entry: the newest this run may restore
+      # that was saved before the run started.
+      - name: Pick the recorded test times
+        id: times
+        run: node .github/scripts/go-test-shards.mjs pick --kind Linux
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Restore the recorded test times
+        if: steps.times.outputs.key != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: go-test-times/Linux
+          key: ${{ steps.times.outputs.key }}
+          fail-on-cache-miss: true
+          # The summary job saves the times on Linux for every OS.
+          enableCrossOsArchive: true
+
+      # Listed from source, nothing compiled: each shard compiles only the
+      # packages it runs. go-test-list checks the listing against go test.
+      - name: List the Go tests
+        run: node .github/scripts/go-test-shards.mjs list --module packages/compiler --module packages/native --out go-tests.json
+
       # checkptr is disabled: modernc.org/quickjs (translated C) trips the
       # checkptr instrumentation under -race. Data-race detection is unaffected.
-      # -p 2 keeps packages from saturating the runner (eval timeouts).
+      # Two packages at a time, each running up to 4 tests (the runner's
+      # cores); more saturates the runner (eval timeouts).
       - name: Go test (race)
-        run: go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m ${{ github.event_name != 'pull_request' && '-count=1' || '' }} ./...
-        working-directory: packages/compiler
+        run: node .github/scripts/go-test-shards.mjs run --list go-tests.json --times go-test-times/Linux/times.json --groups .github/scripts/go-test-groups.json --shards ${{ matrix.shards }} --shard ${{ matrix.shard }} --serial-weight 4 --times-key "${{ steps.times.outputs.key }}" --plan-out go-test-plan.json --jobs 2 --out go-test-results -- -race -gcflags=all=-d=checkptr=0 -parallel 4 -timeout 20m ${{ github.event_name != 'pull_request' && '-count=1' || '' }}
         env:
           KRATE_REQUIRE_E2E: "1"
 
-      # The native module holds the embedded QuickJS engine and the host
-      # runtime; same race flags as the compiler.
-      - name: Go test (race, native)
-        run: go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m ${{ github.event_name != 'pull_request' && '-count=1' || '' }} ./...
-        working-directory: packages/native
-        env:
-          KRATE_REQUIRE_E2E: "1"
+      - name: Upload the test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-results-Linux-${{ matrix.shard }}
+          path: |
+            go-tests.json
+            go-test-plan.json
+            go-test-results/
+          retention-days: 7
 
       # Already part of go test above; re-run for the pass-rate table.
       - name: Parser conformance summary
+        if: matrix.shard == 0
         run: |
           status=0
           go test -count=1 -run TestConformance ./internal/conformance || status=$?
@@ -226,13 +270,16 @@ jobs:
       # must not double the build. Timed without -race; the table goes to the
       # job summary.
       - name: Shared-graph build benchmark
+        if: matrix.shard == 1
         run: go test -count=1 -run TestSharedGraphCompiledOncePerBuild -v ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_REQUIRE_E2E: "1"
 
+      # Every shard compiles every test binary (listing does), so one shard's
+      # cache serves them all; one save avoids the shards racing for the key.
       - name: Save the Go caches
-        if: always()
+        if: always() && matrix.shard == 0
         uses: ./.github/actions/go-cache-save
 
   # Installs the packed packages with npm and runs the installed compiler. It
@@ -348,13 +395,21 @@ jobs:
           docker run --rm -v "$PWD:/repo" -w /repo node:22-alpine sh -c \
             'npm install --global pnpm@11.9.0 >/dev/null && node scripts/smoke-install.mjs'
 
+  # The Go tests on macOS and Windows, split into shards like go-test.
   go-matrix:
-    name: Go (${{ matrix.os }})
+    name: Go (${{ matrix.os }}, ${{ matrix.shard }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        # Shard counts: see the header comment.
+        include:
+          - { os: macos-latest, kind: macOS, cores: 3, shards: 1, shard: 0 }
+          - { os: windows-latest, kind: Windows, cores: 4, shards: 2, shard: 0 }
+          - { os: windows-latest, kind: Windows, cores: 4, shards: 2, shard: 1 }
     defaults:
       run:
         shell: bash
@@ -396,14 +451,10 @@ jobs:
 
       # The native host-child release tests compile with bun and deno, and
       # KRATE_REQUIRE_E2E turns a missing runtime into a failure.
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Bun and Deno
+        uses: ./.github/actions/setup-bun-deno
         with:
           bun-version: 1.4.5
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v1
-        with:
           deno-version: 2.9.8
 
       - name: Install JS dependencies
@@ -414,23 +465,154 @@ jobs:
       - name: Build JS packages
         run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
 
+      # Every shard picks the same entry: the newest this run may restore
+      # that was saved before the run started.
+      - name: Pick the recorded test times
+        id: times
+        run: node .github/scripts/go-test-shards.mjs pick --kind ${{ matrix.kind }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Restore the recorded test times
+        if: steps.times.outputs.key != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: go-test-times/${{ matrix.kind }}
+          key: ${{ steps.times.outputs.key }}
+          fail-on-cache-miss: true
+          # The summary job saves the times on Linux for every OS.
+          enableCrossOsArchive: true
+
+      - name: List the Go tests
+        run: node .github/scripts/go-test-shards.mjs list --module packages/compiler --module packages/native --out go-tests.json
+
       - name: Go test
-        run: go test -timeout 30m ${{ github.event_name != 'pull_request' && '-count=1' || '' }} ./...
-        working-directory: packages/compiler
+        run: node .github/scripts/go-test-shards.mjs run --list go-tests.json --times go-test-times/${{ matrix.kind }}/times.json --groups .github/scripts/go-test-groups.json --shards ${{ matrix.shards }} --shard ${{ matrix.shard }} --serial-weight ${{ matrix.cores }} --times-key "${{ steps.times.outputs.key }}" --plan-out go-test-plan.json --jobs 2 --out go-test-results -- -parallel ${{ matrix.cores }} -timeout 30m ${{ github.event_name != 'pull_request' && '-count=1' || '' }}
         env:
           # The JS workspace and runtime dist are built above, so a missing E2E
           # prerequisite here indicates a real problem, not a bare environment.
           KRATE_REQUIRE_E2E: "1"
 
-      - name: Go test (native)
-        run: go test -timeout 30m ${{ github.event_name != 'pull_request' && '-count=1' || '' }} ./...
-        working-directory: packages/native
-        env:
-          KRATE_REQUIRE_E2E: "1"
+      - name: Upload the test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-results-${{ matrix.kind }}-${{ matrix.shard }}
+          path: |
+            go-tests.json
+            go-test-plan.json
+            go-test-results/
+          retention-days: 7
 
       - name: Save the Go caches
-        if: always()
+        if: always() && matrix.shard == 0
         uses: ./.github/actions/go-cache-save
+
+  # The shards list the tests from source (go-test-list.go). This job builds
+  # every test binary and checks go test -list names the same tests on each
+  # OS, so a test the source listing misses fails CI instead of going unrun.
+  # Nothing waits on it.
+  go-test-list:
+    name: Go test list matches (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+          cache: false
+
+      - name: Restore the Go caches
+        uses: ./.github/actions/go-cache-restore
+        with:
+          key: test
+
+      - name: Compare the source listing with go test -list
+        run: node .github/scripts/go-test-shards.mjs check-list --module packages/compiler --module packages/native
+
+  # Checks the shards of each OS planned alike and together ran every listed
+  # test exactly once (a shard only knows its own part), and on full runs
+  # records the test times the next runs plan with. It runs after the shards,
+  # not in front of them.
+  go-test-summary:
+    name: Go tests ran in full
+    needs: [go-test, go-matrix]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test the shard script
+        run: node --test .github/scripts/go-test-shards.test.mjs
+
+      - name: Download the test results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: go-test-results-*
+          path: results
+
+      - name: Check every listed test ran
+        run: |
+          status=0
+          for kind in Linux macOS Windows; do
+            echo "== $kind"
+            set -- results/go-test-results-"$kind"-*
+            if [ ! -d "$1" ]; then
+              echo "no results from the $kind shards"
+              status=1
+              continue
+            fi
+            # Every shard lists the tests itself; they must agree.
+            for d in "$@"; do
+              if ! cmp -s "$1/go-tests.json" "$d/go-tests.json"; then
+                echo "$d listed other tests than $1"
+                status=1
+              fi
+            done
+            # Every shard must have planned from the same times, alike.
+            dirs=()
+            plans=""
+            for d in "$@"; do
+              dirs+=(--results "$d/go-test-results")
+              plans="$plans${plans:+,}$d/go-test-plan.json"
+            done
+            mkdir -p "go-test-times/$kind"
+            node .github/scripts/go-test-shards.mjs merge --list "$1/go-tests.json" --plans "$plans" "${dirs[@]}" --times-out "go-test-times/$kind/times.json" || status=1
+          done
+          exit $status
+
+      - name: Save the Linux times
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: go-test-times/Linux
+          key: go-test-times-Linux-${{ github.sha }}-${{ github.run_attempt }}
+          enableCrossOsArchive: true
+
+      - name: Save the macOS times
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: go-test-times/macOS
+          key: go-test-times-macOS-${{ github.sha }}-${{ github.run_attempt }}
+          enableCrossOsArchive: true
+
+      - name: Save the Windows times
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: go-test-times/Windows
+          key: go-test-times-Windows-${{ github.sha }}-${{ github.run_attempt }}
+          enableCrossOsArchive: true
 
   # Vet and build the native module for every other OS and architecture the
   # native jobs do not run on, from one Linux runner. The compiled packages
@@ -580,16 +762,11 @@ jobs:
           node-version: "22"
           cache: pnpm
 
-      - name: Set up Bun
+      - name: Set up Bun and Deno
         if: env.RUN == 'true'
-        uses: oven-sh/setup-bun@v2
+        uses: ./.github/actions/setup-bun-deno
         with:
           bun-version: 1.4.5
-
-      - name: Set up Deno
-        if: env.RUN == 'true'
-        uses: denoland/setup-deno@v1
-        with:
           deno-version: 2.9.8
 
       # Every host runtime must be present: the host child tests need all three.
@@ -1134,14 +1311,10 @@ jobs:
           cache-dependency-path: packages/*/go.sum
           cache: true
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Bun and Deno
+        uses: ./.github/actions/setup-bun-deno
         with:
           bun-version: 1.4.5
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v1
-        with:
           deno-version: 2.9.8
 
       - name: Bun action sidecar and Deno static params

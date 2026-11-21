@@ -1,0 +1,9 @@
+{
+  "comment": "Top-level tests that share a fixture built once per test binary, kept on one shard by go-test-shards.mjs so the fixture is not built on several. Keyed by import path.",
+  "groups": {
+    "github.com/kratejs/krate/packages/compiler/internal/build": [
+      ["TestBuildTestProject", "TestBuildLayoutChildrenInjection", "TestBuildMixedTierPage", "TestRuntimeFeaturesCoverLegacyScanExamples"],
+      ["TestOutputAudit", "TestOutputBudgets"]
+    ]
+  }
+}
