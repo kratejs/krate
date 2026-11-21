@@ -10,7 +10,7 @@ const TIER_LINE = /^[ \t]*@(server|static|runtime|client|host|renderer)(?:[ \t]|
 export function isTierDiagnostic(text: string, start: number, code: number, message: string): boolean {
   const lineStart = text.lastIndexOf('\n', start - 1) + 1;
   const lineEnd = text.indexOf('\n', start);
-  const line = text.slice(lineStart, lineEnd < 0 ? text.length : lineEnd);
+  const line = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
   const match = TIER_LINE.exec(line);
   if (!match) return false;
   const at = lineStart + line.indexOf('@');

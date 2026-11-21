@@ -377,7 +377,7 @@ function disposeScopedOwners(gone: (scope: string | null) => boolean): void {
     const p = o.parent as OwnerImpl | null;
     if (p && !gone(p.scope)) {
       const i = p.children.indexOf(o);
-      if (i >= 0) p.children.splice(i, 1);
+      if (i !== -1) p.children.splice(i, 1);
     }
   }
   for (const id of Array.from(condState.keys())) {

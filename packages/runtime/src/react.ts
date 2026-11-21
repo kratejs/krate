@@ -20,7 +20,7 @@
 import { h, krateTrackNode, type Component as FnComponent } from './dom.js';
 import type { KratePortalNode } from './portal.js';
 import { getOwner, handleError, type Owner } from './boundary.js';
-import { createSignal, createEffect, createReducer, isSignalGetter } from './signal.js';
+import { createSignal, createReducer, isSignalGetter } from './signal.js';
 import { createEffectDeps, createEffectEvent, type EffectPhase } from './effects.js';
 import { krateSetRef, type KrateRef } from './refs.js';
 import { krateEventRoot } from './events.js';

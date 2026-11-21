@@ -172,7 +172,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
     var saved = "";
     try {
       saved = localStorage.getItem(themeKey) || "";
-    } catch (e) {}
+    } catch {}
     var dark = saved === "dark";
     if (!dark && saved !== "light") {
       dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -255,7 +255,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
     setTheme(next);
     try {
       localStorage.setItem(themeKey, next);
-    } catch (e) {}
+    } catch {}
   }
 
   return (

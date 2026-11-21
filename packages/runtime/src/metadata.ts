@@ -300,10 +300,10 @@ function fillParams(files: Metadata, params: unknown): Metadata {
 function mergeFiles(acc: Merged, files: Metadata, own: Metadata | null | undefined): Merged {
   const out: Merged = { ...acc, metadata: { ...acc.metadata } };
   if (files.openGraph && files.openGraph.images !== undefined && !(own && own.openGraph && own.openGraph.images !== undefined)) {
-    out.metadata.openGraph = { ...(out.metadata.openGraph || {}), images: files.openGraph.images };
+    out.metadata.openGraph = { ...out.metadata.openGraph, images: files.openGraph.images };
   }
   if (files.twitter && files.twitter.images !== undefined && !(own && own.twitter && own.twitter.images !== undefined)) {
-    out.metadata.twitter = { card: 'summary_large_image', ...(out.metadata.twitter || {}), images: files.twitter.images };
+    out.metadata.twitter = { card: 'summary_large_image', ...out.metadata.twitter, images: files.twitter.images };
   }
   if (files.icons !== undefined && !(own && own.icons !== undefined)) out.metadata.icons = files.icons;
   if (files.manifest !== undefined && !(own && own.manifest !== undefined)) out.metadata.manifest = files.manifest;

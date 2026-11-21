@@ -38,7 +38,7 @@ async function instantiate(url) {
         return await WebAssembly.instantiateStreaming(res);
       }
       return await WebAssembly.instantiate(await res.arrayBuffer());
-    } catch (e) {
+    } catch {
       // fall back to non-streaming below
     }
   }

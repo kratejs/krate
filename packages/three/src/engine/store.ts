@@ -352,14 +352,14 @@ export const createStore = (
           const internal = get().internal;
           // A positive priority takes over rendering: while any such
           // subscriber exists the root does not render on its own.
-          internal.priority = internal.priority + (priority > 0 ? 1 : 0);
+          internal.priority += (priority > 0 ? 1 : 0);
           internal.subscribers.push({ ref, priority, store });
           // Lowest priority first, so the highest renders last (on top).
           internal.subscribers = internal.subscribers.sort((a, b) => a.priority - b.priority);
           return () => {
             const internal = get().internal;
             if (internal?.subscribers) {
-              internal.priority = internal.priority - (priority > 0 ? 1 : 0);
+              internal.priority -= (priority > 0 ? 1 : 0);
               internal.subscribers = internal.subscribers.filter((s) => s.ref !== ref);
             }
           };

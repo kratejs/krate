@@ -156,13 +156,13 @@ function collectInstallers(roots) {
 
 function crc32(buf) {
   let c;
-  let crc = 0xffffffff;
+  let crc = 0xFFFFFFFF;
   for (let i = 0; i < buf.length; i++) {
-    c = (crc ^ buf[i]) & 0xff;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    c = (crc ^ buf[i]) & 0xFF;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
     crc = (crc >>> 8) ^ c;
   }
-  return (crc ^ 0xffffffff) >>> 0;
+  return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
 // writeIconPng writes a plain 1024x1024 PNG, the source `tauri icon` expands.
@@ -183,13 +183,13 @@ export function pngBytes(size = 1024) {
   const row = Buffer.alloc(1 + size * 4);
   for (let x = 0; x < size; x++) {
     const o = 1 + x * 4;
-    row[o] = 0x2a;
-    row[o + 1] = 0x6f;
-    row[o + 2] = 0xdb;
-    row[o + 3] = 0xff;
+    row[o] = 0x2A;
+    row[o + 1] = 0x6F;
+    row[o + 2] = 0xDB;
+    row[o + 3] = 0xFF;
   }
   const raw = Buffer.concat(Array.from({ length: size }, () => row));
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
 // ------------------------------------------------------------------ memory
@@ -467,7 +467,7 @@ function buildElectron(opts) {
   };
 }
 
-function buildTauri(opts, work) {
+function buildTauri(opts, _work) {
   const dir = path.join(here, 'tauri');
   const rust = path.join(dir, 'src-tauri');
   const notes = [];

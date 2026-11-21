@@ -88,7 +88,7 @@ export function ThemeToggle(props: { storageKey?: string }) {
     var saved = "";
     try {
       saved = localStorage.getItem(storageKey) || "";
-    } catch (e) {}
+    } catch {}
     var dark = saved === "dark";
     if (!dark && saved !== "light") {
       dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -112,7 +112,7 @@ export function ThemeToggle(props: { storageKey?: string }) {
     setTheme(next);
     try {
       localStorage.setItem(storageKey, next);
-    } catch (e) {}
+    } catch {}
   }
 
   return (

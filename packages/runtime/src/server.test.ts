@@ -8,7 +8,7 @@ describe('renderToString', () => {
   });
 
   it('drops event and internal props', () => {
-    const node = jsx('button', { onClick: () => undefined, children: 'x' });
+    const node = jsx('button', { onClick: () => {}, children: 'x' });
     expect(renderToString(node)).toBe('<button>x</button>');
   });
 
@@ -44,7 +44,7 @@ describe('Script and Style built-ins', () => {
 describe('server actions', () => {
 
   it('renders a formAction function as a POST submit endpoint', () => {
-    const action = Object.assign(() => undefined, {
+    const action = Object.assign(() => {}, {
       actionUrl: '/__krate/action/a456',
     });
     const html = renderToString(jsx('button', { formAction: action, children: 'go' }));
@@ -244,7 +244,7 @@ describe('clientBoundary', () => {
 
   it('warns when an asChild child can only be sent as HTML', async () => {
     const Trigger = clientBoundary('m12', 'RawTrigger', '/c.js', function RawTrigger() { return null; }, render) as any;
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       await renderToStringAsync(jsx(Trigger, { asChild: true, children: { __raw: '<a>x</a>' } }));
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('<RawTrigger asChild> received a child rendered to HTML'));

@@ -40,7 +40,7 @@ copyFileSync(builderOut, join(embeddedDir, "builder.wasm"));
 const check = (path, names) => {
   const buf = readFileSync(path);
   for (const n of names) {
-    if (buf.indexOf(Buffer.from(n, "utf8")) === -1) {
+    if (!buf.includes(Buffer.from(n, "utf8"))) {
       throw new Error(`${path} is missing export "${n}"`);
     }
   }

@@ -84,7 +84,7 @@ function acceptsEncoding(header: string | null, coding: string): boolean {
     let token = part;
     let q = 1;
     const semi = part.indexOf(";");
-    if (semi >= 0) {
+    if (semi !== -1) {
       token = part.slice(0, semi).trim();
       for (const param of part.slice(semi + 1).split(";")) {
         const t = param.trim();
@@ -196,7 +196,7 @@ export function createNodeStaticLayer(distDir: string): StaticLayer {
       }
 
       const ext = path.extname(target).toLowerCase();
-      let contentType = MIME[ext] || "application/octet-stream";
+      const contentType = MIME[ext] || "application/octet-stream";
       const headers = new Headers();
       const ae = request.headers.get("accept-encoding");
       let encoding = "";
@@ -230,7 +230,7 @@ export function createNodeStaticLayer(distDir: string): StaticLayer {
       let start = 0;
       let end = size - 1;
       const range = request.headers.get("range");
-      if (range && /^bytes=/.test(range) && !range.includes(",")) {
+      if (range && range.startsWith('bytes=') && !range.includes(",")) {
         const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
         if (m && (m[1] !== "" || m[2] !== "")) {
           if (m[1] === "") {

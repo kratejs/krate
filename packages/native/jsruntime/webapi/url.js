@@ -20,7 +20,7 @@
     var bytes = utf8Encode(String(s)), out = '';
     for (var i = 0; i < bytes.length; i++) {
       var b = bytes[i];
-      if ((b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a) || b === 0x2a || b === 0x2d || b === 0x2e || b === 0x5f) out += String.fromCharCode(b);
+      if ((b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A) || b === 0x2A || b === 0x2D || b === 0x2E || b === 0x5F) out += String.fromCharCode(b);
       else if (b === 0x20) out += '+';
       else out += '%' + (b < 16 ? '0' : '') + b.toString(16).toUpperCase();
     }
@@ -134,7 +134,7 @@
     set password(v) { this._cred(this._c.username, String(v)); }
     _cred(u, p) {
       var c = this._c, rest = c.href.slice(c.protocol.length + 2);
-      var at = rest.indexOf('@'), slash = rest.search(/[\/?#]/);
+      var at = rest.indexOf('@'), slash = rest.search(/[/?#]/);
       if (at >= 0 && (slash < 0 || at < slash)) rest = rest.slice(at + 1);
       var cred = u ? encodeURIComponent(u) + (p ? ':' + encodeURIComponent(p) : '') + '@' : '';
       this._reparse(c.protocol + '//' + cred + rest);

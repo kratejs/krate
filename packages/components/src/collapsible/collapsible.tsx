@@ -1,5 +1,5 @@
 import './collapsible.css';
-import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+import { createScope, createCSSGroup } from '@krate/runtime';
 
 const CollapsibleCtx = createScope<string | null>();
 

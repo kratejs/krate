@@ -38,7 +38,7 @@ export function parseRegionShell(shell: string): RegionShell {
     const id = o[2];
     const openEnd = o.index + o[0].length;
     const rel = shell.indexOf("<!--/" + kind + ":" + id + "-->", openEnd);
-    if (rel < 0) {
+    if (rel === -1) {
       e.ok = false;
       e.roots = [];
       e.all = [];
@@ -68,12 +68,12 @@ export function allSuspense(all: RegionBoundary[]): boolean {
 export function splitBodyScripts(shell: string): [string, string] {
   const lower = shell.toLowerCase();
   const body = lower.indexOf("<body");
-  if (body >= 0) {
+  if (body !== -1) {
     const rel = lower.indexOf("<script", body);
-    if (rel >= 0) return [shell.slice(0, rel), shell.slice(rel)];
+    if (rel !== -1) return [shell.slice(0, rel), shell.slice(rel)];
   }
   const at = lower.lastIndexOf("</body>");
-  if (at >= 0) return [shell.slice(0, at), shell.slice(at)];
+  if (at !== -1) return [shell.slice(0, at), shell.slice(at)];
   return [shell, ""];
 }
 

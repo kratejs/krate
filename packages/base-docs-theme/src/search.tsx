@@ -157,6 +157,8 @@ export function DocsSearch(props: DocsSearchProps) {
   const statusId = "krate-docs-search-status";
   const optionId = (index: number) => "krate-docs-search-option-" + index;
 
+  // Krate assigns the element through ref={rootRef} at compile time.
+  // oxlint-disable-next-line eslint/prefer-const
   let rootRef: HTMLElement | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let restoreFocus: HTMLElement | null = null;

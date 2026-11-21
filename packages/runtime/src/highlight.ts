@@ -114,7 +114,7 @@ function lexerFor(name: string): Lexer | undefined {
 }
 
 function ensureLF(text: string): string {
-  if (text.indexOf("\r") < 0) return text;
+  if (!text.includes("\r")) return text;
   return text.replace(/\r\n?/g, "\n");
 }
 
@@ -174,7 +174,7 @@ function lex(lx: Lexer, text: string, startState: number, nested: boolean, out: 
         continue;
       }
       const cp = text.codePointAt(pos) as number;
-      const n = cp > 0xffff ? 2 : 1;
+      const n = cp > 0xFFFF ? 2 : 1;
       out.push(["err", text.substr(pos, n)]);
       pos += n;
       continue;
@@ -250,7 +250,6 @@ function emitTokens(lx: Lexer, emit: Emit, groups: ArrayLike<string | undefined>
           if (e !== null && e !== undefined) emitTokens(lx, e, [group(groups, gi)], out);
         }
       }
-      return;
     }
   }
 }
@@ -285,11 +284,11 @@ export function parseLineRanges(spec: string): [number, number][] {
     part = part.trim();
     if (part === "") continue;
     const dash = part.indexOf("-");
-    const lo = dash < 0 ? part : part.slice(0, dash);
+    const lo = dash === -1 ? part : part.slice(0, dash);
     const a = atoi(lo.trim());
     if (a === null || a < 1) continue;
     let b = a;
-    if (dash >= 0) {
+    if (dash !== -1) {
       const hi = atoi(part.slice(dash + 1).trim());
       if (hi === null || hi < a) continue;
       b = hi;
@@ -438,7 +437,7 @@ function splitFrontmatter(text: string): [string, string] | null {
   if (text.slice(0, lineEnd).replace(/\r$/, "") !== "---") return null;
   for (let pos = lineEnd + 1; pos < text.length; ) {
     const next = text.indexOf("\n", pos);
-    if (next < 0) break;
+    if (next === -1) break;
     lineEnd = next;
     const line = text.slice(pos, lineEnd).replace(/\r$/, "");
     if (line === "---") return [text.slice(0, lineEnd + 1), text.slice(lineEnd + 1)];

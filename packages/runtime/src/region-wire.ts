@@ -112,7 +112,7 @@ function decodeBody(b: Buffer): Record<string, any> {
     for (let i = 0; i < 6; i++) {
       if (off >= b.length) throw new Error("corrupt frame");
       const c = b[off++];
-      x += (c & 0x7f) * mul;
+      x += (c & 0x7F) * mul;
       if (c < 0x80) return x;
       mul *= 128;
     }

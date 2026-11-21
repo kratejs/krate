@@ -64,7 +64,7 @@ export async function callRoute(
   if (fallback && !METHODS.some((m) => named(m))) return (await fallback(request, context)) as Response;
 
   const allow = METHODS.filter((m) => named(m) || (m === "HEAD" && named("GET")));
-  if (allow.indexOf("OPTIONS") < 0) allow.push("OPTIONS");
+  if (!allow.includes("OPTIONS")) allow.push("OPTIONS");
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: { Allow: allow.join(", ") } });
   return new Response("Method Not Allowed", { status: 405, headers: { Allow: allow.join(", ") } });
 }

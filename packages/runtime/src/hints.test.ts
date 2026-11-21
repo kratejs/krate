@@ -23,7 +23,7 @@ describe('resource hints in the browser', () => {
     document.head.innerHTML = '<link rel="preload" href="/x.wasm" as="fetch" crossorigin="">';
     preload('/x.wasm', { as: 'fetch', crossOrigin: 'anonymous' });
     preload(new URL('/x.wasm', document.baseURI).href, { as: 'fetch', crossOrigin: 'anonymous' });
-    expect(document.head.querySelectorAll('link').length).toBe(1);
+    expect(document.head.querySelectorAll('link')).toHaveLength(1);
   });
 
   it('keeps preloads of the same href with another as apart', () => {
@@ -39,10 +39,10 @@ describe('resource hints in the browser', () => {
     prefetchDNS('https://dns.example.com');
     preinit('/a.css', { as: 'style' });
     preinitModule('/m.js');
-    expect(document.head.children.length).toBe(4);
+    expect(document.head.children).toHaveLength(4);
     preinit('/s.js', { as: 'script' });
     preinit('/s.js', { as: 'script' });
-    expect(document.head.querySelectorAll('script[src="/s.js"]').length).toBe(1);
+    expect(document.head.querySelectorAll('script[src="/s.js"]')).toHaveLength(1);
   });
 
   it('writes crossOrigin as React does', () => {
@@ -54,6 +54,6 @@ describe('resource hints in the browser', () => {
 
   it('krateHintTags does nothing in the browser', () => {
     krateHintTags(['<link rel="preload" href="/y" as="fetch">']);
-    expect(document.head.children.length).toBe(0);
+    expect(document.head.children).toHaveLength(0);
   });
 });

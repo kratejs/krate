@@ -139,7 +139,7 @@ export function newQueryTracker(): QueryTracker {
 }
 
 export function trackedQuery(query: Record<string, string> | undefined, t: QueryTracker): Record<string, string> {
-  const target: Record<string, string> = { ...(query || {}) };
+  const target: Record<string, string> = { ...query };
   const note = (prop: string | symbol) => {
     if (typeof prop === "string" && prop !== "then" && prop !== "toJSON" && prop !== "constructor") t.keys.add(prop);
   };
@@ -561,8 +561,8 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
       method: req.method || "GET",
       headers: h,
       cookies: parseCookieHeader(h.get("cookie")),
-      params: { ...(req.params || {}) },
-      searchParams: tracker ? trackedQuery(req.query, tracker) : { ...(req.query || {}) },
+      params: { ...req.params },
+      searchParams: tracker ? trackedQuery(req.query, tracker) : { ...req.query },
     };
   }
 
@@ -797,7 +797,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   // so nothing is re-derived at request time.
 
   function regionProps(region: RegionMeta, req: RenderRequest): Record<string, any> {
-    const props: Record<string, any> = { ...(region.props || {}) };
+    const props: Record<string, any> = { ...region.props };
     if (req.params && Object.keys(req.params).length > 0) props.params = req.params;
     if (req.query && Object.keys(req.query).length > 0) props.query = req.query;
     return props;

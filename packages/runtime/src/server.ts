@@ -7,7 +7,7 @@ import { highlight as highlightCode, trimSpace } from './highlight.js';
 import { accessDeniedStatus, isNotFoundSignal, redirectTarget } from './request-context.js';
 import { sha256Hex } from './sha256.js';
 import { markErrorCaught } from './cache-scope.js';
-import { encodeProp, type FlightHooks } from './flight-props.js';
+import { encodeProp } from './flight-props.js';
 
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
@@ -199,7 +199,7 @@ function isClassComponent(fn: any): boolean {
 // package compiled for React (Radix's Slot is a forwardRef) hands these to a
 // dynamic tag (`const Comp = asChild ? Slot.Root : "button"`), so the server
 // renderer must run them as components instead of printing them as a tag name.
-const R_ELEMENT = [Symbol.for("react.element"), Symbol.for("react.transitional.element")];
+const R_ELEMENT = new Set([Symbol.for("react.element"), Symbol.for("react.transitional.element")]);
 const R_FORWARD_REF = Symbol.for("react.forward_ref");
 const R_MEMO = Symbol.for("react.memo");
 const R_LAZY = Symbol.for("react.lazy");
@@ -275,7 +275,7 @@ function ServerSlot(allProps: Record<string, any>): JSXNode {
 // toReactElement converts a React element object (made by a package's own
 // React) into Krate's element shape.
 function isReactElement(v: unknown): v is { type: unknown; props: Record<string, any> } {
-  return v != null && typeof v === "object" && R_ELEMENT.includes((v as any).$$typeof);
+  return v != null && typeof v === "object" && R_ELEMENT.has((v as any).$$typeof);
 }
 
 function normalizeNode(node: unknown): unknown {
@@ -365,7 +365,7 @@ function withProviderValue<T>(fn: Function, props: Record<string, any>, run: () 
 
 function classFallback(type: any, instance: any, error: unknown): unknown {
   if (typeof type.getDerivedStateFromError !== "function") throw error;
-  instance.state = { ...(instance.state || {}), ...(type.getDerivedStateFromError(error) || {}) };
+  instance.state = { ...instance.state, ...type.getDerivedStateFromError(error) };
   try {
     if (typeof instance.componentDidCatch === "function") instance.componentDidCatch(error, { componentStack: "" });
   } catch {
@@ -1160,7 +1160,7 @@ export function Link(props: {
 
 // Image - renders an <img> tag (server stub; Go compiler handles full responsive output at build time).
 export function Image(props: { src?: string; alt?: string; width?: number; height?: number; [key: string]: any }): JSXNode {
-  const { src = "", alt = "", width, height, ...rest } = props;
+  const { src = "", alt = "", width, height } = props;
   const attrs: string[] = [];
   if (src) attrs.push(`src="${escapeHTML(src)}"`);
   if (alt) attrs.push(`alt="${escapeHTML(alt)}"`);

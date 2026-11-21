@@ -178,7 +178,7 @@ function coreGlobalsPlugin(coreExports) {
 const liteRouterPlugin = {
   name: 'krate-lite-router',
   setup(build) {
-    build.onResolve({ filter: /^\.\/router(\.js)?$/ }, () => ({ path: require('path').join(__dirname, 'src', 'router-lite.ts') }));
+    build.onResolve({ filter: /^\.\/router(\.js)?$/ }, () => ({ path: require('node:path').join(__dirname, 'src', 'router-lite.ts') }));
   },
 };
 
@@ -206,8 +206,8 @@ async function buildIslandSwap() {
     charset: 'utf8',
     logLevel: 'silent',
   });
-  const fs = require('fs');
-  fs.writeFileSync(require('path').join(__dirname, 'dist', 'krate-island-swap.js'), result.outputFiles[0].text);
+  const fs = require('node:fs');
+  fs.writeFileSync(require('node:path').join(__dirname, 'dist', 'krate-island-swap.js'), result.outputFiles[0].text);
   console.log(`Built krate-island-swap.js (${(result.outputFiles[0].text.length / 1024).toFixed(1)} KB)`);
 }
 
@@ -230,14 +230,14 @@ async function buildBundle(outFile, entry, minify = true, plugins = []) {
       js: 'for (const k in __krate_exports) { window[k] = __krate_exports[k]; }',
     },
   });
-  const fs = require('fs');
-  fs.writeFileSync(require('path').join(__dirname, 'dist', outFile), result.outputFiles[0].text);
+  const fs = require('node:fs');
+  fs.writeFileSync(require('node:path').join(__dirname, 'dist', outFile), result.outputFiles[0].text);
   console.log(`Built ${outFile} (${(result.outputFiles[0].text.length / 1024).toFixed(1)} KB)`);
 }
 
 async function buildSplitRuntime() {
-  const fs = require('fs');
-  const path = require('path');
+  const fs = require('node:fs');
+  const path = require('node:path');
   const coreExports = {};
   for (const m of CORE_MODULES) coreExports[m] = await exportNames(`export * from './src/${m}';`);
   const featureGlobals = { ...coreExports, router: ROUTER_GLOBALS };
@@ -269,8 +269,8 @@ async function buildSplitRuntime() {
 }
 
 async function main() {
-  const fs = require('fs');
-  const path = require('path');
+  const fs = require('node:fs');
+  const path = require('node:path');
   fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
   await buildBundle('krate-runtime.js', RUNTIME_ENTRY);
   await buildBundle('krate-hydrate.js', HYDRATE_ENTRY);

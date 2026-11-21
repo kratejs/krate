@@ -24,8 +24,8 @@ function actionSegments(ctx: RequestContext): string[] | null {
   const path = ctx.url.pathname;
   const idx = path.indexOf(base + "/");
   const exact = path === base || path.endsWith(base);
-  if (idx < 0 && !exact) return null;
-  const rest = idx >= 0 ? path.slice(idx + base.length) : "";
+  if (idx === -1 && !exact) return null;
+  const rest = idx !== -1 ? path.slice(idx + base.length) : "";
   return rest.split("/").filter(Boolean).map((s) => decodeURIComponent(s));
 }
 

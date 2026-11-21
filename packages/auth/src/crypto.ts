@@ -61,8 +61,8 @@ export async function encodeToken(params: EncodeParams): Promise<string> {
   const key = deriveKey(secrets[0]!, params.salt);
   const iv = randomBytes(12);
   const sealed = gcm(key, iv, utf8(HEADER)).encrypt(utf8(JSON.stringify(claims)));
-  const ciphertext = sealed.subarray(0, sealed.length - 16);
-  const tag = sealed.subarray(sealed.length - 16);
+  const ciphertext = sealed.subarray(0, -16);
+  const tag = sealed.subarray(-16);
   return [HEADER, "", b64urlEncode(iv), b64urlEncode(ciphertext), b64urlEncode(tag)].join(".");
 }
 

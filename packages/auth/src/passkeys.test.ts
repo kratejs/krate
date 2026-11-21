@@ -99,7 +99,7 @@ describe("registration", () => {
 
     const listed = (await (await c.request("/api/auth/passkey/list")).json()) as any;
     expect(listed.passkeys.map((p: any) => p.name).sort()).toEqual(["Laptop", "Phone"]);
-    expect((await adapter.listAuthenticatorsByUserId!(user.id)).length).toBe(2);
+    expect((await adapter.listAuthenticatorsByUserId!(user.id))).toHaveLength(2);
   });
 
   it("rejects an email that already has an account", async () => {

@@ -20,7 +20,7 @@ var KrateError = class extends Error {
 var mocks = /* @__PURE__ */ new Map();
 function split(fn) {
   const i = fn.lastIndexOf(".");
-  return i < 0 ? ["", fn] : [fn.slice(0, i), fn.slice(i + 1)];
+  return i === -1 ? ["", fn] : [fn.slice(0, i), fn.slice(i + 1)];
 }
 function findMock(fn) {
   if (mocks.size === 0) return void 0;
@@ -51,7 +51,7 @@ function mockSignal(name) {
 
 // ../../app/src/wire.ts
 var TAGS = ["$b", "$d", "$m", "$s"];
-var ESCAPED = TAGS.map((t) => t + "$");
+var ESCAPED = new Set(TAGS.map((t) => t + "$"));
 var te = new TextEncoder();
 var td = new TextDecoder("utf-8", { fatal: true });
 function fail(root, path, msg) {
@@ -135,7 +135,7 @@ function enc(v, ctx, root, path, stack) {
     if (keys.length === 1 && out[keys[0]] !== void 0) {
       const k = keys[0];
       if (TAGS.includes(k)) return { [k + "$"]: out };
-      if (ESCAPED.includes(k)) return { [k]: out };
+      if (ESCAPED.has(k)) return { [k]: out };
     }
     return out;
   } finally {
@@ -198,7 +198,7 @@ function dec(t, blobs) {
       if (!Array.isArray(v)) throw new Error("bad $s value");
       return new Set(v.map((x) => dec(x, blobs)));
     }
-    if (ESCAPED.includes(k)) {
+    if (ESCAPED.has(k)) {
       if (v === null || typeof v !== "object" || Array.isArray(v)) throw new Error(`bad ${k} wrapper`);
       const inner = {};
       for (const ik of Object.keys(v)) setOwn(inner, ik, dec(v[ik], blobs));
@@ -362,7 +362,7 @@ function createClient(options = {}) {
       w.onAbort = () => {
         const r = w.rec;
         const i = r.waiters.indexOf(w);
-        if (i < 0) return;
+        if (i === -1) return;
         r.waiters.splice(i, 1);
         reject(abortReason(signal2));
         if (r.waiters.length === 0) abandon(r);
@@ -753,7 +753,7 @@ function parseEndpoint(addr) {
     let rest = addr.slice("tcp:".length);
     let token = "";
     const q = rest.indexOf("?");
-    if (q >= 0) {
+    if (q !== -1) {
       token = new URLSearchParams(rest.slice(q + 1)).get("token") ?? "";
       rest = rest.slice(0, q);
     }

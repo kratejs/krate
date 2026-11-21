@@ -1,7 +1,7 @@
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 import { execBinary, printVersion, scaffoldTag } from './binary.js';
 import { commandSpec } from './spawn.js';
 

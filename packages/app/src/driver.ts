@@ -297,7 +297,7 @@ class Channel {
         });
       });
     const next = this.tail.then(run, run);
-    this.tail = next.catch(() => undefined);
+    this.tail = next.catch(() => {});
     return next;
   }
 }
@@ -561,12 +561,12 @@ export class App {
   ) {
     this.timeout = timeout;
     this.emit = {
-      tray: (kind = "click", id = "") => this.send(`emit tray ${JSON.stringify({ kind, id })}`).then(() => undefined),
+      tray: (kind = "click", id = "") => this.send(`emit tray ${JSON.stringify({ kind, id })}`).then(() => {}),
       menu: (id, o = {}) =>
         this.send(`emit menu ${JSON.stringify({ id, window: o.window ?? "main", checked: o.checked ?? false })}`).then(
-          () => undefined,
+          () => {},
         ),
-      shortcut: (accelerator) => this.send(`emit shortcut ${JSON.stringify({ accelerator })}`).then(() => undefined),
+      shortcut: (accelerator) => this.send(`emit shortcut ${JSON.stringify({ accelerator })}`).then(() => {}),
     };
   }
 

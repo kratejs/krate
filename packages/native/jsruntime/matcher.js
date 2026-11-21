@@ -5,7 +5,7 @@ function __krate_compile_matcher(src) {
   if (typeof src !== 'string') throw new Error('middleware matcher must be a string or { source }');
   if (src.charAt(0) !== '/') throw new Error('middleware matcher "' + src + '" must start with "/"');
   var out = '', i = 0, n = src.length;
-  function esc(c) { return c.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&'); }
+  function esc(c) { return c.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&'); }
   while (i < n) {
     var c = src.charAt(i);
     var prefix = '';

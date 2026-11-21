@@ -189,7 +189,6 @@ export function konvaRef(ref: unknown): unknown {
       const value = host ? host.konvaNode : null;
       if (typeof ref === 'function') return (ref as (v: unknown) => unknown)(value);
       (ref as { current: unknown }).current = value;
-      return undefined;
     };
     refWrappers.set(ref as object, wrapper);
   }

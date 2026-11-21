@@ -21,7 +21,7 @@ describe('krateList', () => {
     const [items, setItems] = createSignal(['a', 'b']);
     const ul = document.createElement('ul');
     ul.appendChild(krateList(items, (i) => i, (i) => h('li', null, String(i)), 0).mount());
-    expect(ul.querySelectorAll('li').length).toBe(2);
+    expect(ul.querySelectorAll('li')).toHaveLength(2);
     setItems(['a', 'b', 'c']);
     krateFlushSync();
     expect(ul.textContent).toBe('abc');

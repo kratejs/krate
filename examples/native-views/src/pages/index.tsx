@@ -33,7 +33,7 @@ export default function Home() {
     if (size) {
       const cur = loaded();
       const i = cur.findIndex(([id]) => id === from);
-      setLoaded(i < 0 ? [...cur, [from, size]] : cur.map((e, j): [string, string] => (j === i ? [from, size] : e)));
+      setLoaded(i === -1 ? [...cur, [from, size]] : cur.map((e, j): [string, string] => (j === i ? [from, size] : e)));
     } else setHeard(from + ': ' + JSON.stringify(data));
   });
 

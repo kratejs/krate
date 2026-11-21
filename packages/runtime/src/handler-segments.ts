@@ -94,7 +94,7 @@ export function lookupSegmentPage(
       if (e && entryPage(e, kind) !== "") return matchOf(e, kind);
       if (dir === "") return null;
       const i = dir.lastIndexOf("/");
-      dir = i >= 0 ? dir.slice(0, i) : "";
+      dir = i !== -1 ? dir.slice(0, i) : "";
     }
   }
   let best: SegmentEntry | null = null;
@@ -158,7 +158,7 @@ export function fillServerError(page: string, e: ServerError): string {
   for (const [sentinel, val] of subs) page = page.split(sentinel).join(goHTMLEscape(val));
   const block = '<script type="application/json" id="__krate_error">' + escapeJSONForScript(JSON.stringify(e)) + "</script>";
   const at = page.indexOf("</head>");
-  return at >= 0 ? page.slice(0, at) + block + page.slice(at) : block + page;
+  return at !== -1 ? page.slice(0, at) + block + page.slice(at) : block + page;
 }
 
 /** A segment page filled for one response (dynamic dir params, then the error). */
