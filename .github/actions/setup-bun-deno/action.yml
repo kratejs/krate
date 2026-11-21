@@ -1,0 +1,114 @@
+name: Set up Bun and Deno
+description: >-
+  Installs pinned Bun and Deno release binaries and puts them on PATH. The
+  archives are checked against the checksums each release publishes and kept
+  in the Actions cache. oven-sh/setup-bun and denoland/setup-deno unpack with
+  PowerShell on Windows, and PowerShell crashed with an access violation
+  (exit code 3221225477) while unpacking Bun on windows-11-arm; this action
+  unpacks with tar.exe there and unzip elsewhere.
+inputs:
+  bun-version:
+    description: Exact Bun version, such as 1.4.5.
+    required: true
+  deno-version:
+    description: Exact Deno version, such as 2.9.8.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Locate the runtimes
+      shell: bash
+      env:
+        BUN_VERSION: ${{ inputs.bun-version }}
+        DENO_VERSION: ${{ inputs.deno-version }}
+      run: |
+        case "$RUNNER_OS/$RUNNER_ARCH" in
+          Linux/X64) bun=linux-x64; deno=x86_64-unknown-linux-gnu ;;
+          Linux/ARM64) bun=linux-aarch64; deno=aarch64-unknown-linux-gnu ;;
+          macOS/X64) bun=darwin-x64; deno=x86_64-apple-darwin ;;
+          macOS/ARM64) bun=darwin-aarch64; deno=aarch64-apple-darwin ;;
+          Windows/X64) bun=windows-x64; deno=x86_64-pc-windows-msvc ;;
+          Windows/ARM64) bun=windows-aarch64; deno=aarch64-pc-windows-msvc ;;
+          *) echo "::error::no Bun or Deno build for $RUNNER_OS/$RUNNER_ARCH"; exit 1 ;;
+        esac
+        dir="$RUNNER_TOOL_CACHE/krate-js-runtimes/bun-$BUN_VERSION-deno-$DENO_VERSION"
+        {
+          echo "JS_RUNTIMES_DIR=$dir"
+          echo "JS_RUNTIMES_BUN=$bun"
+          echo "JS_RUNTIMES_DENO=$deno"
+        } >> "$GITHUB_ENV"
+
+    - name: Restore the runtimes
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.JS_RUNTIMES_DIR }}
+        key: js-runtimes-${{ runner.os }}-${{ runner.arch }}-bun-${{ inputs.bun-version }}-deno-${{ inputs.deno-version }}
+
+    - name: Download and check the runtimes
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        BUN_VERSION: ${{ inputs.bun-version }}
+        DENO_VERSION: ${{ inputs.deno-version }}
+      run: |
+        set -euo pipefail
+        dir="$JS_RUNTIMES_DIR"
+        mkdir -p "$dir"
+        cd "$dir"
+        sha256() {
+          if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
+        }
+        # The first 64-digit hex string: Bun lists "<hash>  <file>", Deno's
+        # Windows sums use PowerShell's Get-FileHash layout.
+        hexof() { grep -oiE '[0-9a-f]{64}' | head -1 | tr 'A-F' 'a-f'; }
+        check() {
+          local file=$1 want=$2 got
+          got=$(sha256 "$file")
+          if [ -z "$want" ] || [ "$got" != "$want" ]; then
+            echo "::error::$file: sha256 $got, release says ${want:-nothing}"
+            exit 1
+          fi
+        }
+        unpack() {
+          if [ "$RUNNER_OS" = Windows ]; then
+            "$(cygpath "$SYSTEMROOT")/System32/tar.exe" -xf "$1"
+          else
+            unzip -q -o "$1"
+          fi
+        }
+        base=https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION
+        curl -fsSLo "bun-$JS_RUNTIMES_BUN.zip" "$base/bun-$JS_RUNTIMES_BUN.zip"
+        want=$(curl -fsSL "$base/SHASUMS256.txt" | grep " bun-$JS_RUNTIMES_BUN.zip\$" | hexof)
+        check "bun-$JS_RUNTIMES_BUN.zip" "$want"
+        unpack "bun-$JS_RUNTIMES_BUN.zip"
+        base=https://github.com/denoland/deno/releases/download/v$DENO_VERSION
+        curl -fsSLo "deno-$JS_RUNTIMES_DENO.zip" "$base/deno-$JS_RUNTIMES_DENO.zip"
+        want=$(curl -fsSL "$base/deno-$JS_RUNTIMES_DENO.zip.sha256sum" | hexof)
+        check "deno-$JS_RUNTIMES_DENO.zip" "$want"
+        mkdir -p deno
+        (cd deno && unpack "../deno-$JS_RUNTIMES_DENO.zip")
+        rm -f ./*.zip
+
+    - name: Put the runtimes on PATH
+      shell: bash
+      env:
+        BUN_VERSION: ${{ inputs.bun-version }}
+        DENO_VERSION: ${{ inputs.deno-version }}
+      run: |
+        set -euo pipefail
+        bin="$JS_RUNTIMES_DIR/bun-$JS_RUNTIMES_BUN"
+        if [ "$RUNNER_OS" = Windows ]; then
+          bin=$(cygpath -w "$bin")
+          deno=$(cygpath -w "$JS_RUNTIMES_DIR/deno")
+        else
+          chmod +x "$JS_RUNTIMES_DIR/bun-$JS_RUNTIMES_BUN/bun" "$JS_RUNTIMES_DIR/deno/deno"
+          deno="$JS_RUNTIMES_DIR/deno"
+        fi
+        { echo "$bin"; echo "$deno"; } >> "$GITHUB_PATH"
+        export PATH="$JS_RUNTIMES_DIR/bun-$JS_RUNTIMES_BUN:$JS_RUNTIMES_DIR/deno:$PATH"
+        got=$(bun --version)
+        [ "$got" = "$BUN_VERSION" ] || { echo "::error::bun --version is $got, want $BUN_VERSION"; exit 1; }
+        got=$(deno --version | head -1)
+        case "$got" in "deno $DENO_VERSION "*) ;; *) echo "::error::deno --version is '$got', want $DENO_VERSION"; exit 1 ;; esac
+        echo "bun $BUN_VERSION, $got"
