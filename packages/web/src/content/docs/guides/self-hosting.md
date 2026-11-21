@@ -260,7 +260,9 @@ repository root).
 
 Only the host listens on a public port. The sidecars listen on `127.0.0.1` on
 ports derived from it (`port + 1` for the API sidecar, `port + 10` for the
-renderer, or the next free port; `ssr.rendererPort` pins the renderer), so two
+renderer; `ssr.rendererPort` pins the renderer). When that port is taken, or
+lies in the OS ephemeral port range (where outgoing connections could take it
+before the sidecar binds), a free port below that range is used instead, so two
 instances on one machine do not collide. Sidecars are restarted with a growing
 delay if they crash, and they exit with the host.
 
