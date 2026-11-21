@@ -1567,6 +1567,7 @@ func (c *clientSSRImpls) buildCombined(claimed []claimedImpl) error {
 	if hits := guard.errors(res.OutputFiles); len(hits) > 0 {
 		return fmt.Errorf("combined server render build: %s", hits[0].Text)
 	}
+	interopCJSDynamicImports(res.OutputFiles, res.Metafile, opts.AbsWorkingDir)
 	if !opts.MinifyWhitespace {
 		// Name each entry module in the output comments as its own Stdin
 		// build does, not by its batch path.

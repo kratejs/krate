@@ -1430,6 +1430,7 @@ func (b *Builder) buildNeutralOnce(base api.BuildOptions, injects []string, file
 		}
 		result.OutputFiles = liveOutputs(result.OutputFiles, names)
 		trimSharedImports(result.OutputFiles)
+		interopCJSDynamicImports(result.OutputFiles, result.Metafile, opts.AbsWorkingDir)
 	}
 	return result
 }

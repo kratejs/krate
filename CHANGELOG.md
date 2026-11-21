@@ -598,6 +598,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `await import()` of a CommonJS package in client code now resolves to the package's named exports, as
+  it does on Next and in an unsplit build. Island chunks are code-split, so the package became a chunk
+  whose only export was `default` (`module.exports`), and `const { readPsd } = await import("ag-psd")`
+  threw "readPsd is not a function" ("y is not a function" once minified). The same applies to the
+  combined server-render build of client components.
 - Benchmark harness: the Go API route and SvelteKit targets were silently skipped (stale import,
   peer-dependency conflict), the load generator capped results near 21k req/s, timed builds were not
   cold, a stale Krate CLI could be measured, and the Krate fixtures built against the npm runtime

@@ -306,6 +306,7 @@ func (b *Builder) checkIslandFlavour(f *islandFlavour) error {
 	result := f.result
 	if len(result.Errors) == 0 {
 		result.OutputFiles = liveOutputs(result.OutputFiles, f.names)
+		interopCJSDynamicImports(result.OutputFiles, result.Metafile, f.opts.AbsWorkingDir)
 	}
 	result.Errors = append(result.Errors, f.guard.errors(result.OutputFiles)...)
 	f.result = result
