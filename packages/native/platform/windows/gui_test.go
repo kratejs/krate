@@ -33,12 +33,17 @@ type report struct {
 	EchoBytes  int       `json:"echoBytes"`
 	StreamOK   bool      `json:"streamOK"`
 	StreamAt   []float64 `json:"streamAt"`
+	StreamText string    `json:"streamText"`
+	Shim       bool      `json:"shim"`
 	Error      string    `json:"error"`
 	UserAgent  string    `json:"userAgent"`
 	BlockedNav bool      `json:"blockedNav"`
 }
 
 const echoSize = 64 << 10
+
+// streamAcks holds the ack channel of each open /__krate/stream/gui response.
+var streamAcks sync.Map
 
 func guiHandler() http.Handler {
 	mux := http.NewServeMux()
@@ -52,18 +57,40 @@ func guiHandler() http.Handler {
 		w.Header().Set("X-Echo-Len", fmt.Sprint(len(b)))
 		_, _ = w.Write(b)
 	})
+	// The stream sends a chunk only after the page has read the one before
+	// (it posts /stream-ack): a transport that holds the response back until
+	// it ends never delivers chunk-0, so the stream stalls and says so.
 	mux.HandleFunc("/__krate/stream/gui", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fl := w.(http.Flusher)
+		acks := make(chan struct{}, 1)
+		id := r.URL.Query().Get("s")
+		streamAcks.Store(id, acks)
+		defer streamAcks.Delete(id)
 		for i := 0; i < 5; i++ {
 			fmt.Fprintf(w, "chunk-%d\n", i)
 			fl.Flush()
+			if i == 4 {
+				return
+			}
 			select {
-			case <-time.After(50 * time.Millisecond):
+			case <-acks:
+			case <-time.After(10 * time.Second):
+				fmt.Fprintf(w, "stalled: chunk-%d did not reach the page within 10s\n", i)
+				return
 			case <-r.Context().Done():
 				return
 			}
 		}
+	})
+	mux.HandleFunc("/stream-ack", func(w http.ResponseWriter, r *http.Request) {
+		if v, ok := streamAcks.Load(r.URL.Query().Get("s")); ok {
+			select {
+			case v.(chan struct{}) <- struct{}{}:
+			default:
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("/report", func(w http.ResponseWriter, r *http.Request) {
 		var rep report
@@ -151,12 +178,11 @@ func checkReport(t *testing.T, r report) {
 	if !r.EchoOK || r.EchoBytes != echoSize {
 		t.Errorf("64 KiB POST echo failed: ok=%v bytes=%d", r.EchoOK, r.EchoBytes)
 	}
-	if !r.StreamOK {
-		t.Errorf("streamed response was not received as 5 chunks: %v", r.StreamAt)
+	if !r.Shim {
+		t.Errorf("the streaming fetch shim is not installed in the page")
 	}
-	// 5 chunks 50 ms apart: the first must arrive well before the last.
-	if n := len(r.StreamAt); n == 5 && r.StreamAt[4]-r.StreamAt[0] < 120 {
-		t.Errorf("stream arrived all at once (buffered): %v", r.StreamAt)
+	if !r.StreamOK {
+		t.Errorf("streamed response was not received chunk by chunk: %q (reads at %v ms)", r.StreamText, r.StreamAt)
 	}
 	if !r.BlockedNav {
 		t.Errorf("navigation to another origin was not blocked")
@@ -209,7 +235,7 @@ const guiPage = `<!doctype html><meta charset=utf-8><title>krate gui test</title
 <body>running...<script>
 (async () => {
   const rep = {window: new URLSearchParams(location.search).get('w') || '', origin: location.origin,
-    subtle: false, subtleSum: '', echoOK: false, echoBytes: 0, streamOK: false, streamAt: [], error: '',
+    subtle: false, subtleSum: '', echoOK: false, echoBytes: 0, streamOK: false, streamAt: [], streamText: '', shim: !!window.__krateMsgStreams, error: '',
     userAgent: navigator.userAgent, blockedNav: false};
   try {
     rep.subtle = !!(window.crypto && crypto.subtle);
@@ -223,7 +249,8 @@ const guiPage = `<!doctype html><meta charset=utf-8><title>krate gui test</title
       const d = new Uint8Array(await crypto.subtle.digest('SHA-256', back));
       rep.subtleSum = Array.from(d, b => b.toString(16).padStart(2, '0')).join('');
     }
-    const sres = await fetch("/__krate/stream/gui");
+    const sid = String(Math.random()).slice(2);
+    const sres = await fetch("/__krate/stream/gui?s=" + sid);
     const reader = sres.body.getReader();
     const t0 = performance.now();
     let text = '';
@@ -232,8 +259,10 @@ const guiPage = `<!doctype html><meta charset=utf-8><title>krate gui test</title
       if (done) break;
       rep.streamAt.push(Math.round(performance.now() - t0));
       text += new TextDecoder().decode(value);
+      await fetch('/stream-ack?s=' + sid, {method: 'POST'});
     }
-    rep.streamOK = text === 'chunk-0\nchunk-1\nchunk-2\nchunk-3\nchunk-4\n' && rep.streamAt.length === 5;
+    rep.streamText = text;
+    rep.streamOK = text === 'chunk-0\nchunk-1\nchunk-2\nchunk-3\nchunk-4\n';
     // Top-level navigation to another origin must be cancelled: the page stays.
     const before = location.href;
     location.href = 'https://example.com/';
