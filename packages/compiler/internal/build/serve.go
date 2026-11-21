@@ -10,6 +10,7 @@ import (
 	"html"
 	"io"
 	"io/fs"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -1754,7 +1755,9 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		}
 	}
 
-	sidecarURL, _ := url.Parse(fmt.Sprintf("http://localhost:%d", apiPort))
+	// The address the sidecar listens on and the readiness probe checks:
+	// "localhost" may resolve to ::1, where another server can hold the port.
+	sidecarURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", apiPort))
 	apiProxy := httputil.NewSingleHostReverseProxy(sidecarURL)
 	// Every request the host forwards carries the per-process secret (replacing
 	// anything the client sent), so the sidecar can refuse direct connections
@@ -1837,7 +1840,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	gate := &middlewareGate{
 		rt:           middlewareRT,
 		dev:          hub != nil,
-		sidecarURL:   fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
+		sidecarURL:   fmt.Sprintf("http://127.0.0.1:%d/__krate/middleware", apiPort),
 		file:         middlewarePath,
 		required:     middlewareRequired,
 		secret:       revalHost.secret,
@@ -3435,16 +3438,35 @@ func portFree(port int) bool {
 	return true
 }
 
-// internalPort returns preferred when it can be bound and has not been handed
-// out already, and otherwise a free port chosen by the OS. Sidecars default to
-// fixed offsets from the server port, which collide when several servers run
-// at once.
+// internalPort returns preferred when it can be bound, has not been handed
+// out already and lies outside the OS ephemeral range; otherwise a free port
+// below that range. Sidecars default to fixed offsets from the server port,
+// which collide when several servers run at once. A sidecar binds its port
+// seconds after it was chosen (instrumentation register() runs first), and
+// any socket can be given an ephemeral port in between: an outgoing
+// connection holds it for as long as it stays open (Linux gives connections
+// the even ports, and port+1 of a bind(0) port is even), and on Windows a
+// wildcard listener can share it with the sidecar's loopback one.
 func internalPort(preferred int) int {
 	handedOutPortsMu.Lock()
 	defer handedOutPortsMu.Unlock()
-	if !portHandedOut(preferred) && portFree(preferred) {
-		handedOutPorts[preferred] = time.Now()
+	take := func(p int) bool {
+		if portHandedOut(p) || !portFree(p) {
+			return false
+		}
+		handedOutPorts[p] = time.Now()
+		return true
+	}
+	if !inEphemeralRange(preferred) && take(preferred) {
 		return preferred
+	}
+	lo, _ := ephemeralPortRange()
+	if base := max(1024, lo/2); base < lo {
+		for attempt := 0; attempt < 64; attempt++ {
+			if p := base + rand.IntN(lo-base); take(p) {
+				return p
+			}
+		}
 	}
 	for attempt := 0; attempt < 20; attempt++ {
 		ln, err := net.Listen("tcp", ":0")

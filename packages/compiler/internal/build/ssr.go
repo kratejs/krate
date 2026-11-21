@@ -73,7 +73,7 @@ func (s *SSRServer) internalPost(endpoint string, payload any) error {
 		return errSSRNotRunning
 	}
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%d%s", s.port, endpoint), bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d%s", s.port, endpoint), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -367,7 +367,7 @@ func (s *SSRServer) Start() error {
 			return fmt.Errorf("SSR renderer exited during startup")
 		case <-time.After(100 * time.Millisecond):
 		}
-		resp, err := sidecarClient.Get(fmt.Sprintf("http://localhost:%d/__krate/ssr/health", s.port))
+		resp, err := sidecarClient.Get(fmt.Sprintf("http://127.0.0.1:%d/__krate/ssr/health", s.port))
 		if err == nil && resp.StatusCode == 200 {
 			ready = true
 			resp.Body.Close()
