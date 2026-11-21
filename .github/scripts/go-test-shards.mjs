@@ -2,7 +2,10 @@
 //
 //   pick   picks the recorded times every shard of a run restores: the same
 //          cache entry for all of them, chosen through the REST API.
-//   list   lists the top-level tests of every package (go test -list).
+//   list   lists the top-level tests of every package from source
+//          (go-test-list.go), without compiling them; --compile 1 uses
+//          go test -list instead.
+//   check-list  fails unless the source listing matches go test -list.
 //   plan   prints the partition of a list into shards.
 //   run    runs one shard: re-derives the whole partition, checks it covers
 //          every listed test exactly once, then runs go test -json with an
@@ -33,7 +36,8 @@
 //
 // Usage:
 //   node go-test-shards.mjs pick  --kind Linux   (env: GH_TOKEN and the GITHUB_* run variables)
-//   node go-test-shards.mjs list  --module DIR [--module DIR] --out list.json [-- go test flags]
+//   node go-test-shards.mjs list  --module DIR [--module DIR] --out list.json [--compile 1 [-- go test flags]]
+//   node go-test-shards.mjs check-list --module DIR [--module DIR] [-- go test flags]
 //   node go-test-shards.mjs plan  --list list.json [--times t.json] [--groups g.json] --shards N
 //                                 [--serial-weight W]
 //   node go-test-shards.mjs run   --list list.json [--times t.json] [--groups g.json] --shards N --shard I
@@ -120,24 +124,94 @@ export function parseListOutput(text) {
   return { pkgs: sorted, failed };
 }
 
+// listSource lists the tests of the module in dir from source
+// (go-test-list.go): the test files go list selects for this OS and
+// architecture, parsed, nothing compiled. Each shard then compiles only the
+// packages it runs.
+export function listSource(dir) {
+  const helper = path.join(path.dirname(fileURLToPath(import.meta.url)), "go-test-list.go");
+  const res = spawnSync("go", ["run", helper, "./..."], { cwd: dir, encoding: "utf8", maxBuffer: 1 << 30 });
+  if (res.status !== 0) {
+    process.stderr.write(res.stderr || "");
+    throw new Error(`listing the tests of ${dir} from source failed`);
+  }
+  return sortedList(JSON.parse(res.stdout));
+}
+
+// listCompiled lists the tests of the module in dir the way go test does:
+// it builds every test binary and runs it with -test.list.
+export function listCompiled(dir, extra = []) {
+  const res = spawnSync("go", ["test", "-list", ".", "-json", ...extra, "./..."], { cwd: dir, encoding: "utf8", maxBuffer: 1 << 30 });
+  const { pkgs, failed } = parseListOutput(res.stdout || "");
+  if (res.status !== 0 || failed.length > 0) {
+    process.stderr.write(res.stderr || "");
+    throw new Error(`go test -list failed in ${dir}${failed.length ? ": " + failed.join(", ") : ""}`);
+  }
+  return pkgs;
+}
+
+function sortedList(pkgs) {
+  const out = {};
+  for (const p of Object.keys(pkgs).sort()) {
+    out[p] = [...new Set(pkgs[p])].sort();
+  }
+  return out;
+}
+
+// listDiff returns the tests one listing has and the other lacks, as lines.
+export function listDiff(source, compiled) {
+  const keys = (l) => new Set(Object.entries(l).flatMap(([p, ts]) => ts.map((t) => `${p} ${t}`)));
+  const a = keys(source);
+  const b = keys(compiled);
+  const out = [];
+  for (const k of [...b].sort()) {
+    if (!a.has(k)) {
+      out.push(`go test -list has ${k}; the source listing does not`);
+    }
+  }
+  for (const k of [...a].sort()) {
+    if (!b.has(k)) {
+      out.push(`the source listing has ${k}; go test -list does not`);
+    }
+  }
+  return out;
+}
+
+function writeList(file, list) {
+  fs.writeFileSync(file, JSON.stringify(list, null, 1) + "\n");
+  const n = Object.values(list.modules).reduce((s, m) => s + Object.values(m).reduce((t, x) => t + x.length, 0), 0);
+  console.log(`listed ${n} tests in ${Object.values(list.modules).reduce((s, m) => s + Object.keys(m).length, 0)} packages`);
+}
+
 function cmdList(opts) {
   if (opts.module.length === 0 || !opts.out) {
     throw new Error("list needs --module and --out");
   }
   const list = { modules: {} };
   for (const dir of opts.module) {
-    const args = ["test", "-list", ".", "-json", ...opts.extra, "./..."];
-    const res = spawnSync("go", args, { cwd: dir, encoding: "utf8", maxBuffer: 1 << 30 });
-    const { pkgs, failed } = parseListOutput(res.stdout || "");
-    if (res.status !== 0 || failed.length > 0) {
-      process.stderr.write(res.stderr || "");
-      throw new Error(`go test -list failed in ${dir}${failed.length ? ": " + failed.join(", ") : ""}`);
-    }
-    list.modules[dir] = pkgs;
+    list.modules[dir] = opts.compile ? listCompiled(dir, opts.extra) : listSource(dir);
   }
-  fs.writeFileSync(opts.out, JSON.stringify(list, null, 1) + "\n");
-  const n = Object.values(list.modules).reduce((s, m) => s + Object.values(m).reduce((t, x) => t + x.length, 0), 0);
-  console.log(`listed ${n} tests in ${Object.values(list.modules).reduce((s, m) => s + Object.keys(m).length, 0)} packages`);
+  writeList(opts.out, list);
+}
+
+// cmdCheckList fails unless the source listing the shards plan from lists
+// exactly what go test -list does, module by module.
+function cmdCheckList(opts) {
+  if (opts.module.length === 0) {
+    throw new Error("check-list needs --module");
+  }
+  let problems = [];
+  for (const dir of opts.module) {
+    const source = listSource(dir);
+    const compiled = listCompiled(dir, opts.extra);
+    const diff = listDiff(source, compiled);
+    const n = Object.values(compiled).reduce((t, x) => t + x.length, 0);
+    console.log(`${dir}: ${n} tests from go test -list, ${diff.length} differences`);
+    problems = problems.concat(diff.map((d) => `${dir}: ${d}`));
+  }
+  if (problems.length > 0) {
+    throw new Error(`the source listing differs from go test -list (fix go-test-list.go):\n  ${problems.join("\n  ")}`);
+  }
 }
 
 // restorableRefs are the refs whose caches a run can restore: a pull request
@@ -677,6 +751,8 @@ async function main() {
       return cmdPick(opts);
     case "list":
       return cmdList(opts);
+    case "check-list":
+      return cmdCheckList(opts);
     case "plan":
       return cmdPlan(opts);
     case "run":
@@ -684,7 +760,7 @@ async function main() {
     case "merge":
       return cmdMerge(opts);
     default:
-      throw new Error(`unknown command ${cmd ?? ""} (pick, list, plan, run, merge)`);
+      throw new Error(`unknown command ${cmd ?? ""} (pick, list, check-list, plan, run, merge)`);
   }
 }
 

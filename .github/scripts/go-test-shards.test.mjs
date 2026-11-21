@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { checkCoverage, checkPlans, checkResults, collectResults, invocations, parseListOutput, partition, pickTimesEntry, planHash, restorableRefs } from "./go-test-shards.mjs";
+import { checkCoverage, checkPlans, listDiff, checkResults, collectResults, invocations, parseListOutput, partition, pickTimesEntry, planHash, restorableRefs } from "./go-test-shards.mjs";
 
 const list = {
   modules: {
@@ -195,4 +195,15 @@ test("the list is the same whatever order go test prints the packages in", () =>
   const b = [ev("m/a", "TestA"), ev("m/b", "TestB1"), ev("m/b", "TestB2")].join("\n");
   assert.equal(JSON.stringify(parseListOutput(a).pkgs), JSON.stringify(parseListOutput(b).pkgs));
   assert.deepEqual(Object.keys(parseListOutput(a).pkgs), ["m/a", "m/b"]);
+});
+
+test("the list check names every test one listing has and the other lacks", () => {
+  const source = { "m/a": ["TestA", "TestB"], "m/b": ["FuzzB"] };
+  assert.deepEqual(listDiff(source, structuredClone(source)), []);
+  const compiled = { "m/a": ["TestA", "ExampleA"], "m/b": ["FuzzB"], "m/c": ["TestC"] };
+  assert.deepEqual(listDiff(source, compiled), [
+    "go test -list has m/a ExampleA; the source listing does not",
+    "go test -list has m/c TestC; the source listing does not",
+    "the source listing has m/a TestB; go test -list does not",
+  ]);
 });

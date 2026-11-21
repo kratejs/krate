@@ -14,6 +14,12 @@ name: CI
 #   - the Go tests run in shards (.github/scripts/go-test-shards.mjs), so test
 #     results are not reused across runs; compiled packages still come from
 #     the shared build cache saved by shard 0. Full runs pass -count=1.
+#
+# Go test shard counts: Linux race 3 (go-test), Windows 2 and macOS 1
+# (go-matrix). They are sized for the GitHub Free plan's 20 concurrent jobs, 5
+# of them macOS: more shards queue behind each other and make a run slower.
+# Raise them in those two matrices (shard indexes and the shards value) once
+# the concurrency limit is raised.
 
 on:
   pull_request:
@@ -159,8 +165,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shards: [8]
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        # Shard count: see the header comment.
+        shards: [3]
+        shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@v4
 
@@ -234,10 +241,10 @@ jobs:
           # The summary job saves the times on Linux for every OS.
           enableCrossOsArchive: true
 
-      # Listing builds the test binaries with the flags the run uses, so the
-      # run reuses them.
+      # Listed from source, nothing compiled: each shard compiles only the
+      # packages it runs. go-test-list checks the listing against go test.
       - name: List the Go tests
-        run: node .github/scripts/go-test-shards.mjs list --module packages/compiler --module packages/native --out go-tests.json -- -race -gcflags=all=-d=checkptr=0
+        run: node .github/scripts/go-test-shards.mjs list --module packages/compiler --module packages/native --out go-tests.json
 
       # checkptr is disabled: modernc.org/quickjs (translated C) trips the
       # checkptr instrumentation under -race. Data-race detection is unaffected.
@@ -412,14 +419,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Shard counts: see the header comment.
         include:
-          - { os: macos-latest, kind: macOS, cores: 3, shards: 3, shard: 0 }
-          - { os: macos-latest, kind: macOS, cores: 3, shards: 3, shard: 1 }
-          - { os: macos-latest, kind: macOS, cores: 3, shards: 3, shard: 2 }
-          - { os: windows-latest, kind: Windows, cores: 4, shards: 4, shard: 0 }
-          - { os: windows-latest, kind: Windows, cores: 4, shards: 4, shard: 1 }
-          - { os: windows-latest, kind: Windows, cores: 4, shards: 4, shard: 2 }
-          - { os: windows-latest, kind: Windows, cores: 4, shards: 4, shard: 3 }
+          - { os: macos-latest, kind: macOS, cores: 3, shards: 1, shard: 0 }
+          - { os: windows-latest, kind: Windows, cores: 4, shards: 2, shard: 0 }
+          - { os: windows-latest, kind: Windows, cores: 4, shards: 2, shard: 1 }
     defaults:
       run:
         shell: bash
@@ -521,6 +525,37 @@ jobs:
       - name: Save the Go caches
         if: always() && matrix.shard == 0
         uses: ./.github/actions/go-cache-save
+
+  # The shards list the tests from source (go-test-list.go). This job builds
+  # every test binary and checks go test -list names the same tests on each
+  # OS, so a test the source listing misses fails CI instead of going unrun.
+  # Nothing waits on it.
+  go-test-list:
+    name: Go test list matches (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+          cache: false
+
+      - name: Restore the Go caches
+        uses: ./.github/actions/go-cache-restore
+        with:
+          key: test
+
+      - name: Compare the source listing with go test -list
+        run: node .github/scripts/go-test-shards.mjs check-list --module packages/compiler --module packages/native
 
   # Checks the shards of each OS planned alike and together ran every listed
   # test exactly once (a shard only knows its own part), and on full runs
