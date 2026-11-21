@@ -187,7 +187,7 @@ func TestServerBundleDoesNotRepeatMaxDurationWarnings(t *testing.T) {
 	if _, err := b.BuildServerBundle("node"); err != nil {
 		t.Fatalf("BuildServerBundle: %v", err)
 	}
-	if n := strings.Count(logs(), "src/api/bad.ts:1:"); n != 1 {
+	if n := strings.Count(logs(), filepath.Join("src", "api", "bad.ts")+":1:"); n != 1 {
 		t.Errorf("the maxDuration warning printed %d times, want once:\n%s", n, logs())
 	}
 }
