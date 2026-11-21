@@ -28,6 +28,7 @@ A tour of the features that ship with Krate beyond the core compiler.
 | [Middleware](/docs/features/middleware/) | Request interception before page rendering |
 | [Authentication](/docs/features/authentication/) | OAuth, credentials, magic links, Drizzle adapters, two-factor authentication and passkeys (`@krate/auth`) |
 | [3D with three.js](/docs/features/three/) | three.js scenes in JSX with Krate signals (`createFrame`, `createThree`, `createLoader`) or the react-three-fiber API (`useFrame`, `useThree`, `useLoader`): `<Canvas>`, pointer events, portals (`@krate/three`) |
+| [3D with Filament](/docs/features/3d/) | Physically based 3D scenes in Three.js-style JSX, compiled ahead of time into direct Google Filament calls: static flattening, auto-instancing, calibrated lights, custom shaders (`@krate/3d`) |
 | [Environment Variables](/docs/features/environment-variables/) | `.env` files, precedence, `process.env` in server contexts |
 | [Analytics](/docs/features/analytics/) | Snippets via `<Head>`/`<Script>` + the SPA route-change hook |
 | [HTTP Headers](/docs/features/http-headers/) | Middleware headers, automatic cache/security headers, ISR `Cache-Control` |

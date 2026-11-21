@@ -1,6 +1,9 @@
 package bundler
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -19,6 +22,8 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
+	"github.com/kratejs/krate/packages/compiler/internal/scene3d"
+	"github.com/kratejs/krate/packages/compiler/internal/scene3d/matc"
 	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
@@ -126,6 +131,7 @@ type Bundler struct {
 	pathAliases       []pathAlias
 	tsBaseDir         string
 	baseURL           string
+	matc              matc.Options
 	serverComponents  []string
 	runtimeComponents []string
 	serverDirs        []string
@@ -183,6 +189,91 @@ func (b *Bundler) SetMarkdownBasePath(base string) { b.mdBase = base }
 // SetURLBasePath sets the site base path prepended to asset, worker and chunk
 // URLs emitted into code.
 func (b *Bundler) SetURLBasePath(base string) { b.urlBase = base }
+
+// SetScene3DMatc overrides how <shaderMaterial> sources are compiled (the
+// matc location, download host and environment). The zero value uses the
+// process environment.
+func (b *Bundler) SetScene3DMatc(o matc.Options) { b.matc = o }
+
+// scene3dVersion is the Filament release the packaged and generated materials
+// are compiled for.
+func (b *Bundler) scene3dVersion() string {
+	if b.matc.Version != "" {
+		return b.matc.Version
+	}
+	return matc.FilamentVersion
+}
+
+// scene3dMaterialsURL is the site directory (without the base path) of every
+// .filamat. The Filament version is in the path because a .filamat is only
+// valid for the engine release that compiled it.
+func (b *Bundler) scene3dMaterialsURL() string {
+	return "/assets/3d/materials-" + b.scene3dVersion()
+}
+
+// scene3dShader compiles a generated Filament material source with matc into
+// the project's build cache and registers the .filamat as a site asset. The
+// cache is per Filament version.
+func (b *Bundler) scene3dShader(mat []byte) (string, error) {
+	dir := filepath.Join(b.root, ".krate", "cache", "3d", b.scene3dVersion())
+	path, _, err := b.matc.Compile(context.Background(), mat, dir)
+	if err != nil {
+		return "", err
+	}
+	url := b.scene3dMaterialsURL() + "/" + filepath.Base(path)
+	b.assets[path] = url
+	return sitepath.Join(b.urlBase, url), nil
+}
+
+// scene3dAssets copies the engine files a scene loads at run time into the
+// site: filament.js and filament.wasm from the app's own filament package (so
+// no bundler resolves the engine) and the packaged .filamat uber-materials
+// from @krate/3d. Nothing is embedded in the krate binary.
+func (b *Bundler) scene3dAssets() (scene3d.Assets, error) {
+	var out scene3d.Assets
+	entry := resolver.NodeModule(b.root, "filament")
+	pkgDir := resolver.PackageDirOf(entry)
+	if entry == "" || pkgDir == "" {
+		return out, errors.New("the `filament` package is not installed: @krate/3d needs filament.js and filament.wasm from it")
+	}
+	js, wasm := filepath.Join(pkgDir, "filament.js"), filepath.Join(pkgDir, "filament.wasm")
+	for _, f := range []string{js, wasm} {
+		if !resolver.Exists(f) {
+			return out, errors.New("the installed `filament` package has no " + filepath.Base(f))
+		}
+	}
+	version := ""
+	if data, err := os.ReadFile(filepath.Join(pkgDir, "package.json")); err == nil {
+		var pj struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal(data, &pj) == nil {
+			version = pj.Version
+		}
+	}
+	if want := b.scene3dVersion(); version != "" && version != want {
+		return out, errors.New("the installed `filament` package is " + version + " but the packaged materials are built for " + want)
+	}
+	if version == "" {
+		version = b.scene3dVersion()
+	}
+	dir := "/assets/3d/filament-" + version
+	b.assets[js] = dir + "/filament.js"
+	b.assets[wasm] = dir + "/filament.wasm"
+	out.FilamentURL = sitepath.Join(b.urlBase, dir+"/filament.js")
+
+	mats := resolver.NodeModule(b.root, "@krate/3d")
+	if matDir := resolver.PackageDirOf(mats); matDir != "" {
+		files, _ := filepath.Glob(filepath.Join(matDir, "materials", "*.filamat"))
+		for _, f := range files {
+			b.assets[f] = b.scene3dMaterialsURL() + "/" + filepath.Base(f)
+		}
+		if len(files) > 0 {
+			out.MaterialBase = sitepath.Join(b.urlBase, b.scene3dMaterialsURL())
+		}
+	}
+	return out, nil
+}
 
 // SetMarkdownConfig sets the markdown options used when compiling .md and
 // .mdx modules (page-level and imported).
@@ -888,6 +979,14 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	}
 	_, actionChanged := b.rewriteActionImports(prog, abs)
 	actionChanged = actionChanged || inlineChanged
+	sceneModule := scene3d.Mentions(src) && !strings.Contains(filepath.ToSlash(abs), "/node_modules/")
+	if sceneModule {
+		_, sceneDiags, err := scene3d.Rewrite(prog, scene3d.Options{File: path, Source: src, Shader: b.scene3dShader, Assets: b.scene3dAssets})
+		if err != nil {
+			return err
+		}
+		reactDiags = append(reactDiags, sceneDiags...)
+	}
 
 	if err := checkTierConflicts(prog, path, src, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs); err != nil {
 		return err
@@ -904,7 +1003,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	b.collectImports(prog, mod)
 	// Modules a rewrite pass may mutate are parsed fresh per bundle (never
 	// shared), since those rewrites are not idempotent.
-	mod.Rewritable = actionChanged || moduleNeedsRewrite(src, mod.Imports)
+	mod.Rewritable = actionChanged || sceneModule || moduleNeedsRewrite(src, mod.Imports)
 	b.order = append(b.order, mod)
 	if cacheable && !mod.Rewritable {
 		b.cache.putProgram(abs, &programEntry{

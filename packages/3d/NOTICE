@@ -1,0 +1,9 @@
+@krate/3d
+Copyright 2026 The Krate Authors
+
+This package renders with Filament (https://github.com/google/filament),
+Copyright Google LLC, licensed under the Apache License 2.0. Filament is not
+bundled in this package: apps install the `filament` npm package, which
+provides the WebAssembly engine. The pre-compiled materials in `materials/`
+are produced by Filament's `matc` tool and are bound to the Filament version
+recorded in `materials/VERSION`.

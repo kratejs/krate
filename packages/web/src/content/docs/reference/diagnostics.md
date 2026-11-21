@@ -1204,6 +1204,18 @@ A revalidatePath() call names a route that is rendered statically (SSG). The pag
 
 forbidden() and unauthorized() answer one request with a 403 or 401 page, so they only work in code that runs on every request: a page rendered with ssr, isr or streaming, an async server component, a server action or an API route. This call sits in a statically built page, or in a layout (layouts are baked into the shell at build time), so it never runs and the page is served to everyone. Make the page request-time (`export const dynamic = "force-dynamic"`), or call the function from an async server component that the page renders.
 
+### KR8701
+
+**3D scene runs on the runtime path**
+
+The compiler turns the JSX scene of an @krate/3d `<Canvas>` into direct Filament engine calls: static transforms are flattened into world matrices, identical meshes become instances, and reactive props become typed-array writes. A scene it cannot fully analyse (spread props, unknown components, dynamic tag names, a reactive `<group>` transform, a `<For>` over a signal, a reactive geometry argument, or a non-static shader string) is left as written and mounted by the runtime component path, which creates the same Filament objects in the browser without those optimisations. The message names the construct. This is a warning, not an error: the scene still renders. Remove the construct or hoist static values into module-level constants to get the compiled path.
+
+### KR8702
+
+**3D engine files are not available**
+
+An @krate/3d scene loads the Filament engine in the browser. The build does not bundle it: it copies filament.js and filament.wasm from the app's `filament` package into dist/assets/3d/ and tells the scene where they are, so the engine never goes through a bundler. When the `filament` package cannot be found from the project root, or its version does not match the Filament release the packaged materials were built for, the build warns and the scene cannot start in the browser. Install it with `npm install filament` (version 1.53.4 for this release of @krate/3d).
+
 ### KR8801
 
 **Image source cannot be used**

@@ -1,0 +1,90 @@
+// Uber-material for meshPhysicalMaterial: standard plus clearcoat, sheen and
+// transmission.
+material {
+    name : physical,
+    shadingModel : lit,
+    blending : opaque,
+    refractionMode : screenspace,
+    refractionType : thin,
+    requires : [ uv0, tangents ],
+    parameters : [
+        { type : float4, name : baseColor },
+        { type : float, name : roughness },
+        { type : float, name : metallic },
+        { type : float3, name : emissive },
+        { type : float, name : emissiveIntensity },
+        { type : float, name : opacity },
+        { type : float, name : normalScale },
+        { type : float, name : aoMapIntensity },
+        { type : float, name : clearcoat },
+        { type : float, name : clearcoatRoughness },
+        { type : float3, name : sheenColor },
+        { type : float, name : sheenRoughness },
+        { type : float, name : transmission },
+        { type : float, name : ior },
+        { type : float, name : useBaseColorMap },
+        { type : float, name : useNormalMap },
+        { type : float, name : useAoMap },
+        { type : float, name : useRoughnessMap },
+        { type : float, name : useMetallicMap },
+        { type : float, name : useEmissiveMap },
+        { type : sampler2d, name : baseColorMap, precision : medium },
+        { type : sampler2d, name : normalMap, precision : medium },
+        { type : sampler2d, name : aoMap, precision : medium },
+        { type : sampler2d, name : roughnessMap, precision : medium },
+        { type : sampler2d, name : metallicMap, precision : medium },
+        { type : sampler2d, name : emissiveMap, precision : medium }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        vec2 uv = getUV0();
+        if (materialParams.useNormalMap > 0.5) {
+            vec3 n = texture(materialParams_normalMap, uv).xyz * 2.0 - 1.0;
+            n.xy *= materialParams.normalScale;
+            material.normal = n;
+        }
+        prepareMaterial(material);
+
+        vec4 base = materialParams.baseColor;
+        if (materialParams.useBaseColorMap > 0.5) {
+            base *= texture(materialParams_baseColorMap, uv);
+        }
+        material.baseColor = base;
+#if defined(KRATE_TRANSPARENT)
+        material.baseColor.a *= materialParams.opacity;
+        material.baseColor.rgb *= material.baseColor.a;
+#endif
+
+        float rough = materialParams.roughness;
+        if (materialParams.useRoughnessMap > 0.5) {
+            rough *= texture(materialParams_roughnessMap, uv).g;
+        }
+        material.roughness = rough;
+
+        float metal = materialParams.metallic;
+        if (materialParams.useMetallicMap > 0.5) {
+            metal *= texture(materialParams_metallicMap, uv).b;
+        }
+        material.metallic = metal;
+
+        if (materialParams.useAoMap > 0.5) {
+            float ao = texture(materialParams_aoMap, uv).r;
+            material.ambientOcclusion = 1.0 + materialParams.aoMapIntensity * (ao - 1.0);
+        }
+
+        vec3 em = materialParams.emissive;
+        if (materialParams.useEmissiveMap > 0.5) {
+            em *= texture(materialParams_emissiveMap, uv).rgb;
+        }
+        material.emissive = vec4(em * materialParams.emissiveIntensity, 0.0);
+
+        material.clearCoat = materialParams.clearcoat;
+        material.clearCoatRoughness = materialParams.clearcoatRoughness;
+        material.sheenColor = materialParams.sheenColor;
+        material.sheenRoughness = materialParams.sheenRoughness;
+        material.transmission = materialParams.transmission;
+        material.ior = materialParams.ior;
+    }
+}
