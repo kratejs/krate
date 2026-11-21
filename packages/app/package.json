@@ -180,7 +180,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+    "typecheck": "node ../../node_modules/typescript7/bin/tsc --noEmit && node ../../node_modules/typescript7/bin/tsc --noEmit -p tsconfig.test.json"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
