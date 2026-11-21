@@ -1014,10 +1014,18 @@ jobs:
             snap download "$s" --basename="$s"
           done
 
+      # A snap installed from a file tracks no channel. snapcraft refreshes an
+      # installed build snap whose channel differs from the one it wants
+      # (latest/stable), so without the switch below every snapcraft pack
+      # refreshed the GNOME SDK and the bases from the store, inside the 15
+      # minute smoke step and with no timeout of its own. Holding refreshes
+      # keeps snapd's auto-refresh from starting a store download that
+      # snapcraft's own snap commands then wait behind.
       - name: Install snapcraft
         if: matrix.role == 'primary' && env.FULL == 'true'
         run: |
           cd ~/snaps
+          sudo snap refresh --hold
           for s in $SNAPS; do
             sudo snap ack "$s.assert"
           done
@@ -1027,7 +1035,9 @@ jobs:
             else
               sudo snap install "./$s.snap"
             fi
+            sudo snap switch --channel=latest/stable "$s"
           done
+          snap list
           snapcraft --version
 
       - name: Packaging smoke test, snap build, install, run (Linux)
@@ -1036,6 +1046,15 @@ jobs:
         env:
           KRATE_REQUIRE_E2E: "1"
           KRATE_SNAP_DESTRUCTIVE: "1"
+
+      # snapcraft's output is only shown when it fails on its own; a run that
+      # is killed at the time limit leaves its log and snapd's changes here.
+      - name: Show what the snap build was doing
+        if: failure() && matrix.role == 'primary' && env.FULL == 'true'
+        run: |
+          snap changes || true
+          log=$(ls -t ~/.local/state/snapcraft/log/*.log 2>/dev/null | head -1)
+          if [ -n "$log" ]; then echo "== $log"; tail -n 80 "$log"; fi
 
       - name: Save the Go caches
         if: always()
