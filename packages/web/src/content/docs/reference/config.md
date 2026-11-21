@@ -614,7 +614,9 @@ server action revalidates) and a navigation that only changes the query string
 of the current page swap in place without a transition, so a search box that
 updates the URL on each keystroke does not cross-fade. Mark persistent chrome
 with `data-view-transition="name"` to morph it instead of cross-fading.
-Reduced-motion preferences are respected.
+Reduced-motion preferences are respected. `krate migrate nextjs` writes
+`viewTransitions: "off"` unless `next.config` turns on
+`experimental.viewTransition`, as Next.js navigates without one.
 
 With View Transitions off (or unsupported), nothing animates: the current page
 stays fully visible and interactive until the next one is ready, then swaps in
