@@ -15,6 +15,7 @@ import (
 // Regression for the "nested layout composition" report area: only the nearest
 // layout was applied, so the root nav/footer vanished under a section layout.
 func TestNestedLayoutComposition(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	write := func(rel, body string) {
 		p := filepath.Join(root, filepath.FromSlash(rel))

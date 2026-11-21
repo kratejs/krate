@@ -212,6 +212,7 @@ func TestSegmentPagesServe(t *testing.T) {
 }
 
 func TestServerErrorSanitizing(t *testing.T) {
+	t.Parallel()
 	prod := newServerError("secret", "stack here", "", false)
 	if prod.Message != "Internal Server Error" || prod.Stack != "" || prod.Digest == "" {
 		t.Errorf("production error = %+v", prod)
@@ -230,6 +231,7 @@ func TestServerErrorSanitizing(t *testing.T) {
 }
 
 func TestSegmentIndexRefusesPathsOutsideTheOutput(t *testing.T) {
+	t.Parallel()
 	out := t.TempDir()
 	secret := filepath.Join(filepath.Dir(out), "secret.html")
 	if err := os.WriteFile(secret, []byte("secret"), 0o644); err != nil {

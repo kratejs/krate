@@ -258,6 +258,7 @@ func lineDiff(react, krate []string) string {
 }
 
 func TestReactDifferential(t *testing.T) {
+	t.Parallel()
 	entries, err := filepath.Glob(filepath.Join(reactDiffDir, "*.tsx"))
 	if err != nil || len(entries) == 0 {
 		t.Fatalf("no fixtures in %s: %v", reactDiffDir, err)

@@ -6,6 +6,7 @@ import (
 )
 
 func TestMatchRoutePatternCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		url, pattern string
 		ok           bool
@@ -40,6 +41,7 @@ func TestMatchRoutePatternCases(t *testing.T) {
 }
 
 func TestMatchRoutePrefixCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		url, pattern string
 		ok           bool
@@ -71,6 +73,7 @@ func TestMatchRouteMissDoesNotAllocate(t *testing.T) {
 }
 
 func TestFindPageForRouteReloadAndParams(t *testing.T) {
+	t.Parallel()
 	s := &SSRServer{manifest: &ServerManifest{Pages: []ManifestPage{
 		{Route: "[...all]", Source: "all.tsx"},
 		{Route: "blog/[slug]", Source: "post.tsx"},

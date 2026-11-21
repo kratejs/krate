@@ -18,6 +18,7 @@ import (
 // requires the same match and the same capture groups. The patterns cover what
 // differs between .NET and JavaScript regular expressions.
 func TestTranspiledRegexesMatchRegexp2(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	needNode(t, root)
 	patterns := []struct {

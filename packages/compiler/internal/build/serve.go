@@ -10,6 +10,7 @@ import (
 	"html"
 	"io"
 	"io/fs"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -1380,15 +1381,27 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 
 // ServeDev starts an HTTP server with live reload SSE + request logging.
 func ServeDev(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
-	return serve(root, cfg, hub, startTime)
+	return serve(context.Background(), root, cfg, hub, startTime)
+}
+
+// ServeDevContext is ServeDev that also shuts down, as on SIGTERM, once ctx is
+// done.
+func ServeDevContext(ctx context.Context, root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
+	return serve(ctx, root, cfg, hub, startTime)
 }
 
 // Serve starts an HTTP server with request logging (production preview).
 func Serve(root string, cfg *config.Config, startTime time.Time) error {
-	return serve(root, cfg, nil, startTime)
+	return serve(context.Background(), root, cfg, nil, startTime)
 }
 
-func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
+// ServeContext is Serve that also shuts down, as on SIGTERM, once ctx is done.
+// It lets one process run and stop several servers independently.
+func ServeContext(ctx context.Context, root string, cfg *config.Config, startTime time.Time) error {
+	return serve(ctx, root, cfg, nil, startTime)
+}
+
+func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
 	absOutDir, err := filepath.Abs(cfg.OutDir)
 	if err != nil {
 		return fmt.Errorf("resolving out dir: %w", err)
@@ -1742,7 +1755,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 	}
 
-	sidecarURL, _ := url.Parse(fmt.Sprintf("http://localhost:%d", apiPort))
+	// The address the sidecar listens on and the readiness probe checks:
+	// "localhost" may resolve to ::1, where another server can hold the port.
+	sidecarURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", apiPort))
 	apiProxy := httputil.NewSingleHostReverseProxy(sidecarURL)
 	// Every request the host forwards carries the per-process secret (replacing
 	// anything the client sent), so the sidecar can refuse direct connections
@@ -1825,7 +1840,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	gate := &middlewareGate{
 		rt:           middlewareRT,
 		dev:          hub != nil,
-		sidecarURL:   fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
+		sidecarURL:   fmt.Sprintf("http://127.0.0.1:%d/__krate/middleware", apiPort),
 		file:         middlewarePath,
 		required:     middlewareRequired,
 		secret:       revalHost.secret,
@@ -2580,7 +2595,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			if rr.unavailable != "" {
 				fmt.Fprintf(os.Stderr, "  %sSegment page renderer unavailable (%s):%s %s\n", cYellow, m.Route, cReset, rr.unavailable)
 			} else if rr.fatalErr != "" {
-				fmt.Fprintf(os.Stderr, "  %sSegment page render error (%s):%s %s\n", cRed, m.Route, cReset, rr.fatalErr)
+				eprintf("  %sSegment page render error (%s):%s %s\n", cRed, m.Route, cReset, rr.fatalErr)
 			}
 			return false
 		}
@@ -2648,10 +2663,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if hub != nil {
 		devMux = devErrorShell(hub, root, absOut, mux)
 	}
-	proxyTrust.Store(cfg.Server.TrustProxy)
-	flashSecret.Store(flashSecretFor(revalHost.secret))
-	proxyHops.Store(int32(cfg.Server.TrustedProxies))
-	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, frontRedirects(slashMode, insideRedirects, devMux))))))))
+	var rootHandler http.Handler = requestIDMiddleware(withFlashSecret(flashSecretFor(revalHost.secret), forwardedHeadersMiddleware(cfg.Server.TrustProxy, cfg.Server.TrustedProxies, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, frontRedirects(slashMode, insideRedirects, devMux)))))))))
 
 	listenerOwned = true
 	addr := listener.Addr().(*net.TCPAddr)
@@ -2787,6 +2799,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if hub != nil {
 		restartCh = hub.RestartRequested()
 	}
+	signals := 0 // SIGINT/SIGTERM received
 	select {
 	case err := <-serveErr:
 		// The listener failed on its own (not a shutdown).
@@ -2818,11 +2831,25 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		stopSidecars()
 		return ErrDevRestart
 	case <-sigCh:
+		signals = 1
+	case <-stopCtx.Done():
 	}
 
 	printf("\n%sShutting down...%s\n", cGray, cReset)
+	shutDown := make(chan struct{})
+	defer close(shutDown)
+	// The second signal forces an exit. A shutdown the context started has
+	// had none yet: its first signal is the one that starts a graceful
+	// shutdown, which is already under way.
 	go func() {
-		<-sigCh
+		for signals < 2 {
+			select {
+			case <-sigCh:
+				signals++
+			case <-shutDown:
+				return
+			}
+		}
 		fmt.Fprintf(os.Stderr, "  %s! second signal, exiting immediately%s\n", cYellow, cReset)
 		os.Exit(130)
 	}()
@@ -3411,16 +3438,35 @@ func portFree(port int) bool {
 	return true
 }
 
-// internalPort returns preferred when it can be bound and has not been handed
-// out already, and otherwise a free port chosen by the OS. Sidecars default to
-// fixed offsets from the server port, which collide when several servers run
-// at once.
+// internalPort returns preferred when it can be bound, has not been handed
+// out already and lies outside the OS ephemeral range; otherwise a free port
+// below that range. Sidecars default to fixed offsets from the server port,
+// which collide when several servers run at once. A sidecar binds its port
+// seconds after it was chosen (instrumentation register() runs first), and
+// any socket can be given an ephemeral port in between: an outgoing
+// connection holds it for as long as it stays open (Linux gives connections
+// the even ports, and port+1 of a bind(0) port is even), and on Windows a
+// wildcard listener can share it with the sidecar's loopback one.
 func internalPort(preferred int) int {
 	handedOutPortsMu.Lock()
 	defer handedOutPortsMu.Unlock()
-	if !portHandedOut(preferred) && portFree(preferred) {
-		handedOutPorts[preferred] = time.Now()
+	take := func(p int) bool {
+		if portHandedOut(p) || !portFree(p) {
+			return false
+		}
+		handedOutPorts[p] = time.Now()
+		return true
+	}
+	if !inEphemeralRange(preferred) && take(preferred) {
 		return preferred
+	}
+	lo, _ := ephemeralPortRange()
+	if base := max(1024, lo/2); base < lo {
+		for attempt := 0; attempt < 64; attempt++ {
+			if p := base + rand.IntN(lo-base); take(p) {
+				return p
+			}
+		}
 	}
 	for attempt := 0; attempt < 20; attempt++ {
 		ln, err := net.Listen("tcp", ":0")

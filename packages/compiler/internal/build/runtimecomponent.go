@@ -2,6 +2,7 @@ package build
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,7 +93,7 @@ export default jsx;
 // CompileRuntimeComponents finds and compiles all runtime component files
 // (by *.runtime.tsx convention, // @runtime directive, or runtimeDirs config)
 // into standalone JS bundles executable via quickjs at serve time.
-func CompileRuntimeComponents(root, outDir, basePath string, serverComponents, runtimeComponents []string, runtimeDirs []string) []RuntimeComponentBundle {
+func CompileRuntimeComponents(stderr io.Writer, root, outDir, basePath string, serverComponents, runtimeComponents []string, runtimeDirs []string) []RuntimeComponentBundle {
 	files := findRuntimeComponentFiles(root, serverComponents, runtimeComponents, runtimeDirs)
 	if len(files) == 0 {
 		return nil
@@ -100,7 +101,7 @@ func CompileRuntimeComponents(root, outDir, basePath string, serverComponents, r
 
 	bundleDir := ServerOutPath(outDir, "server-components")
 	if err := os.MkdirAll(bundleDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sx Runtime components: cannot create output dir:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(stderr, "  %sx Runtime components: cannot create output dir:%s %v\n", cRed, cReset, err)
 		return nil
 	}
 
@@ -110,7 +111,7 @@ func CompileRuntimeComponents(root, outDir, basePath string, serverComponents, r
 		printf("  %s> Runtime%s %s\n", cCyan, cReset, filepath.Base(file))
 		bundle, err := compileSingleRuntimeComponent(root, outDir, basePath, file)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sx Runtime component error (%s):%s %v\n", cRed, name, cReset, err)
+			fmt.Fprintf(stderr, "  %sx Runtime component error (%s):%s %v\n", cRed, name, cReset, err)
 			continue
 		}
 		bundles = append(bundles, *bundle)

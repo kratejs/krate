@@ -43,6 +43,7 @@ var scriptRefRe = regexp.MustCompile(`<script[^>]*\ssrc=|rel="?modulepreload|rel
 // static hosts and the docs rely on it, so a change here has to come with an
 // upgrade note (guides/upgrading.md) and a CHANGELOG line.
 func TestDistLayoutContract(t *testing.T) {
+	t.Parallel()
 	cfg := buildContractSite(t, true)
 	out := cfg.OutDir
 
@@ -102,6 +103,7 @@ func TestDistLayoutContract(t *testing.T) {
 // The counter page keeps the runtime chunk within a size budget; the figures
 // are today's (26.1 KB gzip with the router, 17.8 KB without) plus about 15%.
 func TestJSBudget(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		spa       bool

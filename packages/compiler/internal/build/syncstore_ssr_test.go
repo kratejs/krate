@@ -12,6 +12,7 @@ import (
 // () => "EyeDropper" in window, () => false) threw "window is not defined"
 // because preact/compat ignores the third argument.
 func TestClientBoundaryServerRenderUsesServerSnapshot(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	if err := os.MkdirAll(filepath.Join(root, "node_modules", "@krate"), 0755); err != nil {
@@ -36,8 +37,7 @@ export default async function Page() {
   return <main><h1>{title}</h1><Picker /></main>;
 }
 `)
-	t.Chdir(root)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	if !canStopInProcessServer {

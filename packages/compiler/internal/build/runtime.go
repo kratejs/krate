@@ -188,19 +188,22 @@ func probeNamedBundleFromDisk(projectRoot string, names []string) string {
 		candidateDirs = append(candidateDirs, filepath.Join(monorepoRoot, "packages", "runtime", "dist"))
 	}
 
-	// 2. CWD-relative paths (works when running CLI from packages/compiler/)
+	// 2. The project's own node_modules, whatever the working directory.
+	candidateDirs = append(candidateDirs, filepath.Join(projectRoot, "node_modules", "@krate", "runtime", "dist"))
+
+	// 3. CWD-relative paths (works when running CLI from packages/compiler/)
 	candidateDirs = append(candidateDirs,
 		"packages/runtime/dist",
 		"../runtime/dist",
 	)
 
-	// 3. node_modules fallback (for published packages)
+	// 4. node_modules fallback (for published packages)
 	candidateDirs = append(candidateDirs, "node_modules/@krate/runtime/dist")
 
-	// 4. Binary-relative path (works when installed as a Go binary)
+	// 5. Binary-relative path (works when installed as a Go binary)
 	candidateDirs = append(candidateDirs, filepath.Join(filepath.Dir(os.Args[0]), "..", "runtime", "dist"))
 
-	// 5. Walk up from project root checking each parent for packages/runtime/dist/
+	// 6. Walk up from project root checking each parent for packages/runtime/dist/
 	dir := projectRoot
 	for {
 		candidate := filepath.Join(dir, "packages", "runtime", "dist")

@@ -317,9 +317,14 @@ func runHookTimeout(name, hook string, timeout time.Duration, fn func() error) e
 	return err
 }
 
-// RunBeforeBuild runs all BeforeBuild hooks sorted by order.
+// RunBeforeBuild runs the BeforeBuild hooks of the default registry.
 func RunBeforeBuild(ctx *BuildHookCtx) error {
-	for _, p := range DefaultRegistry.Sorted() {
+	return DefaultRegistry.RunBeforeBuild(ctx)
+}
+
+// RunBeforeBuild runs the BeforeBuild hooks of the plugins in r, sorted by order.
+func (r *Registry) RunBeforeBuild(ctx *BuildHookCtx) error {
+	for _, p := range r.Sorted() {
 		h := p.Hooks()
 		if h.BeforeBuild == nil {
 			continue
@@ -331,9 +336,14 @@ func RunBeforeBuild(ctx *BuildHookCtx) error {
 	return nil
 }
 
-// RunAfterParse runs all AfterParse hooks sorted by order.
+// RunAfterParse runs the AfterParse hooks of the default registry.
 func RunAfterParse(ctx *ParseHookCtx) error {
-	for _, p := range DefaultRegistry.Sorted() {
+	return DefaultRegistry.RunAfterParse(ctx)
+}
+
+// RunAfterParse runs the AfterParse hooks of the plugins in r, sorted by order.
+func (r *Registry) RunAfterParse(ctx *ParseHookCtx) error {
+	for _, p := range r.Sorted() {
 		h := p.Hooks()
 		if h.AfterParse == nil {
 			continue
@@ -345,9 +355,14 @@ func RunAfterParse(ctx *ParseHookCtx) error {
 	return nil
 }
 
-// RunAfterMarkdownParse runs all AfterMarkdownParse hooks sorted by order.
+// RunAfterMarkdownParse runs the AfterMarkdownParse hooks of the default registry.
 func RunAfterMarkdownParse(ctx *MarkdownHookCtx) error {
-	for _, p := range DefaultRegistry.Sorted() {
+	return DefaultRegistry.RunAfterMarkdownParse(ctx)
+}
+
+// RunAfterMarkdownParse runs the AfterMarkdownParse hooks of the plugins in r, sorted by order.
+func (r *Registry) RunAfterMarkdownParse(ctx *MarkdownHookCtx) error {
+	for _, p := range r.Sorted() {
 		h := p.Hooks()
 		if h.AfterMarkdownParse == nil {
 			continue
@@ -359,9 +374,14 @@ func RunAfterMarkdownParse(ctx *MarkdownHookCtx) error {
 	return nil
 }
 
-// RunAfterRender runs all AfterRender hooks sorted by order.
+// RunAfterRender runs the AfterRender hooks of the default registry.
 func RunAfterRender(ctx *RenderHookCtx) error {
-	for _, p := range DefaultRegistry.Sorted() {
+	return DefaultRegistry.RunAfterRender(ctx)
+}
+
+// RunAfterRender runs the AfterRender hooks of the plugins in r, sorted by order.
+func (r *Registry) RunAfterRender(ctx *RenderHookCtx) error {
+	for _, p := range r.Sorted() {
 		h := p.Hooks()
 		if h.AfterRender == nil {
 			continue
@@ -373,10 +393,16 @@ func RunAfterRender(ctx *RenderHookCtx) error {
 	return nil
 }
 
-// RunGenerateRoutes runs all GenerateRoutes hooks and returns combined routes.
+// RunGenerateRoutes runs the GenerateRoutes hooks of the default registry and
+// returns the combined routes.
 func RunGenerateRoutes(ctx *BuildHookCtx) ([]Route, error) {
+	return DefaultRegistry.RunGenerateRoutes(ctx)
+}
+
+// RunGenerateRoutes runs the GenerateRoutes hooks of the plugins in r, sorted by order.
+func (r *Registry) RunGenerateRoutes(ctx *BuildHookCtx) ([]Route, error) {
 	var allRoutes []Route
-	for _, p := range DefaultRegistry.Sorted() {
+	for _, p := range r.Sorted() {
 		h := p.Hooks()
 		if h.GenerateRoutes == nil {
 			continue
@@ -394,9 +420,14 @@ func RunGenerateRoutes(ctx *BuildHookCtx) ([]Route, error) {
 	return allRoutes, nil
 }
 
-// RunAfterPage runs all AfterPage hooks sorted by order.
+// RunAfterPage runs the AfterPage hooks of the default registry.
 func RunAfterPage(ctx *PageHookCtx) error {
-	for _, p := range DefaultRegistry.Sorted() {
+	return DefaultRegistry.RunAfterPage(ctx)
+}
+
+// RunAfterPage runs the AfterPage hooks of the plugins in r, sorted by order.
+func (r *Registry) RunAfterPage(ctx *PageHookCtx) error {
+	for _, p := range r.Sorted() {
 		h := p.Hooks()
 		if h.AfterPage == nil {
 			continue
@@ -408,9 +439,14 @@ func RunAfterPage(ctx *PageHookCtx) error {
 	return nil
 }
 
-// RunAfterBuild runs all AfterBuild hooks sorted by order.
+// RunAfterBuild runs the AfterBuild hooks of the default registry.
 func RunAfterBuild(ctx *BuildResultHookCtx) error {
-	for _, p := range DefaultRegistry.Sorted() {
+	return DefaultRegistry.RunAfterBuild(ctx)
+}
+
+// RunAfterBuild runs the AfterBuild hooks of the plugins in r, sorted by order.
+func (r *Registry) RunAfterBuild(ctx *BuildResultHookCtx) error {
+	for _, p := range r.Sorted() {
 		h := p.Hooks()
 		if h.AfterBuild == nil {
 			continue
@@ -454,7 +490,12 @@ func DefaultContributedCollections(cfg *config.Config) map[string]content.Collec
 // When true, page output may depend on plugin side effects the disk build cache
 // cannot replay, so callers disable page-level caching.
 func HasPerPageHooks() bool {
-	for _, p := range DefaultRegistry.Sorted() {
+	return DefaultRegistry.HasPerPageHooks()
+}
+
+// HasPerPageHooks reports whether any plugin in r has a per-page hook.
+func (r *Registry) HasPerPageHooks() bool {
+	for _, p := range r.Sorted() {
 		h := p.Hooks()
 		if h.AfterParse != nil || h.AfterMarkdownParse != nil || h.AfterRender != nil || h.AfterPage != nil {
 			return true

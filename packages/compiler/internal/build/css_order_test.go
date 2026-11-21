@@ -10,6 +10,7 @@ import (
 )
 
 func TestCSPCoversMinifiedInlineStylesAndAttrs(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeFileRel(t, root, "src/pages/index.tsx", "export default function P() {\n"+
 		" return <div style={{color: 'red', 'margin-top': '3px'}}><style>{`.a  {  color : blue ;  }\n\n .b{color:green}`}</style><p>x</p></div>;\n}\n")

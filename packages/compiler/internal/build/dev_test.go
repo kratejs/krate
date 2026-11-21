@@ -7,6 +7,7 @@ import (
 )
 
 func TestSafeProjectPath(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.tsx"), []byte("x"), 0644); err != nil {
 		t.Fatal(err)

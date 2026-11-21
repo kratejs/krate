@@ -4,8 +4,8 @@
 // writes framed replies (and console lines) on stdout. A frame is a 4-byte
 // big-endian length and a JSON header, followed for a request by a second
 // length-prefixed frame holding the code.
-const vm = require("vm");
-const fs = require("fs");
+const vm = require("node:vm");
+const fs = require("node:fs");
 
 const NODE_GLOBALS = __KRATE_NODE_GLOBALS__;
 
@@ -15,7 +15,7 @@ process.on("unhandledRejection", () => {});
 function describe(e) {
   try {
     return (e && e.stack) || String(e);
-  } catch (_) {
+  } catch {
     return "error";
   }
 }
@@ -23,7 +23,7 @@ function describe(e) {
 function writeErr(line) {
   try {
     process.stderr.write(line + "\n");
-  } catch (_) {}
+  } catch {}
 }
 
 function send(obj) {
@@ -176,6 +176,8 @@ function makeContext(st, env, trap) {
     // the wait going either.
     timer(cb, ms, repeat) {
       st.pending++;
+      // h is assigned after run is defined and read inside it.
+      // oxlint-disable-next-line eslint/prefer-const
       let h;
       const run = () => {
         if (!repeat && st.timers.has(h)) {
@@ -285,6 +287,7 @@ function makeContext(st, env, trap) {
       enumerable: false,
       get() {
         st.trapped = true;
+        // oxlint-disable-next-line unicorn/no-useless-undefined
         return undefined;
       },
       set(v) {
@@ -304,7 +307,7 @@ function cleanup(st) {
   for (const ac of st.aborts) {
     try {
       ac.abort();
-    } catch (_) {}
+    } catch {}
   }
   st.aborts.clear();
   st.pending = 0;
@@ -313,7 +316,7 @@ function cleanup(st) {
 function errText(e) {
   try {
     return String(e);
-  } catch (_) {
+  } catch {
     return "Error";
   }
 }
@@ -327,7 +330,7 @@ async function settle(st, ctx, until, deadline) {
     if (!until) return false;
     try {
       return !!until.runInContext(ctx, { timeout: Math.max(1, deadline - Date.now()) });
-    } catch (_) {
+    } catch {
       return false;
     }
   };
@@ -384,7 +387,7 @@ async function handle(req, code) {
       if (req.until) {
         try {
           until = new vm.Script(req.until);
-        } catch (_) {}
+        } catch {}
       }
       await settle(st, ctx, until, deadline);
     }

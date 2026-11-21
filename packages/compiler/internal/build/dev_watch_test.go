@@ -81,6 +81,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 func TestWatchPicksUpNewNestedDirectory(t *testing.T) {
+	t.Parallel()
 	root, _, _ := startDevWatch(t, map[string]string{"src/pages/index.tsx": devPage("home")}, nil)
 	deep := filepath.Join(root, "src", "pages", "blog", "deep")
 	if err := os.MkdirAll(deep, 0o755); err != nil {
@@ -116,6 +117,7 @@ func httpGet(t *testing.T, url, accept string) (int, string) {
 }
 
 func TestServeDevRestartsOnRequestAndShowsErrorShell(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := config.Default()
 	cfg.PagesDir = filepath.Join(root, "src", "pages")

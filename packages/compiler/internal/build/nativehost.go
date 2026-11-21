@@ -49,7 +49,7 @@ func (b *Builder) prepareNativeHost() error {
 		errs := make([]error, len(ds))
 		for i, d := range ds {
 			errs[i] = d
-			fmt.Fprintf(os.Stderr, "  %sHost code error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{d}), "\n", "\n    "))
+			fmt.Fprintf(b.stderr(), "  %sHost code error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{d}), "\n", "\n    "))
 		}
 		return &multiError{summary: fmt.Sprintf("build failed: %d %s", len(ds), what), errs: errs}
 	}
@@ -78,7 +78,7 @@ func (b *Builder) prepareNativeHost() error {
 			}
 		}
 		if len(warns) > 0 {
-			printWarningsOnce(os.Stderr, warns)
+			b.printWarningsOnce(warns)
 		}
 		if len(errs) > 0 {
 			return fail(errs, "host code error(s)")
@@ -413,7 +413,7 @@ func (b *Builder) rewriteBakedCalls(overlays map[string]string, calls []hostts.B
 		}
 		out, skipped := bake.Rewrite(src, edits)
 		if len(skipped) > 0 {
-			fmt.Fprintf(os.Stderr, "  %sWarning:%s %s: %d build function call(s) were left to the baked stub\n", cYellow, cReset, b.relTo(abs), len(skipped))
+			fmt.Fprintf(b.stderr(), "  %sWarning:%s %s: %d build function call(s) were left to the baked stub\n", cYellow, cReset, b.relTo(abs), len(skipped))
 		}
 		overlays[abs] = out
 	}

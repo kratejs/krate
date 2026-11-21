@@ -12,6 +12,7 @@ import (
 // routes it responds to and a 404 falls through (Handle returns false) so the
 // built-in Go/TS routes can try.
 func TestAPISidecarProxyFirstAndFallthrough(t *testing.T) {
+	t.Parallel()
 	sidecar := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/echo":

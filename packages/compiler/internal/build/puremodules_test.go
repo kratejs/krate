@@ -15,6 +15,7 @@ import (
 // asks esbuild for nothing again, and its output is the one a fresh plugin
 // gives.
 func TestPurePruneMemoAcrossPasses(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeProjectFile(t, root, "src/entry.ts", "import { a } from './a';\nimport { b } from './b';\nimport { c } from './lib';\nconsole.log(a(), b(), c());\n")
 	writeProjectFile(t, root, "src/a.ts", "export const a = () => 'a-mark';\nexport const unusedA = () => 'unused-a-mark';\n")

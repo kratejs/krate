@@ -253,6 +253,7 @@ func compare(t *testing.T, label string, got, want map[string]declMap) {
 }
 
 func TestThemeCSSMatchesChromaPerMode(t *testing.T) {
+	t.Parallel()
 	names := styles.Names()
 	for _, name := range names {
 		other := DefaultDarkTheme

@@ -11,6 +11,7 @@ import (
 )
 
 func TestSecurityHeadersMiddleware(t *testing.T) {
+	t.Parallel()
 	cfg := config.Default()
 	cfg.SEO.BaseURL = "https://example.com"
 	h := securityHeadersMiddleware(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +35,7 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 }
 
 func TestCORSMiddlewareRejectsCredentialedWildcard(t *testing.T) {
+	t.Parallel()
 	cfg := config.Default()
 	cfg.CORS.Enabled = true
 	cfg.CORS.Credentials = true
@@ -52,6 +54,7 @@ func TestCORSMiddlewareRejectsCredentialedWildcard(t *testing.T) {
 }
 
 func TestCORSMiddlewareExplicitOrigins(t *testing.T) {
+	t.Parallel()
 	cfg := config.Default()
 	cfg.CORS.Enabled = true
 	cfg.CORS.Origins = []string{"https://ok.example"}
@@ -79,6 +82,7 @@ func TestCORSMiddlewareExplicitOrigins(t *testing.T) {
 }
 
 func TestBodyLimitMiddleware(t *testing.T) {
+	t.Parallel()
 	h := bodyLimitMiddleware(8, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, err := io.ReadAll(r.Body)
 		if err != nil {

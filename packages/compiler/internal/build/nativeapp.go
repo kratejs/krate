@@ -448,7 +448,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	if !opts.Dev {
 		pl, _ := native.Analyze(b.Root, b.Cfg)
 		if lean, err := native.CheckLean(b.Root, b.Cfg, pl); err == nil {
-			printWarningsOnce(os.Stderr, lean)
+			b.printWarningsOnce(lean)
 		}
 	}
 
@@ -520,7 +520,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		m.Media = mm
 	}
 	if !opts.Dev && nativeTargetsMac(eff) {
-		printWarningsOnce(os.Stderr, mediaUsageDiagnostics(eff, uses))
+		b.printWarningsOnce(mediaUsageDiagnostics(eff, uses))
 	}
 	m.Window.Permissions = eff.Window.Permissions
 	m.Window.KeepAlive = eff.Window.KeepAlive

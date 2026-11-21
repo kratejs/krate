@@ -55,6 +55,7 @@ func bundleWith(t *testing.T, root string, plugin api.Plugin) (string, []api.Mes
 
 // A Preact island gets the island builds of @krate/three and its drei.
 func TestThreeIslandPluginResolvesIslandBuilds(t *testing.T) {
+	t.Parallel()
 	out, errs := bundleWith(t, threeResolveFixture(t, false), threeIslandPlugin())
 	if len(errs) > 0 {
 		t.Fatalf("build errors: %v", errs)
@@ -67,6 +68,7 @@ func TestThreeIslandPluginResolvesIslandBuilds(t *testing.T) {
 // A real-React island runs a @krate/three scene as @react-three/fiber, and
 // says what to install when fiber is missing.
 func TestThreeRealReactPluginUsesFiber(t *testing.T) {
+	t.Parallel()
 	out, errs := bundleWith(t, threeResolveFixture(t, true), threeRealReactPlugin())
 	if len(errs) > 0 {
 		t.Fatalf("build errors: %v", errs)

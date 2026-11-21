@@ -227,7 +227,7 @@ export function krateApplyStyle(el: Element, style: Record<string, unknown>): vo
  * accessor is not shadowed by the early own property.
  */
 export function krateCustomProp(el: Element, key: string, value: unknown): boolean {
-  if (el.localName.indexOf('-') < 1 || key.indexOf('-') >= 0) return false;
+  if (el.localName.indexOf('-') < 1 || key.includes('-')) return false;
   const complex = (typeof value === 'object' && value !== null) || typeof value === 'function';
   if (!complex && !(key in el)) return false;
   (el as unknown as Record<string, unknown>)[key] = value;

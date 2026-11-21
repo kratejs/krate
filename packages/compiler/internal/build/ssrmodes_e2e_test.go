@@ -25,6 +25,7 @@ import (
 // guards the ssr-backend unification by asserting the orphaned QuickJS SSR
 // bundle staging (.krate/ssr-bundles) is gone and only sidecar bundles exist.
 func TestBuildServerModesManifestE2E(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	pagesDir := filepath.Join(root, "src", "pages")
 	if err := os.MkdirAll(pagesDir, 0755); err != nil {
@@ -261,6 +262,7 @@ func TestBuildServerModesManifestE2E(t *testing.T) {
 // stale-while-revalidate with single-flight background refresh, the
 // /__krate/ssr/revalidate invalidation endpoint, and cache persistence.
 func TestISRVariantCacheE2E(t *testing.T) {
+	t.Parallel()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		requireE2E(t, "node not available: %v", err)
@@ -349,7 +351,7 @@ export default function VideoPage(props) {
 		t.Fatal(err)
 	}
 
-	staged := stageServerRenderer(repoRoot, outDir)
+	staged := stageServerRenderer(os.Stderr, repoRoot, outDir)
 	if staged == "" {
 		t.Fatal("stageServerRenderer returned empty path")
 	}

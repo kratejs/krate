@@ -6,7 +6,7 @@ export function sum(...nums: number[]): number {
   return nums.reduce((acc, n) => acc + n, 0);
 }
 
-export function joinList(items: string[], sep: string = ", "): string {
+export function joinList(items: string[], sep = ", "): string {
   return items.join(sep);
 }
 

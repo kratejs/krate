@@ -10,6 +10,7 @@ import (
 // A Link prefetches on intent by default; prefetch="viewport" marks it for
 // viewport prefetch and prefetch={false} drops the attribute.
 func TestLinkPrefetchModes(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/index.tsx": `export default function Home() {
   return (

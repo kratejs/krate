@@ -3,7 +3,6 @@ package build
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -265,13 +264,13 @@ func pageDataCacheUsage(mods []*bundler.Module, entry *bundler.Module, resolve f
 // unsupported segment-export values and the data-cache inference: a page that
 // states no mode but reads tagged, timed or no-store data renders as ISR/SSR
 // instead of being frozen at build time.
-func resolvePageRenderMode(page string, entry *bundler.Module, mods []*bundler.Module, resolve func(importer, spec string) string) (RenderMode, int, dataCacheUsage) {
+func (b *Builder) resolvePageRenderMode(page string, entry *bundler.Module, mods []*bundler.Module, resolve func(importer, spec string) string) (RenderMode, int, dataCacheUsage) {
 	cfg := parsePageConfig(entry.Program)
 	var issues []diag.Diagnostic
 	for _, is := range cfg.issues {
 		issues = append(issues, warnAt(page, entry.SourceCode, is.pos, diag.CodeSegmentExportValue, is.message, is.hint))
 	}
-	printWarningsOnce(os.Stderr, issues)
+	b.printWarningsOnce(issues)
 
 	usage := pageDataCacheUsage(mods, entry, resolve)
 	mode, reval := detectRenderModeWith(entry.Program, rendererComponentNames(entry, mods))
@@ -321,19 +320,16 @@ func warnAt(file, source string, pos ast.Pos, code diag.Code, msg, hint string) 
 	return d
 }
 
-// printWarningsOnce prints warnings not printed earlier in this build (pages
-// expanded per generateStaticParams entry would otherwise repeat them).
+// printWarningsOnce prints warnings, each once.
 func printWarningsOnce(w io.Writer, ds []diag.Diagnostic) {
-	var out []diag.Diagnostic
-	moduleWarningsSeen.mu.Lock()
-	for _, d := range ds {
-		key := d.Error()
-		if moduleWarningsSeen.seen[key] {
-			continue
-		}
-		moduleWarningsSeen.seen[key] = true
-		out = append(out, d)
-	}
-	moduleWarningsSeen.mu.Unlock()
-	printTreeWarnings(w, out)
+	// A caller without a Builder has no build to dedupe across.
+	var once warningSet
+	printTreeWarnings(w, once.fresh(ds))
+}
+
+// printWarningsOnce prints warnings not printed earlier in this build of b
+// (pages expanded per generateStaticParams entry would otherwise repeat
+// them).
+func (b *Builder) printWarningsOnce(ds []diag.Diagnostic) {
+	printTreeWarnings(b.stderr(), b.warned.fresh(ds))
 }

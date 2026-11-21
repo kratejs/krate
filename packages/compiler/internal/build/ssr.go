@@ -73,7 +73,7 @@ func (s *SSRServer) internalPost(endpoint string, payload any) error {
 		return errSSRNotRunning
 	}
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%d%s", s.port, endpoint), bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d%s", s.port, endpoint), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -367,7 +367,7 @@ func (s *SSRServer) Start() error {
 			return fmt.Errorf("SSR renderer exited during startup")
 		case <-time.After(100 * time.Millisecond):
 		}
-		resp, err := sidecarClient.Get(fmt.Sprintf("http://localhost:%d/__krate/ssr/health", s.port))
+		resp, err := sidecarClient.Get(fmt.Sprintf("http://127.0.0.1:%d/__krate/ssr/health", s.port))
 		if err == nil && resp.StatusCode == 200 {
 			ready = true
 			resp.Body.Close()
@@ -682,7 +682,7 @@ func (s *SSRServer) findRendererScriptLocked() string {
 	outDir := s.outputDirLocked()
 	staged := filepath.Join(outDir, ".krate", "server-renderer.mjs")
 	if _, err := os.Stat(staged); err != nil {
-		staged = stageServerRenderer(s.root, outDir)
+		staged = stageServerRenderer(childStderr(), s.root, outDir)
 		if staged == "" {
 			return ""
 		}
@@ -762,7 +762,7 @@ func findServerRendererSource(root string) string {
 // The driver bundles the SSR runtime (server.ts) so `krate serve` only needs a
 // plain runtime process. Returns the absolute staged path, or "" if the source
 // couldn't be located or bundled.
-func stageServerRenderer(root, outDir string) string {
+func stageServerRenderer(stderr io.Writer, root, outDir string) string {
 	source := findServerRendererSource(root)
 	if source == "" {
 		return ""
@@ -792,7 +792,7 @@ func stageServerRenderer(root, outDir string) string {
 
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
-			fmt.Fprintf(os.Stderr, "  %sSSR renderer bundle error:%s %s\n", cYellow, cReset, e.Text)
+			fmt.Fprintf(stderr, "  %sSSR renderer bundle error:%s %s\n", cYellow, cReset, e.Text)
 		}
 		return ""
 	}
@@ -822,7 +822,7 @@ func matchRoute(urlPath, pattern string) (map[string]string, bool) {
 func stageCacheRuntime(root, outDir string) string {
 	source := findServerRendererSource(root)
 	if source == "" {
-		fmt.Fprintf(os.Stderr, "  %sWarning: @krate/runtime not found; fetch cache options are not applied in Node API routes and actions%s\n", cYellow, cReset)
+		eprintf("  %sWarning: @krate/runtime not found; fetch cache options are not applied in Node API routes and actions%s\n", cYellow, cReset)
 		return ""
 	}
 	stageDir := filepath.Join(outDir, ".krate")
@@ -854,7 +854,7 @@ func stageCacheRuntime(root, outDir string) string {
 	})
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
-			fmt.Fprintf(os.Stderr, "  %sCache runtime bundle error:%s %s\n", cYellow, cReset, e.Text)
+			eprintf("  %sCache runtime bundle error:%s %s\n", cYellow, cReset, e.Text)
 		}
 		return ""
 	}

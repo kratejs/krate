@@ -18,7 +18,7 @@
   });
   def('atob', function (s) {
     s = String(s).replace(/[\t\n\f\r ]/g, '');
-    if (s.length % 4 === 1 || /[^A-Za-z0-9+\/=]/.test(s) || /=[^=]/.test(s)) throw new DOMException('The string to be decoded is not correctly encoded.', 'InvalidCharacterError');
+    if (s.length % 4 === 1 || /[^A-Za-z0-9+/=]/.test(s) || /=[^=]/.test(s)) throw new DOMException('The string to be decoded is not correctly encoded.', 'InvalidCharacterError');
     var u8 = b64ToBytes(s), out = '';
     for (var i = 0; i < u8.length; i += 8192) out += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
     return out;
@@ -29,7 +29,7 @@
     encode(s) { return utf8Encode(s === undefined ? '' : String(s)); }
     encodeInto(s, dest) {
       var bytes = utf8Encode(String(s)), n = Math.min(bytes.length, dest.length);
-      while (n > 0 && n < bytes.length && (bytes[n] & 0xc0) === 0x80) n--;
+      while (n > 0 && n < bytes.length && (bytes[n] & 0xC0) === 0x80) n--;
       dest.set(bytes.subarray(0, n));
       return { read: utf8Decode(bytes.subarray(0, n)).length, written: n };
     }
@@ -56,14 +56,14 @@
         var st = { rest: 0 };
         out = utf8Decode(u8, this.fatal, stream, st);
         if (st.rest) this._pending = u8.slice(u8.length - st.rest);
-        if (!this.ignoreBOM && !this._seenBOM && out.charCodeAt(0) === 0xfeff) out = out.slice(1);
+        if (!this.ignoreBOM && !this._seenBOM && out.charCodeAt(0) === 0xFEFF) out = out.slice(1);
       } else if (this._enc === 'utf-16le') {
         var units = [], k = 0;
         for (; k + 1 < u8.length; k += 2) units.push(u8[k] | (u8[k + 1] << 8));
-        if (k < u8.length) { if (stream) this._pending = u8.slice(k); else units.push(0xfffd); }
+        if (k < u8.length) { if (stream) this._pending = u8.slice(k); else units.push(0xFFFD); }
         out = '';
         for (var m = 0; m < units.length; m += 8192) out += String.fromCharCode.apply(null, units.slice(m, m + 8192));
-        if (!this.ignoreBOM && !this._seenBOM && out.charCodeAt(0) === 0xfeff) out = out.slice(1);
+        if (!this.ignoreBOM && !this._seenBOM && out.charCodeAt(0) === 0xFEFF) out = out.slice(1);
       } else {
         out = '';
         for (var q = 0; q < u8.length; q += 8192) out += String.fromCharCode.apply(null, u8.subarray(q, q + 8192));

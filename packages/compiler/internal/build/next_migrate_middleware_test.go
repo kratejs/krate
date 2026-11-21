@@ -15,6 +15,7 @@ import (
 // answers with its status and body, and redirect() redirects. It runs in the
 // embedded runtime and in the Node sidecar.
 func TestMigratedNextMiddlewareNextResponse(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for rel, content := range map[string]string{
 		"package.json":            `{"name":"mw-app","private":true,"dependencies":{"next":"16.0.0","react":"19.0.0"}}`,

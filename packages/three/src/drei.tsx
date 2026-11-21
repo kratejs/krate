@@ -230,7 +230,7 @@ export function Lightformer(props: LightformerProps) {
       ) : Form ? (
         <Form args={props.args} />
       ) : null}
-      {props.children ? props.children : <meshBasicMaterial toneMapped={props.toneMapped ?? false} map={props.map} side={THREE.DoubleSide} />}
+      {props.children || <meshBasicMaterial toneMapped={props.toneMapped ?? false} map={props.map} side={THREE.DoubleSide} />}
       {props.light ? <pointLight castShadow {...forwardProps(props.light, [])} /> : null}
     </mesh>
   );

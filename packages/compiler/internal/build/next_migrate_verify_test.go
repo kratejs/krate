@@ -12,6 +12,7 @@ import (
 // Next.js projects migrate, build, pass checks, keep their full route
 // inventory, and roll back cleanly.
 func TestNextMigrateReferenceApps(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		files  map[string]string

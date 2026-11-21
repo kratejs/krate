@@ -8,6 +8,7 @@ import (
 )
 
 func TestSEOCanonicalMatchesServedForm(t *testing.T) {
+	t.Parallel()
 	seo := config.SEOConfig{BaseURL: "https://example.com", SiteName: "Site", Image: "/og.png"}
 	got := generateSEOTags("<title>Guide</title>", "/docs/guide", seo, seoCtx{BasePath: "/sub"})
 	for _, want := range []string{

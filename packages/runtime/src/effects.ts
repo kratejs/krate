@@ -228,7 +228,7 @@ export function krateUnmount(value: unknown): void {
   if (owner.parent) {
     const list = owner.parent.children;
     const i = list.indexOf(owner);
-    if (i >= 0) list.splice(i, 1);
+    if (i !== -1) list.splice(i, 1);
   }
   if (passive.length) {
     passiveCleanups.push(...passive);
@@ -797,7 +797,7 @@ function unmountExcept(gone: (scope: string | null) => boolean): void {
     if (!gone(child.scope)) continue;
     disposeTree(child, child.shown, passive);
     const i = root.children.indexOf(child);
-    if (i >= 0) root.children.splice(i, 1);
+    if (i !== -1) root.children.splice(i, 1);
   }
   const keptHooks: HookEffect[] = [];
   for (const hook of root.hooks) {

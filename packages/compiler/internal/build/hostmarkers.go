@@ -2,7 +2,6 @@ package build
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
@@ -22,7 +21,7 @@ func (b *Builder) checkHostMarkers() error {
 	errs := make([]error, len(ds))
 	for i, d := range ds {
 		errs[i] = d
-		fmt.Fprintf(os.Stderr, "  %sHost code error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{d}), "\n", "\n    "))
+		fmt.Fprintf(b.stderr(), "  %sHost code error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{d}), "\n", "\n    "))
 	}
 	return &multiError{summary: fmt.Sprintf("build failed: %d host code marker(s) in a web build", len(ds)), errs: errs}
 }

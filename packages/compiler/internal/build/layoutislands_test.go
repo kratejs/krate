@@ -55,10 +55,11 @@ func toastFixture(t *testing.T, root string) {
 // a client component that only calls toast() run as islands of one chunk
 // graph, so the library's module state exists once.
 func TestLayoutToasterSharesStoreWithPageIslands(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	toastFixture(t, root)
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -85,6 +86,7 @@ func TestLayoutToasterSharesStoreWithPageIslands(t *testing.T) {
 // TestVendorBundleResolvesReact: a plain function of a React package called
 // from a module that is not an island bundles for the browser.
 func TestVendorBundleResolvesReact(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	writeProjectFile(t, root, "node_modules/react-util/package.json", `{"name":"react-util","version":"1.0.0","main":"index.js","peerDependencies":{"react":"*"}}`)
@@ -101,7 +103,7 @@ func TestVendorBundleResolvesReact(t *testing.T) {
 			return <main><p id="s">{s}</p></main>;
 		}
 	`)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	js := readBuilt(t, mustGlobOne(t, filepath.Join(cfg.OutDir, "index.*.js")))
@@ -113,6 +115,7 @@ func TestVendorBundleResolvesReact(t *testing.T) {
 // TestLayoutProviderWithScriptIsLifted: a provider that adds a script next to
 // its children (next-themes) is lifted into the islands instead of KR8016.
 func TestLayoutProviderWithScriptIsLifted(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	writeProjectFile(t, root, "node_modules/theme-script/package.json", `{"name":"theme-script","version":"1.0.0","main":"index.js","peerDependencies":{"react":"*"}}`)
@@ -141,7 +144,7 @@ func TestLayoutProviderWithScriptIsLifted(t *testing.T) {
 		import Toggle from '../../components/Toggle';
 		export default function Page() { return <main><Toggle /></main>; }
 	`)
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -158,6 +161,7 @@ func TestLayoutProviderWithScriptIsLifted(t *testing.T) {
 // client component of an async page are client boundaries built in the island
 // graph, so the library's module state exists once in the browser.
 func TestAsyncLayoutToasterSharesStore(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	toastFixture(t, root)
@@ -171,7 +175,7 @@ func TestAsyncLayoutToasterSharesStore(t *testing.T) {
 		import Save from '../../components/Save';
 		export default async function Page() { return <main><h1>one</h1><Save /></main>; }
 	`)
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}

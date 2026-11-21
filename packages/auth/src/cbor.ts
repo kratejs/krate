@@ -48,7 +48,7 @@ export function decodeCbor(bytes: Uint8Array, offset = 0): Decoded {
     need(1);
     const initial = bytes[pos++]!;
     const major = initial >> 5;
-    const info = initial & 0x1f;
+    const info = initial & 0x1F;
     if (major === 7) {
       if (info === 20) return false;
       if (info === 21) return true;
@@ -102,9 +102,9 @@ function head(major: number, value: number | bigint): number[] {
 export function encodeCbor(value: CborValue): Uint8Array {
   const out: number[] = [];
   const push = (v: CborValue): void => {
-    if (v === null) out.push(0xf6);
-    else if (v === undefined) out.push(0xf7);
-    else if (typeof v === "boolean") out.push(v ? 0xf5 : 0xf4);
+    if (v === null) out.push(0xF6);
+    else if (v === undefined) out.push(0xF7);
+    else if (typeof v === "boolean") out.push(v ? 0xF5 : 0xF4);
     else if (typeof v === "number" || typeof v === "bigint") {
       const n = typeof v === "bigint" ? v : BigInt(v);
       if (n >= 0n) out.push(...head(0, n));

@@ -161,7 +161,7 @@ describe('swapPreservingIslands', () => {
     expect(b.handle.unmount).not.toHaveBeenCalled();
     expect(a1.handle.unmount).toHaveBeenCalled();
     expect(a2.handle.unmount).toHaveBeenCalled();
-    expect(root.querySelectorAll('b').length).toBe(1);
+    expect(root.querySelectorAll('b')).toHaveLength(1);
     expect(root.querySelector('b')).not.toBe(nodes[0]);
   });
 
@@ -230,7 +230,7 @@ describe('server children of a kept island', () => {
     // islands keep their nodes; the server content follows the new markup.
     expect(root.querySelector('.shell')).toBe(shell);
     expect(document.getElementById('q')).toBe(input);
-    expect(root.querySelectorAll('li').length).toBe(2);
+    expect(root.querySelectorAll('li')).toHaveLength(2);
     expect(root.querySelector('ul')).not.toBe(ul);
     for (const r of [providers, nav, filters]) expect(r.handle.unmount).not.toHaveBeenCalled();
     // The slot id of the new render is mapped onto the adopted slot, so the

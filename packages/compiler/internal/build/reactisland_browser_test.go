@@ -16,6 +16,7 @@ import (
 // pages rendered per request. It needs KRATE_BROWSER like the other browser
 // gates.
 func TestBrowserReactLibraryIslands(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -49,8 +50,6 @@ func TestBrowserReactLibraryIslands(t *testing.T) {
 	if err := os.Symlink(runtimeSrc, filepath.Join(root, "node_modules", "@krate", "runtime")); err != nil {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
-	// The runtime bundle is found next to the working directory.
-	t.Chdir(root)
 	reactLibFixture(t, root)
 	writeProjectFile(t, root, "src/store.ts", `
 		import { create } from 'fake-store';
@@ -145,7 +144,7 @@ func TestBrowserReactLibraryIslands(t *testing.T) {
 		import { jsx } from 'react/jsx-runtime';
 		export function Badge({ label }) { return jsx('span', { id: 'deferred', className: 'badge', children: label }); }
 	`)
-	if _, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if _, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
 	// Pages rendered per request need the real server (Node renderer).
@@ -172,6 +171,7 @@ func TestBrowserReactLibraryIslands(t *testing.T) {
 // that imports a "use server" function: the island posts to the action
 // endpoint and shows the id the action returned.
 func TestBrowserRealReactIslandAction(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -203,9 +203,8 @@ func TestBrowserRealReactIslandAction(t *testing.T) {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
 	realReactFixture(t, root)
-	t.Chdir(root)
 	realReactServerOnlyFiles(t, root)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	if !canStopInProcessServer {

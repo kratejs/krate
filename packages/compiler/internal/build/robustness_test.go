@@ -13,6 +13,7 @@ import (
 // the parent directory survive; an outDir outside the project that holds no
 // sources still builds.
 func TestBuildAllRefusesParentOutDirBeforeDeleting(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	root := filepath.Join(parent, "proj")
 	writeProjectFile(t, root, "src/pages/index.tsx", "export default function P() { return <main>hi</main>; }\n")

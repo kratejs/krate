@@ -52,7 +52,7 @@ func (b *Builder) contentConfig() *content.Config {
 	if cfg == nil {
 		cfg = &content.Config{Collections: map[string]content.Collection{}}
 	}
-	for name, col := range plugin.DefaultContributedCollections(b.Cfg) {
+	for name, col := range plugin.ContributedCollections(b.plugins, b.Cfg) {
 		if _, exist := cfg.Collections[name]; exist {
 			continue
 		}

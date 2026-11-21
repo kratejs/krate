@@ -36,7 +36,7 @@ export interface HeadSplit {
  * markers. Both are removed from the returned html.
  */
 export function takeHead(html: string): HeadSplit {
-  const hasHead = html.indexOf(HEAD_OPEN) !== -1;
+  const hasHead = html.includes(HEAD_OPEN);
   const hasTitle = /<title[\s>]/i.test(html);
   if (!hasHead && !hasTitle) return { title: "", head: "", html };
   let body = html;
@@ -93,7 +93,7 @@ export function takeHead(html: string): HeadSplit {
 }
 
 function takeTitles(html: string): { title: string; html: string } {
-  if (html.indexOf("<title") === -1 && html.indexOf("<TITLE") === -1) return { title: "", html };
+  if (!html.includes("<title") && !html.includes("<TITLE")) return { title: "", html };
   const re = /<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/gi;
   const found: { index: number; length: number; text: string }[] = [];
   let m: RegExpExecArray | null;
@@ -115,7 +115,7 @@ function takeTitles(html: string): { title: string; html: string } {
 function insideSVG(html: string, pos: number): boolean {
   const before = html.slice(0, pos).toLowerCase();
   let depth = 0;
-  const re = /<(\/?)svg[\s>\/]/g;
+  const re = /<(\/?)svg[\s>/]/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(before))) depth += m[1] ? -1 : 1;
   return depth > 0;
@@ -367,7 +367,7 @@ function decodeAttr(v: string): string {
 export function splitDocTags(fragment: string): { rest: string; html: DocAttrs; body: DocAttrs } {
   const html: DocAttrs = new Map();
   const body: DocAttrs = new Map();
-  if (!/<(html|body)[\s>\/]/i.test(fragment)) return { rest: fragment, html, body };
+  if (!/<(html|body)[\s>/]/i.test(fragment)) return { rest: fragment, html, body };
   let rest = "";
   let at = 0;
   for (const el of scanHeadElements(fragment)) {

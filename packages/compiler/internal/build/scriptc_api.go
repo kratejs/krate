@@ -520,7 +520,7 @@ func (b *Builder) finishScriptc(items []scriptcManifestItem, fallbacks []diag.Di
 	for i := range fallbacks {
 		fallbacks[i].Severity = diag.SeverityWarning
 	}
-	printWarningsOnce(os.Stderr, fallbacks)
+	b.printWarningsOnce(fallbacks)
 	sort.Slice(items, func(i, j int) bool { return items[i].File < items[j].File })
 	data, err := json.MarshalIndent(scriptcManifest{Version: 1, Executable: exe, Routes: items}, "", "  ")
 	if err != nil {

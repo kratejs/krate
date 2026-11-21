@@ -16,6 +16,7 @@ import (
 // binary is missing (bin/ is built, not committed) must abort the build, not
 // silently drop the plugin's contribution.
 func TestBuildGatesOnPluginError(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	pagesDir := filepath.Join(root, "src", "pages")
 	if err := os.MkdirAll(pagesDir, 0755); err != nil {

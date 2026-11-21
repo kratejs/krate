@@ -44,6 +44,7 @@ export default function Home() {
 // script loads the runtime chunk, and the chunk starts the router itself
 // (once: only when no router registered yet) after the document ran.
 func TestIslandOnlyPageRuntimeStartsRouter(t *testing.T) {
+	t.Parallel()
 	ensureRuntimeDist(t)
 	b, root := scProject(t, islandRouterFiles)
 	b.Cfg.Minify = true
@@ -100,6 +101,7 @@ func TestIslandOnlyPageRuntimeStartsRouter(t *testing.T) {
 // the island's router.replace() goes through the page router (no document
 // load, focus kept), and links are intercepted.
 func TestIslandOnlyPageRouterReplaceIsSoftNavigation(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the island router browser test")

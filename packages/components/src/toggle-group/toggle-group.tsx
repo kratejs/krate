@@ -1,5 +1,5 @@
 import './toggle-group.css';
-import { createScope, createScopeFlags, createCSSChoice, createCSSFlags, type CSSScope, type CSSFlagsScope } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSChoice, createCSSFlags } from '@krate/runtime';
 
 const ToggleGroupCtx = createScope<string>();
 const ToggleGroupMultiCtx = createScopeFlags<string>();

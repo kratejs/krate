@@ -8,6 +8,7 @@ import (
 )
 
 func TestFixedRegionShellCacheNeverRereads(t *testing.T) {
+	t.Parallel()
 	absOut := t.TempDir()
 	writeRoute(t, absOut, "/p", cacheTestShell)
 	path := filepath.Join(absOut, "p", "index.html")
@@ -37,6 +38,7 @@ func TestFixedRegionShellCacheNeverRereads(t *testing.T) {
 }
 
 func TestDevRegionShellCacheDetectsRewrite(t *testing.T) {
+	t.Parallel()
 	absOut := t.TempDir()
 	writeRoute(t, absOut, "/p", cacheTestShell)
 	path := filepath.Join(absOut, "p", "index.html")

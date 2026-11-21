@@ -46,6 +46,7 @@ func konvaBundleWith(t *testing.T, root string, plugin api.Plugin) (string, []ap
 
 // A Preact island gets the island build of @krate/konva.
 func TestKonvaIslandPluginResolvesIslandBuild(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeFakeKrateKonva(t, root)
 	writeProjectFile(t, root, "node_modules/preact/package.json", `{"name":"preact","main":"index.js"}`)
@@ -62,6 +63,7 @@ func TestKonvaIslandPluginResolvesIslandBuild(t *testing.T) {
 // A real-React island runs @krate/konva as react-konva, and says what to
 // install when react-konva is missing.
 func TestKonvaRealReactPluginUsesReactKonva(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeFakeKrateKonva(t, root)
 	_, errs := konvaBundleWith(t, root, konvaRealReactPlugin())
@@ -85,6 +87,7 @@ func TestKonvaRealReactPluginUsesReactKonva(t *testing.T) {
 // is a Preact island that loads the island build and no React; a @krate/konva
 // module rendered inside a real-React island runs there as react-konva.
 func TestKonvaIslandKind(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	realReactFixture(t, root)
@@ -152,8 +155,7 @@ export default async function Page() {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
 	e2eEnv(t)
-	t.Chdir(root)
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}

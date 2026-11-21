@@ -48,7 +48,7 @@ export function redirectResponse(ctx: RequestContext, url: string, jar?: Respons
 }
 
 export function jsonResponse(body: unknown, init: { status?: number; jar?: ResponseCookies; headers?: Record<string, string> } = {}): Response {
-  const headers = new Headers({ "content-type": "application/json", "cache-control": "no-store", ...(init.headers ?? {}) });
+  const headers = new Headers({ "content-type": "application/json", "cache-control": "no-store", ...init.headers });
   init.jar?.apply(headers);
   return new Response(JSON.stringify(body), { status: init.status ?? 200, headers });
 }

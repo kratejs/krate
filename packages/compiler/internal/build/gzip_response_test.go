@@ -21,6 +21,7 @@ func gzipTestBody(n int) []byte {
 }
 
 func TestGzipMiddlewareRoundTripsWithPooledWriters(t *testing.T) {
+	t.Parallel()
 	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Length", "1")
@@ -58,6 +59,7 @@ func TestGzipMiddlewareRoundTripsWithPooledWriters(t *testing.T) {
 }
 
 func TestGzipMiddlewareSkipsPartialContent(t *testing.T) {
+	t.Parallel()
 	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Header().Set("Content-Range", "bytes 0-4/10")

@@ -99,7 +99,7 @@ export function MemoryAdapter(store: MemoryStore = createMemoryStore()): Adapter
     },
     useVerificationToken({ identifier, token }) {
       const index = store.tokens.findIndex((t) => t.identifier === identifier && t.token === token);
-      if (index < 0) return null;
+      if (index === -1) return null;
       const [found] = store.tokens.splice(index, 1);
       return found ?? null;
     },

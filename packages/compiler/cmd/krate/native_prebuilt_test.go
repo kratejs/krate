@@ -95,6 +95,7 @@ func tarGzNames(t *testing.T, path string) map[string]string {
 // that has the prebuilt shell next to it and no go command on PATH, and
 // packages the result: the shell becomes <productName> with app/ beside it.
 func TestNativePrebuiltShellWithoutGo(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "linux" {
 		t.Skip("packages the Linux formats")
 	}

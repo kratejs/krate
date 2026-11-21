@@ -161,12 +161,12 @@ describe('script preloading', () => {
     holdPreloads = true;
     const first = krateRouter.push('/a');
     await new Promise((r) => setTimeout(r, 20));
-    expect(preloads.length).toBe(2);
+    expect(preloads).toHaveLength(2);
     holdPreloads = false;
     await krateRouter.push('/b');
     release();
     await first;
     expect(document.querySelector('#root h1')!.textContent).toBe('B');
-    expect(document.head.querySelectorAll('link[rel="preload"], link[rel="modulepreload"]').length).toBe(0);
+    expect(document.head.querySelectorAll('link[rel="preload"], link[rel="modulepreload"]')).toHaveLength(0);
   });
 });

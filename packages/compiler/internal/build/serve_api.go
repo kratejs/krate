@@ -18,14 +18,25 @@ import (
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
-// proxyTrust is set once at startup from server.trustProxy. When false the
-// server ignores client-supplied X-Forwarded-* headers; when true it honors
-// them (request URLs, CSRF origin check, client IP).
-var proxyTrust atomic.Bool
+// proxySettings are server.trustProxy and server.trustedProxies of the server
+// a request reached. Without trust the server ignores client-supplied
+// X-Forwarded-* headers; with it it honors them (request URLs, CSRF origin
+// check, client IP), and hops is how many proxies sit in front of the server.
+// forwardedHeadersMiddleware attaches them to the request context, so servers
+// in one process each keep their own.
+type proxySettings struct {
+	trust bool
+	hops  int
+}
 
-// proxyHops is server.trustedProxies: how many proxies sit in front of the
-// server when proxyTrust is set.
-var proxyHops atomic.Int32
+type proxySettingsKey struct{}
+
+// proxyOf returns the proxy settings of the server r reached; a request that
+// did not pass forwardedHeadersMiddleware is untrusted.
+func proxyOf(r *http.Request) proxySettings {
+	p, _ := r.Context().Value(proxySettingsKey{}).(proxySettings)
+	return p
+}
 
 // firstForwarded returns the first element of a comma-separated forwarded
 // header value.
@@ -39,7 +50,7 @@ func firstForwarded(v string) string {
 // requestHost is the host the client addressed: the Host header, or
 // X-Forwarded-Host behind a trusted proxy.
 func requestHost(r *http.Request) string {
-	if proxyTrust.Load() {
+	if proxyOf(r).trust {
 		if h := firstForwarded(r.Header.Get("X-Forwarded-Host")); h != "" {
 			return h
 		}
@@ -50,7 +61,7 @@ func requestHost(r *http.Request) string {
 // requestScheme is "https" for TLS connections (or a trusted
 // X-Forwarded-Proto), else "http".
 func requestScheme(r *http.Request) string {
-	if proxyTrust.Load() {
+	if proxyOf(r).trust {
 		switch p := strings.ToLower(firstForwarded(r.Header.Get("X-Forwarded-Proto"))); p {
 		case "http", "https":
 			return p
@@ -77,7 +88,7 @@ func requestFullURL(r *http.Request) string {
 // is whatever the client sent, so it never decides the address.
 // forwardedHeadersMiddleware has already appended the peer as the last entry.
 func clientIP(r *http.Request) string {
-	if proxyTrust.Load() {
+	if p := proxyOf(r); p.trust {
 		var chain []string
 		for _, part := range strings.Split(r.Header.Get("X-Forwarded-For"), ",") {
 			if part = strings.TrimSpace(part); part != "" {
@@ -85,7 +96,7 @@ func clientIP(r *http.Request) string {
 			}
 		}
 		if n := len(chain); n > 0 {
-			hops := int(proxyHops.Load())
+			hops := p.hops
 			if hops < 1 {
 				hops = 1
 			}
@@ -107,8 +118,10 @@ func clientIP(r *http.Request) string {
 // downstream (JS handlers, sidecars, migrated code reading x-forwarded-for).
 // Without a trusted proxy the client-supplied values are replaced by what the
 // server observed; with one, the observed peer is appended to the chain.
-func forwardedHeadersMiddleware(trust bool, next http.Handler) http.Handler {
+func forwardedHeadersMiddleware(trust bool, hops int, next http.Handler) http.Handler {
+	settings := proxySettings{trust: trust, hops: hops}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(context.WithValue(r.Context(), proxySettingsKey{}, settings))
 		peer, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
 			peer = r.RemoteAddr

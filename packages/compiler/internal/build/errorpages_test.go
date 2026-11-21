@@ -13,6 +13,7 @@ import (
 // emitted at the output root as 404.html/500.html: the friendly-fallback
 // documents the dev server and client router serve on render failures.
 func TestBuildErrorPages(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	pagesDir := filepath.Join(root, "src", "pages")
 	if err := os.MkdirAll(pagesDir, 0755); err != nil {

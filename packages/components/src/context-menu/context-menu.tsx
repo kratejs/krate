@@ -1,5 +1,5 @@
 import './context-menu.css';
-import { createSignal, createEffect, onCleanup } from '@krate/runtime';
+import { createSignal, createEffect } from '@krate/runtime';
 
 export interface ContextMenuProps {
   children?: any;
@@ -53,7 +53,7 @@ export function ContextMenu(props: ContextMenuProps) {
     if (x < 0) x = 8;
     if (y < 0) y = 8;
     lastTrigger = trigger;
-    setMenuPos({ x: x, y: y });
+    setMenuPos({ x, y });
     setOpen(true);
     // Keyboard users land on the first item once the menu is shown.
     requestAnimationFrame(function () {

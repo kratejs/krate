@@ -17,6 +17,7 @@ import (
 // navigations, a template remounts, and catch-all routes resolve with the
 // right specificity. Runs when KRATE_BROWSER is set (chromium recommended).
 func TestRouterBrowserE2E(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the router e2e")
@@ -77,6 +78,7 @@ func TestRouterBrowserE2E(t *testing.T) {
 // TestCSPSpeculationRulesInBrowser checks that the router's runtime-injected
 // speculation rules are not blocked by the generated CSP.
 func TestCSPSpeculationRulesInBrowser(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the CSP browser check")

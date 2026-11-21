@@ -13,6 +13,7 @@ import (
 // `import { Layer as KLayer }` renders <KLayer>, so KLayer must be defined in
 // the page's hydration code.
 func TestMergeModuleConstantsImportAliases(t *testing.T) {
+	t.Parallel()
 	parse := func(name, src string) *ast.Program {
 		prog, errs := tsstrip.Parse(name, src, tsstrip.Options{})
 		if len(errs) > 0 {

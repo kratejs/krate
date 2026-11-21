@@ -45,6 +45,7 @@ func buildImagePage(t *testing.T, page string, mutate func(*config.Config)) (str
 }
 
 func TestImageRemoteNotAllowedIsBuildError(t *testing.T) {
+	t.Parallel()
 	_, _, err := buildImagePage(t, `export default function P() {
   return <Image src="https://evil.example/x.png" alt="x" width={10} height={10} />;
 }
@@ -55,6 +56,7 @@ func TestImageRemoteNotAllowedIsBuildError(t *testing.T) {
 }
 
 func TestImageDefaultSizesShrinkBelowRequestedWidth(t *testing.T) {
+	t.Parallel()
 	html, _, err := buildImagePage(t, `export default function P() {
   return <Image src="/small.png" alt="x" width={200} />;
 }

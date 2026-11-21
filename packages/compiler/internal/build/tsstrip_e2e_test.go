@@ -9,6 +9,7 @@ import (
 // TypeScript Krate's own parser could not skip: an enum plus a nested generic
 // annotation used to build "successfully" into an empty root.
 func TestBuildTypeScriptEnumAndNestedGenerics(t *testing.T) {
+	t.Parallel()
 	src := `enum Color { Red = "red" }
 const lookup: Map<string, Set<string>> = new Map();
 

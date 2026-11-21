@@ -6,6 +6,7 @@ import (
 )
 
 func TestSanitizeActionReturn(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("POST", "https://example.com/__krate/action/a1", nil)
 	r.Host = "example.com"
 	cases := map[string]string{

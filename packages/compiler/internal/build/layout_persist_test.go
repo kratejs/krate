@@ -77,6 +77,7 @@ export default function Root({ children }) {
 // lists the chain outermost first, and the layout's hydration code is
 // bracketed by its route scope.
 func TestLayoutBoundaryMarkersAndRouteInfo(t *testing.T) {
+	t.Parallel()
 	root := lpWrite(t, map[string]string{
 		"src/pages/_layout.tsx":      counterLayout,
 		"src/pages/blog/_layout.tsx": "export default function Blog({ children }) { return <section class=\"blog\">{children}</section>; }\n",

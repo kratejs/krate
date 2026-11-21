@@ -82,7 +82,7 @@ async function run() {
 
   await step('capture', async () => {
     const png = await capture();
-    const sig = [0x89, 0x50, 0x4e, 0x47];
+    const sig = [0x89, 0x50, 0x4E, 0x47];
     if (png.length < 100 || sig.some((b, i) => png[i] !== b)) throw new Error(`not a PNG (${png.length} bytes)`);
     return `${png.length} bytes`;
   });

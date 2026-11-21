@@ -10,6 +10,7 @@ import (
 )
 
 func TestExecuteGenerateStaticParams(t *testing.T) {
+	t.Parallel()
 	// Create a temp directory with a TSX file that has generateStaticParams
 	tmpDir := t.TempDir()
 	pagesDir := filepath.Join(tmpDir, "src", "pages")
@@ -64,6 +65,7 @@ export function generateStaticParams() {
 // each supported build-time runtime (node, bun, deno). CI installs Bun and Deno
 // so this is the runtime matrix gate.
 func TestExecuteGenerateStaticParamsRuntime(t *testing.T) {
+	t.Parallel()
 	for _, rt := range []string{"node", "bun", "deno"} {
 		t.Run(rt, func(t *testing.T) {
 			if _, err := exec.LookPath(rt); err != nil {

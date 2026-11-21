@@ -172,8 +172,12 @@ export function middleware(request: Request) {
 `,
 		"src/api/webauthn.ts": `import { verifyRegistration, verifyAuthentication } from "` + imp + `/webauthn.js";
 const fixtures = ` + string(fixtures) + `;
-export function GET() {
-  const results = fixtures.cases.map((c: any) => {
+// One case per request (?case=N), so each stays well inside the request
+// budget under -race; all cases without it.
+export function GET(request: Request) {
+  const n = new URL(request.url).searchParams.get("case");
+  const cases = n === null ? fixtures.cases : [fixtures.cases[Number(n)]];
+  const results = cases.map((c: any) => {
     const common = { origins: [fixtures.origin], rpId: fixtures.rpId, requireUserVerification: true };
     const reg = verifyRegistration({ credential: c.registration, challenge: c.regChallenge, ...common });
     let forgedRejected = false;
@@ -307,22 +311,27 @@ export function GET() {
 
 	t.Run("webauthn signatures verify for ES256, EdDSA and RS256", func(t *testing.T) {
 		a := newAuthHTTP(t, srv.URL)
-		res, body := a.do("GET", "/api/webauthn", "", "")
-		if res.StatusCode != 200 {
-			t.Fatalf("webauthn: %d %s", res.StatusCode, body)
-		}
-		var results []struct {
+		type result struct {
 			Name           string `json:"name"`
 			CredentialID   string `json:"credentialID"`
 			Counter        int    `json:"counter"`
 			UserVerified   bool   `json:"userVerified"`
 			ForgedRejected bool   `json:"forgedRejected"`
 		}
-		if err := json.Unmarshal([]byte(body), &results); err != nil {
-			t.Fatalf("decoding %s: %v", body, err)
+		var results []result
+		for i := 0; i < 3; i++ {
+			res, body := a.do("GET", fmt.Sprintf("/api/webauthn?case=%d", i), "", "")
+			if res.StatusCode != 200 {
+				t.Fatalf("webauthn case %d: %d %s", i, res.StatusCode, body)
+			}
+			var one []result
+			if err := json.Unmarshal([]byte(body), &one); err != nil {
+				t.Fatalf("decoding %s: %v", body, err)
+			}
+			results = append(results, one...)
 		}
 		if len(results) != 3 {
-			t.Fatalf("expected three algorithms, got %s", body)
+			t.Fatalf("expected three algorithms, got %+v", results)
 		}
 		for _, r := range results {
 			if r.CredentialID == "" || r.Counter != 1 || !r.UserVerified || !r.ForgedRejected {

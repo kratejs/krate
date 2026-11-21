@@ -23,6 +23,7 @@ func wsServe(t *testing.T, files map[string]string) (string, string) {
 const wsStorage = `{"name":"@dd/storage","version":"0.0.0","type":"module","main":"src/index.ts"}`
 
 func TestServerBundleResolvesTsconfigPaths(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	base, root := wsServe(t, map[string]string{
 		"tsconfig.base.json":              `{"compilerOptions":{"strict":true}}`,
@@ -45,6 +46,7 @@ export default async function Home() { await Promise.resolve(); return <main><Ms
 }
 
 func TestServerBundleExternalsResolveFromWorkspacePackage(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	base, _ := wsServe(t, map[string]string{
 		"packages/storage/package.json":                       wsStorage,
@@ -62,6 +64,7 @@ export default async function Home() { await Promise.resolve(); return <main>{st
 }
 
 func TestServerBundleBundledCommonJSCanRequireJSXRuntime(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	base, _ := wsServe(t, map[string]string{
 		"apps/web/node_modules/fake-script/package.json": `{"name":"fake-script","version":"1.0.0","main":"index.js"}`,

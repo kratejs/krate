@@ -33,7 +33,6 @@ func lazySharedProject(t *testing.T) (string, *config.Config) {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
 	realReactFixtureFrom(t, root, repo)
-	t.Chdir(root)
 	writeProjectFile(t, root, "src/lib/counter.ts", `let n = 0;
 export const next = () => {
 	if (n < 0) throw new Error('lazy-counter-mark');
@@ -98,11 +97,12 @@ export default function Page() { return <main><h1>home</h1><Scene /><Count /></m
 // loads with import() share every dependency: each ships in exactly one
 // emitted file, and no standalone copy of the import() target is written.
 func TestIslandDynamicImportShared(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
 	}
 	root, cfg := lazySharedProject(t)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	found := map[string][]string{}
@@ -132,6 +132,7 @@ func TestIslandDynamicImportShared(t *testing.T) {
 // TestBrowserIslandDynamicImportShared: the four next() calls (two islands,
 // each once statically and once from the import()ed module) hit one counter.
 func TestBrowserIslandDynamicImportShared(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -144,7 +145,7 @@ func TestBrowserIslandDynamicImportShared(t *testing.T) {
 		t.Fatal(err)
 	}
 	root, cfg := lazySharedProject(t)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	if !canStopInProcessServer {

@@ -54,6 +54,7 @@ func wantCode(t *testing.T, err error, code diag.Code, contains string) {
 }
 
 func TestUseClientInServerPageBuildsBoundary(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/Counter.tsx": counterClientSrc,
 		"src/pages/index.tsx": `import Counter from "../components/Counter";
@@ -95,6 +96,7 @@ export default async function Home() {
 }
 
 func TestServerOnlyModuleInClientBoundaryIsAnError(t *testing.T) {
+	t.Parallel()
 	b, projRoot := scProject(t, map[string]string{
 		"src/db.ts": `import "server-only";
 export const secret = "s3cret";`,
@@ -112,6 +114,7 @@ export default async function Home() { await Promise.resolve(); return <main><Le
 // and SSR sidecar and clicks the client counter it renders in a browser.
 // Requires KRATE_BROWSER (like TestBrowserConformance).
 func TestUseClientIslandBrowser(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the client island browser test")
@@ -191,6 +194,7 @@ export default function Row(p: any) {
 // Set, undefined, NaN, ...) from an async server page to a client component
 // and checks the server render and, with KRATE_BROWSER set, the hydrated client.
 func TestClientPropsCarryFlightTypes(t *testing.T) {
+	t.Parallel()
 	if !canStopInProcessServer {
 		t.Skip("in-process server needs a unix host")
 	}
@@ -269,6 +273,7 @@ export default async function Home() {
 }
 
 func TestClientModuleStarReexportExpandsRuntimeExports(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{
 		"src/components/viewer/types.ts":   "export interface ViewerProps { label: string }\nexport type Mode = 'a' | 'b';\n",
 		"src/components/viewer/helpers.ts": "export function fmt(s: string) { return s.toUpperCase(); }\nexport const MAX = 3;\nexport default 1;\n",
@@ -345,6 +350,7 @@ export default async function Home() { await 1; return <main><A /></main>; }`,
 // initial state is in the HTML, its chunk exists) instead of evaluating its
 // hooks, and with KRATE_BROWSER it hydrates.
 func TestUseClientPageUnderAsyncLayoutIsABoundary(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/(app)/_layout.tsx": `export default async function Layout({ children }: { children: any }) {
   await Promise.resolve();
@@ -414,6 +420,7 @@ export default function Settings() {
 // client component imports; server-only modules neither enter them nor
 // warn about process.env.
 func TestServerOnlyCodeStaysOutOfClientBundles(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"node_modules/nativepkg/package.json": `{"name":"nativepkg","version":"1.0.0","main":"index.js"}`,
 		"node_modules/nativepkg/index.js": `const fs = require("node:fs");
@@ -454,7 +461,7 @@ export default async function Home() {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	out, err := captureOutput(b.BuildAll)
+	out, err := captureBuild(b)
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -476,7 +483,9 @@ export default async function Home() {
 	var counterChunks int
 	for _, p := range js {
 		data, _ := os.ReadFile(p)
-		for _, bad := range []string{"nativepkg", "node:", "addon.node", "createHash", "readFileSync", "hashIt", "drawn-"} {
+		// A node: module specifier is quoted; a bare node: is also an object
+		// key ({node: n}) in the runtime's island swap.
+		for _, bad := range []string{"nativepkg", `"node:`, "addon.node", "createHash", "readFileSync", "hashIt", "drawn-"} {
 			if strings.Contains(string(data), bad) {
 				t.Errorf("%s holds server-only code (%q)", filepath.Base(p), bad)
 			}
@@ -516,6 +525,7 @@ export default async function Home() {
 // reference only; the action's body, its secret and node:crypto stay out of
 // every emitted file.
 func TestUseServerBodyStaysOutOfClientChunks(t *testing.T) {
+	t.Parallel()
 	client := func(imp string) string {
 		return `"use client";
 import { useState } from "react";
@@ -545,7 +555,7 @@ export async function saveDraft(text: string) {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	out, err := captureOutput(b.BuildAll)
+	out, err := captureBuild(b)
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -555,7 +565,7 @@ export async function saveDraft(text: string) {
 			return nil
 		}
 		data, _ := os.ReadFile(p)
-		for _, bad := range []string{"TOPSECRET", "createHash", "node:"} {
+		for _, bad := range []string{"TOPSECRET", "createHash", `"node:`} {
 			if strings.Contains(string(data), bad) {
 				t.Errorf("%s holds server-only code (%q)", p, bad)
 			}
@@ -575,6 +585,7 @@ export async function saveDraft(text: string) {
 // slot) to a client component. The slots render on the server, are in the SSR
 // HTML, and survive hydration in a browser (KRATE_BROWSER).
 func TestJSXPropsReachClientComponent(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	b, root := scProject(t, map[string]string{
 		"src/components/Shell.tsx": `"use client";
@@ -656,6 +667,7 @@ export default async function Home() {
 // preloadModule work in a server component and in a client component that the
 // server renders, and put their tags (once each) in the head of the response.
 func TestReactDOMResourceHints(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	b, root := scProject(t, map[string]string{
 		"src/server/hints.ts": `import "server-only";
@@ -723,6 +735,7 @@ export default async function Home() {
 // form bound to useActionState reports its pending status through
 // useFormStatus. Requires KRATE_BROWSER.
 func TestUseClientReact19HooksBrowser(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the client hooks browser test")
@@ -825,6 +838,7 @@ export default async function Home() {
 // in and KR7116 stays quiet (the same pair on a static page still warns, see
 // TestExportClashNamesProjectRelativeFiles).
 func TestServerTreeClientModulesSameExportNameNoClash(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/a/Bar.tsx": `"use client";
 import { useState } from "react";
@@ -843,7 +857,7 @@ export default async function Home() {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	out, err := captureOutput(b.BuildAll)
+	out, err := captureBuild(b)
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}

@@ -1,5 +1,5 @@
 import './accordion.css';
-import { createScope, createScopeFlags, createCSSGroup, createCSSFlags, type CSSScope, type CSSFlagsScope } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSGroup, createCSSFlags } from '@krate/runtime';
 
 const AccordionCtx = createScope<string | null>();
 const AccordionMultiCtx = createScopeFlags<string>();

@@ -9,6 +9,7 @@ import (
 )
 
 func TestPrivateDir(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 
 	own := filepath.Join(base, "own")
@@ -41,6 +42,7 @@ func TestPrivateDir(t *testing.T) {
 // A directory owned by someone else (pre-created in the shared temp dir) must
 // not be used for the socket. /proc is owned by root and is not ours.
 func TestPrivateDirRefusesForeignOwner(t *testing.T) {
+	t.Parallel()
 	if os.Getuid() == 0 {
 		t.Skip("running as root")
 	}

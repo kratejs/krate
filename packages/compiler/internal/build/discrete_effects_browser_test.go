@@ -17,6 +17,7 @@ import (
 // reported the prop flip (#1d3fbb -> #ffd100 -> #1d3fbb) as user input, which
 // lost a colour the Genesis editor autosaved.
 func TestBrowserDiscreteEventEffects(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	b, root := scProject(t, map[string]string{
 		"src/components/repro.tsx": `'use client';
@@ -66,7 +67,7 @@ export default async function Page() { await Promise.resolve(); return <main><Re
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+	if out, err := captureBuild(b); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))

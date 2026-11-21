@@ -1,5 +1,5 @@
 import './radio-group.css';
-import { createScope, createScopeFlags, createCSSChoice, type CSSScope } from '@krate/runtime';
+import { createScope, createCSSChoice } from '@krate/runtime';
 
 const RadioGroupCtx = createScope<string>();
 

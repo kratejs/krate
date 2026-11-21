@@ -10,6 +10,7 @@ import (
 // A pasted Figma/Illustrator SVG carries namespace declarations and
 // camelCase React-style names; both spellings must render as XML names.
 func TestPastedSVGNamespacedAttributes(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/pages/index.tsx": `export default function Home() {
   return (

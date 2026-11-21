@@ -10,6 +10,7 @@ import (
 // Two modules that a barrel re-exports both export "dup". An importer through a
 // barrel and a direct importer each get their own.
 func TestStuckExportsKeepTheirOwnBinding(t *testing.T) {
+	t.Parallel()
 	html, logged := buildPlain(t, map[string]string{
 		"src/lib/a.ts":        "export function dup() { return 'AAA'; }\n",
 		"src/lib/b.ts":        "export function dup() { return 'BBB'; }\n",
@@ -30,6 +31,7 @@ func TestStuckExportsKeepTheirOwnBinding(t *testing.T) {
 // A clash that cannot be renamed is reported once per build, not once per page
 // that bundles it (static pages, a generateStaticParams page and the rest).
 func TestExportCollisionWarnsOncePerBuild(t *testing.T) {
+	t.Parallel()
 	page := func(name string) string {
 		return "import { ra, rb } from '../lib/ab';\nexport default function " + name + "() { return <p>{ra}{rb}</p>; }\n"
 	}

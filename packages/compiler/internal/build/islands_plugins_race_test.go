@@ -14,6 +14,7 @@ import (
 // and router-hooks plugins must not share mutable state between those calls
 // (run with -race: an unguarded lazy assignment was a data race in CI).
 func TestCompatPluginsResolveConcurrently(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Skip(err)

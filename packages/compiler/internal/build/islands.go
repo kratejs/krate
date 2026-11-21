@@ -211,7 +211,7 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 			}.WithCode(diag.CodeIslandAsset)
 		}
 		if v := installedPreactVersion(b.Root); v != "" && versionLess(v, "10.20.0") {
-			fmt.Fprintf(os.Stderr, "  %sWarning:%s preact %s is older than 10.20.0; islands use hooks and compat APIs that older releases can break\n", cYellow, cReset, v)
+			fmt.Fprintf(b.stderr(), "  %sWarning:%s preact %s is older than 10.20.0; islands use hooks and compat APIs that older releases can break\n", cYellow, cReset, v)
 		}
 	}
 	var boot strings.Builder
@@ -296,11 +296,11 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 		}
 
 		if e.ClientOnly || (!e.ReactIsland && isCSSInJSPackage(e.Source)) {
-			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" (<"+e.Local+">) is client-only: its CSS-in-JS library creates styles in the browser", "use CSS modules or Tailwind for content that must be styled before JavaScript loads")
+			b.printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" (<"+e.Local+">) is client-only: its CSS-in-JS library creates styles in the browser", "use CSS modules or Tailwind for content that must be styled before JavaScript loads")
 			continue
 		}
 		if !e.SSRPropsKnown {
-			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" (<"+e.Local+">) stays client-only: a bridged prop has no build-time initial value", "pass build-time initial values, or keep the island client-only intentionally")
+			b.printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" (<"+e.Local+">) stays client-only: a bridged prop has no build-time initial value", "pass build-time initial values, or keep the island client-only intentionally")
 			continue
 		}
 		ssrSrc := b.islandSSRSource(e, used, prov)
@@ -314,7 +314,7 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 				// separate Preact trees and do not see it.
 				hint = "a missing provider must be rendered inside the island (in the module that uses the hook), not in a layout; " + hint
 			}
-			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" stays client-only: server render failed: "+err.Error(), hint)
+			b.printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" stays client-only: server render failed: "+err.Error(), hint)
 			continue
 		}
 		ssrHTML[e.ID] = html
@@ -420,15 +420,15 @@ func islandBootLine(e irtree.ExternalComponent, url string) string {
 
 // printIslandWarning emits a source-located island diagnostic. The build
 // package owns the asset failure, but the source position comes from the IR.
-func printIslandWarning(e irtree.ExternalComponent, code diag.Code, msg, hint string) {
+func (b *Builder) printIslandWarning(e irtree.ExternalComponent, code diag.Code, msg, hint string) {
 	msg = strings.Replace(msg, "(<"+reactIslandPageLocal+">)", "(the page component)", 1)
 	d := diag.Diagnostic{
 		File: e.File, Line: e.Line, Col: e.Col,
 		Message: msg, Hint: hint, Severity: diag.SeverityWarning,
 	}.WithCode(code)
-	fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n", cYellow, cReset, d.Error())
+	fmt.Fprintf(b.stderr(), "  %sWarning:%s %s\n", cYellow, cReset, d.Error())
 	if d.Hint != "" {
-		fmt.Fprintf(os.Stderr, "      hint: %s\n", d.Hint)
+		fmt.Fprintf(b.stderr(), "      hint: %s\n", d.Hint)
 	}
 }
 

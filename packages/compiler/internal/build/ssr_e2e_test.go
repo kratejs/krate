@@ -23,6 +23,7 @@ import (
 // server are injected into the page component's props at render time - not
 // dropped as the placeholder/officially-empty props.
 func TestSSRDynamicRouteParamsE2E(t *testing.T) {
+	t.Parallel()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		requireE2E(t, "node not available: %v", err)
@@ -111,7 +112,7 @@ export default function VideoPage(props) {
 		t.Fatal(err)
 	}
 
-	staged := stageServerRenderer(repoRoot, outDir)
+	staged := stageServerRenderer(os.Stderr, repoRoot, outDir)
 	if staged == "" {
 		t.Fatal("stageServerRenderer returned empty path")
 	}

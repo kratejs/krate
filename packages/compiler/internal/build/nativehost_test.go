@@ -62,6 +62,7 @@ func readTree(t *testing.T, dir string) map[string]string {
 }
 
 func TestNativeBuildSplitsHostCode(t *testing.T) {
+	t.Parallel()
 	root, b, err := buildNativeFixture(t, map[string]string{
 		"src/lib/sync.host.ts": "export async function syncNow() { return 'HOSTONLYSECRET'; }\n",
 		"src/pages/index.tsx": `import { syncNow } from "../lib/sync.host";

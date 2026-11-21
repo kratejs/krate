@@ -8,7 +8,6 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/css"
-	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
 
@@ -25,7 +24,7 @@ func (b *Builder) dceCSSEnabled() bool {
 	if !b.Cfg.Dce.CSSEnabled() {
 		return false
 	}
-	if plugin.HasPerPageHooks() || hasCommunityPlugins(b.Cfg) {
+	if b.plugins.HasPerPageHooks() || hasCommunityPlugins(b.Cfg) {
 		return false
 	}
 	return true

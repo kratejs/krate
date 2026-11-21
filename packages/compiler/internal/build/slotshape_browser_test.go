@@ -19,6 +19,7 @@ import (
 // other keep their order and focus when the component re-renders, and a slot
 // the component moves takes its nodes along.
 func TestBrowserSlotDOMShape(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	b, root := scProject(t, map[string]string{
 		"src/components/button.tsx": `'use client';
@@ -68,7 +69,7 @@ export default async function Page() {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+	if out, err := captureBuild(b); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	base, err := startKrateServer(t, root, b.Cfg)

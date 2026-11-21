@@ -30,23 +30,23 @@ describe("cbor", () => {
     expect(Array.from(encodeCbor(-1))).toEqual([0x20]);
     expect(Array.from(encodeCbor(-257))).toEqual([0x39, 0x01, 0x00]);
     expect(Array.from(encodeCbor("a"))).toEqual([0x61, 0x61]);
-    expect(Array.from(encodeCbor(new Map()))).toEqual([0xa0]);
+    expect(Array.from(encodeCbor(new Map()))).toEqual([0xA0]);
   });
 
   it("reports how many bytes it consumed", () => {
     const first = encodeCbor(new Map<any, any>([[1, 2]]));
-    const joined = new Uint8Array([...first, 0xff, 0xff]);
-    expect(decodeCbor(joined).length).toBe(first.length);
+    const joined = new Uint8Array([...first, 0xFF, 0xFF]);
+    expect(decodeCbor(joined)).toHaveLength(first.length);
   });
 
   it("rejects truncated, indefinite, tagged and over-deep input", () => {
     expect(() => decodeCbor(new Uint8Array([0x62, 0x61]))).toThrow();
-    expect(() => decodeCbor(new Uint8Array([0x5f, 0xff]))).toThrow();
-    expect(() => decodeCbor(new Uint8Array([0xc1, 0x00]))).toThrow();
-    expect(() => decodeCbor(new Uint8Array([0xfb, 0, 0, 0, 0, 0, 0, 0, 0]))).toThrow();
+    expect(() => decodeCbor(new Uint8Array([0x5F, 0xFF]))).toThrow();
+    expect(() => decodeCbor(new Uint8Array([0xC1, 0x00]))).toThrow();
+    expect(() => decodeCbor(new Uint8Array([0xFB, 0, 0, 0, 0, 0, 0, 0, 0]))).toThrow();
     expect(() => decodeCbor(new Uint8Array([]))).toThrow();
     expect(() => decodeCbor(new Uint8Array(40).fill(0x81))).toThrow("too deep");
-    expect(() => decodeCbor(new Uint8Array([0x99, 0xff, 0xff]))).toThrow("too large");
+    expect(() => decodeCbor(new Uint8Array([0x99, 0xFF, 0xFF]))).toThrow("too large");
   });
 });
 

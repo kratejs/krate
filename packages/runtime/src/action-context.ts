@@ -61,7 +61,7 @@ function withNextCookies(ctx: ActionContext): ActionContext {
     const cookies: ActionCookies = {
       get: (name) => {
         const v = (jar.get as (n: string) => unknown)(name);
-        if (v === undefined || v === null) return undefined;
+        if (v === undefined || v === null) return;
         return typeof v === 'object' ? (v as { name: string; value: string }) : { name, value: String(v) };
       },
       getAll: () => jar.getAll(),

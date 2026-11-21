@@ -121,6 +121,7 @@ var nodeFrameScenarios = map[string]struct {
 }
 
 func TestFetchNodeRegionsFormatsAgree(t *testing.T) {
+	t.Parallel()
 	for name, sc := range nodeFrameScenarios {
 		t.Run(name, func(t *testing.T) {
 			nd := fetchFrom(t, newFrameServer(t, "ndjson", sc.frames), sc.regions)
@@ -137,6 +138,7 @@ func TestFetchNodeRegionsFormatsAgree(t *testing.T) {
 }
 
 func TestFetchNodeRegionsRequestBody(t *testing.T) {
+	t.Parallel()
 	fs := newFrameServer(t, "binary", []regionFrame{{Type: "end"}})
 	fetchFrom(t, fs, 1)
 	var req struct {
@@ -159,6 +161,7 @@ func TestFetchNodeRegionsRequestBody(t *testing.T) {
 }
 
 func TestFetchNodeRegionsCutStreamMarksRenderErr(t *testing.T) {
+	t.Parallel()
 	frames := []regionFrame{
 		{Type: "region", ID: "r0", Status: 200, HTML: "<p>one</p>"},
 		{Type: "region", ID: "r1", Status: 200, HTML: "<p>two</p>"},
@@ -176,6 +179,7 @@ func TestFetchNodeRegionsCutStreamMarksRenderErr(t *testing.T) {
 }
 
 func TestFetchNodeRegionsCorruptFrameMarksRenderErr(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", regionwire.ContentType+"; v=1")
 		out, _ := regionwire.AppendFrame(nil, &regionFrame{Type: "region", ID: "r0", Status: 200, HTML: "ok"})
@@ -193,6 +197,7 @@ func TestFetchNodeRegionsCorruptFrameMarksRenderErr(t *testing.T) {
 }
 
 func TestStreamNodeRegionEventsFormats(t *testing.T) {
+	t.Parallel()
 	frames := []regionFrame{
 		{Type: "region", ID: "r0", Status: 200, HTML: "<p>a & b</p>", Head: "<meta>"},
 		{Type: "region", ID: "r1", Status: 200, HTML: "<p>c</p>"},
@@ -219,6 +224,7 @@ func TestStreamNodeRegionEventsFormats(t *testing.T) {
 }
 
 func TestGoRenderContextFormats(t *testing.T) {
+	t.Parallel()
 	frames := []regionFrame{
 		{Type: "region", ID: "a", Status: 200, HTML: "<b>1 & 2 < 3</b>", Vary: &goVaryFrame{Query: []string{"q"}}},
 		{Type: "region", ID: "b", Status: 500, Error: "kaboom"},
@@ -256,6 +262,7 @@ func TestGoRenderContextFormats(t *testing.T) {
 }
 
 func TestGoRenderContextVaryAndCache(t *testing.T) {
+	t.Parallel()
 	frames := []regionFrame{{Type: "region", ID: "a", Status: 200, HTML: "<b>x</b>", Vary: &goVaryFrame{Query: []string{"q"}, Full: false}}}
 	for _, mode := range []string{"ndjson", "binary"} {
 		t.Run(mode, func(t *testing.T) {
@@ -280,6 +287,7 @@ func TestGoRenderContextVaryAndCache(t *testing.T) {
 }
 
 func TestAppendJSONStringMatchesEncodingJSON(t *testing.T) {
+	t.Parallel()
 	for _, s := range []string{"", "plain", `a"b\c`, "<a href='x'>&amp;</a>", "line\nbreak\r\ttab\x00\x01\x1f", "café 中 \U0001F600", "sep  ", "bad\xffutf\xc3", "\x7f del"} {
 		var want string
 		{
@@ -306,6 +314,7 @@ func TestAppendJSONStringMatchesEncodingJSON(t *testing.T) {
 }
 
 func TestNodeRegionsRequestJSON(t *testing.T) {
+	t.Parallel()
 	req := nodeRegionsRequest{
 		Route: "/a/[id]", URL: "/a/1?x=<y>", Method: "GET",
 		Headers: map[string]string{"Cookie": `a="b"`, "X-N": "\n"},
@@ -330,6 +339,7 @@ func TestNodeRegionsRequestJSON(t *testing.T) {
 }
 
 func TestGoRegionsRequestJSON(t *testing.T) {
+	t.Parallel()
 	in := []goRenderRegion{{ID: "a", Name: "N", Props: `{"p":"<1>"}`, Request: `{"q":1}`, Revalidate: 30}, {ID: "b", Name: "M", Props: "{}"}}
 	var out struct {
 		Regions []goRenderRegion `json:"regions"`

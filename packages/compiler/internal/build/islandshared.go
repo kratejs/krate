@@ -1712,7 +1712,7 @@ func (b *Builder) warnDuplicatedIslandModules(metas []*islandMetafile, globals [
 		})
 	}
 	if len(ds) > 0 {
-		printWarningsOnce(os.Stderr, ds)
+		b.printWarningsOnce(ds)
 	}
 }
 

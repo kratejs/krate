@@ -206,24 +206,24 @@ export function maskIslands(html: string): string {
   for (;;) {
     const a = html.indexOf(OPEN_TAG, i);
     const h = hostAt(html, i);
-    if (a < 0 && h < 0) return out + html.slice(i);
-    if (h >= 0 && (a < 0 || h < a)) {
+    if (a === -1 && h < 0) return out + html.slice(i);
+    if (h >= 0 && (a === -1 || h < a)) {
       const e = html.indexOf('</krate-island>', h);
-      if (e < 0) return out + html.slice(i);
+      if (e === -1) return out + html.slice(i);
       out += html.slice(i, h) + '<!--i:' + (/data-module="([^"]*)"/.exec(html.slice(h, html.indexOf('>', h))) || ['', ''])[1] + '-->';
       i = e + 15;
       continue;
     }
     const headEnd = html.indexOf('-->', a);
-    if (headEnd < 0) return out + html.slice(i);
+    if (headEnd === -1) return out + html.slice(i);
     const p = parse(html.slice(a + OPEN_TAG.length, headEnd));
     let j = headEnd + 3;
     let d = 0;
     for (;;) {
       const o = html.indexOf(OPEN_TAG, j);
       const c = html.indexOf(CLOSE_TAG, j);
-      if (c < 0) return out + html.slice(i);
-      if (o >= 0 && o < c) {
+      if (c === -1) return out + html.slice(i);
+      if (o !== -1 && o < c) {
         d++;
         j = o + OPEN_TAG.length;
         continue;

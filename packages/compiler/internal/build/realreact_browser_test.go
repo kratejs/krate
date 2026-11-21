@@ -16,6 +16,7 @@ import (
 // page without such an island loads no React. It needs KRATE_BROWSER like the
 // other browser gates.
 func TestBrowserRealReactIsland(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -47,12 +48,11 @@ func TestBrowserRealReactIsland(t *testing.T) {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
-	t.Chdir(root)
 	realReactFixtureFrom(t, root, repo)
 	realReactSceneFiles(t, root)
 	realReactAsyncFiles(t, root)
 	realReactClientFiles(t, root)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	serverBase, err := startKrateServer(t, root, cfg)
@@ -75,6 +75,7 @@ func TestBrowserRealReactIsland(t *testing.T) {
 // hydrates without console errors, and clicking the link navigates on the
 // client: a marker set on window survives the navigation.
 func TestBrowserRealReactIslandTags(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -106,7 +107,6 @@ func TestBrowserRealReactIslandTags(t *testing.T) {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
 	realReactFixtureFrom(t, root, repo)
-	t.Chdir(root)
 	writeProjectFile(t, root, "src/components/Scene.tsx", `'use client';
 import { Canvas, Rect } from 'fake-canvas';
 export default function Scene() {
@@ -126,7 +126,7 @@ export default function Page() { return <main><h1>home</h1><Scene /></main>; }
 	writeProjectFile(t, root, "src/pages/other.tsx", `export default function Page() { return <main><h1 id="other">other page</h1></main>; }
 `)
 	writeProjectFile(t, root, "public/a.png", "\x89PNG\r\n\x1a\n")
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	if !canStopInProcessServer {
@@ -182,7 +182,6 @@ func TestBrowserClientProcessEnv(t *testing.T) {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
 	realReactFixtureFrom(t, root, repo)
-	t.Chdir(root)
 	writeProjectFile(t, root, "node_modules/envlib/package.json", `{"name":"envlib","version":"1.0.0","main":"index.js"}`)
 	writeProjectFile(t, root, "node_modules/envlib/index.js", `import { jsx } from 'react/jsx-runtime';
 import { useState } from 'react';
@@ -222,7 +221,7 @@ export default function Scene() {
 import { Plain } from 'envlib';
 export default function Page() { return <main><h1>home</h1><Scene /><Plain text="p" /></main>; }
 `)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if out, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	chunks, _ := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "*.js"))
@@ -257,6 +256,7 @@ export default function Page() { return <main><h1>home</h1><Scene /><Plain text=
 // see the provider's context: the server renders the Preact one inside it,
 // both tooltips open on hover, and a click in the provider updates both.
 func TestBrowserIslandContextFromLayoutProvider(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -352,7 +352,7 @@ export default async function Page() {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+	if out, err := captureBuild(b); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	base, err := startKrateServer(t, root, b.Cfg)
@@ -377,6 +377,7 @@ export default async function Page() {
 // Radix asChild triggers (tooltip, dropdown menu, dialog); each must open
 // without errors, and a useRef on the Button must be the button element.
 func TestBrowserIslandFunctionComponentRef(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -448,7 +449,7 @@ export default function Page() {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+	if out, err := captureBuild(b); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	base, err := startKrateServer(t, root, b.Cfg)
@@ -469,6 +470,7 @@ export default function Page() {
 // renders them in a Preact island and a real-React island: lazy() needs a
 // { default } module, so migrate normalizes the loader result.
 func TestBrowserMigratedDynamicLoaders(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -546,14 +548,13 @@ export default function Home() { return <main><Real /><Pre /></main>; }`,
 		t.Fatal(err)
 	}
 	prepareMigratedRuntime(t, root)
-	t.Chdir(root)
 	cfg, err := config.Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	b := New(root, cfg)
 	b.SkipQualityChecks = true
-	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+	if out, err := captureBuild(b); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	if !canStopInProcessServer {

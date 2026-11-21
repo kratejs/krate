@@ -16,11 +16,13 @@ import (
 
 const afterRoute = `
 import { after } from "RUNTIME_AFTER";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 export async function GET(request) {
   const marker = request.nextUrl.searchParams.get("marker");
+  // The task waits until the test has seen the response (marker.go), so a
+  // task that held the response back would never let it arrive.
   after(async () => {
-    await new Promise((r) => setTimeout(r, 150));
+    for (let i = 0; i < 400 && !existsSync(marker + ".go"); i++) await new Promise((r) => setTimeout(r, 25));
     writeFileSync(marker, "ran");
   });
   after(() => { throw new Error("boom"); });
@@ -30,6 +32,7 @@ export async function GET(request) {
 `
 
 func TestAPISidecarAfterRunsAfterResponse(t *testing.T) {
+	t.Parallel()
 	for _, runtime := range []string{"node", "bun"} {
 		t.Run(runtime, func(t *testing.T) {
 			if _, err := exec.LookPath(runtime); err != nil {
@@ -103,9 +106,10 @@ func TestAPISidecarAfterRunsAfterResponse(t *testing.T) {
 			marker := filepath.Join(dir, "marker")
 			url := fmt.Sprintf("http://127.0.0.1:%d/api/later?marker=%s", port, marker)
 			var body string
+			client := &http.Client{Timeout: 5 * time.Second}
 			deadline := time.Now().Add(15 * time.Second)
 			for {
-				resp, err := http.Get(url)
+				resp, err := client.Get(url)
 				if err == nil {
 					b, _ := io.ReadAll(resp.Body)
 					resp.Body.Close()
@@ -122,6 +126,9 @@ func TestAPISidecarAfterRunsAfterResponse(t *testing.T) {
 			}
 			if _, err := os.Stat(marker); err == nil {
 				t.Fatal("after() task ran before the response was sent")
+			}
+			if err := os.WriteFile(marker+".go", nil, 0o644); err != nil {
+				t.Fatal(err)
 			}
 			for _, f := range []string{marker, marker + ".second"} {
 				ok := false

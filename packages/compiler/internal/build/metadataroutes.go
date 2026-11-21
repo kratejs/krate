@@ -360,7 +360,7 @@ func (b *Builder) buildImageRoute(f metaRouteFile, pages []string, bnd *bundler.
 		d := diag.Diagnostic{File: b.display(f.Path), Code: diag.CodeImageRouteParams, Severity: diag.SeverityWarning,
 			Message: filepath.Base(f.Path) + " is in a dynamic segment (" + f.URLDir + ") but the segment's page has no generateStaticParams, so no image was built",
 			Hint:    "export generateStaticParams from the page of " + f.URLDir + "; one image is built per entry"}
-		printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
+		b.printWarningsOnce([]diag.Diagnostic{d})
 		return nil
 	}
 	out, err := b.runBootstrapBundle(abs, imageRouteBootstrap(abs, b.Root, sets), "imageroute", bnd, nil)

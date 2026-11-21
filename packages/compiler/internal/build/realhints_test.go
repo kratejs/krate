@@ -6,6 +6,7 @@ import (
 )
 
 func TestBogusHintURL(t *testing.T) {
+	t.Parallel()
 	for tag, want := range map[string]bool{
 		`<link rel="preload" href="/x.wasm" as="fetch">`:            false,
 		`<script type="module" src="/m.js" async></script>`:         false,
@@ -24,6 +25,7 @@ func TestBogusHintURL(t *testing.T) {
 // once, and an island whose render gave only head content keeps its plain
 // placeholder.
 func TestInjectIslandSSRHints(t *testing.T) {
+	t.Parallel()
 	hint := `<link rel="preload" href="/x.wasm" as="fetch">`
 	page := `<div data-krate-island="island-1" style="display:contents"></div><div data-krate-island="island-2" style="display:contents"></div>`
 	html, head := injectIslandSSR(page, map[string]string{
@@ -40,6 +42,7 @@ func TestInjectIslandSSRHints(t *testing.T) {
 }
 
 func TestRequestHeadMarkers(t *testing.T) {
+	t.Parallel()
 	if got := requestHeadMarkers("<p>a</p>"); got != "<p>a</p>" {
 		t.Errorf("markup without head changed: %s", got)
 	}
@@ -52,6 +55,7 @@ func TestRequestHeadMarkers(t *testing.T) {
 // TestRealBoundaryStubHints: an export with build-time hints records them
 // when it renders; one without keeps the plain fallback.
 func TestRealBoundaryStubHints(t *testing.T) {
+	t.Parallel()
 	cb := ClientBoundary{ModuleID: "m", ChunkURL: "/chunks/c.js", Exports: []string{"default", "Other"}, Real: true,
 		Hints: map[string][]string{"default": {`<link rel="preload" href="/x.wasm" as="fetch">`}}}
 	stub := realBoundaryStub(cb)

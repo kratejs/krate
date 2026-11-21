@@ -9,7 +9,7 @@ import (
 )
 
 func TestDiskCacheReplayAndInvalidation(t *testing.T) {
-	t.Setenv("KRATE_NO_BUILD_CACHE", "")
+	t.Parallel()
 
 	root := t.TempDir()
 	const indexPage = `import { createSignal } from '@krate/runtime';
@@ -28,6 +28,8 @@ export default function Page() {
 
 	snapshot := func() (map[string][]byte, *Builder) {
 		b := New(root, cfg)
+		// On even when the shell sets KRATE_NO_BUILD_CACHE.
+		b.diskCache.enabled = true
 		if err := b.BuildAll(); err != nil {
 			t.Fatalf("BuildAll: %v", err)
 		}

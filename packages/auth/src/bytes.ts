@@ -43,11 +43,11 @@ export function b64urlDecode(input: string): Uint8Array {
   for (let i = 0; i < clean.length; i++) {
     const v = B64_LOOKUP[clean.charAt(i)];
     if (v === undefined) throw new Error("invalid base64url input");
-    buffer = ((buffer << 6) | v) & 0xffffff;
+    buffer = ((buffer << 6) | v) & 0xFFFFFF;
     bits += 6;
     if (bits >= 8) {
       bits -= 8;
-      out[o++] = (buffer >> bits) & 0xff;
+      out[o++] = (buffer >> bits) & 0xFF;
     }
   }
   return out.subarray(0, o);

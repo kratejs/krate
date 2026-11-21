@@ -150,7 +150,7 @@ func (b *Builder) scanRuntimeCompat(unit, metafile, option string) *[]string {
 	ds := jsruntime.CompatDiagnostics(scan, b.Root, option)
 	b.setRuntimeCompatWarnings(unit, ds)
 	if len(ds) > 0 {
-		printWarningsOnce(os.Stderr, ds)
+		b.printWarningsOnce(ds)
 	}
 	if !scan.Complete {
 		return nil

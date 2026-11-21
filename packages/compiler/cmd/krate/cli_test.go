@@ -35,6 +35,7 @@ func runKrate(t *testing.T, args ...string) (int, string) {
 }
 
 func TestDoctorExitStatus(t *testing.T) {
+	t.Parallel()
 	good := writeProjectConfig(t, "export default { outDir: 'dist' }\n")
 	if code, out := runKrate(t, "doctor", good); code != 0 {
 		t.Errorf("healthy project: exit %d\n%s", code, out)

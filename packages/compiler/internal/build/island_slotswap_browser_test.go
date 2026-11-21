@@ -177,6 +177,7 @@ export default function Home() {
 // every mounted island's markers are well formed in the document with no
 // server-children markers left inside.
 func TestBrowserKeptProviderSlotChangesShape(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -194,7 +195,7 @@ func TestBrowserKeptProviderSlotChangesShape(t *testing.T) {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+	if out, err := captureBuild(b); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	base, err := startKrateServer(t, root, b.Cfg)

@@ -106,6 +106,7 @@ func (f *flushRecorder) Flush() {
 }
 
 func TestStreamRegionPageSplicesFrames(t *testing.T) {
+	t.Parallel()
 	absOut := t.TempDir()
 	route := "/live"
 

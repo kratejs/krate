@@ -8,6 +8,7 @@ import (
 // TestWebContentTypesArePinned guards against the OS table: on Windows the
 // registry gave .js without a charset and nothing for .woff2.
 func TestWebContentTypesArePinned(t *testing.T) {
+	t.Parallel()
 	for ext, want := range map[string]string{
 		".js":    "text/javascript; charset=utf-8",
 		".woff2": "font/woff2",

@@ -123,19 +123,12 @@ export default function Intro() { return <p>intro</p>; }`,
 	}
 }
 
-func resetMetadataRuns() {
-	metadataRuns.Layout.Store(0)
-	metadataRuns.Page.Store(0)
-	metadataRuns.Data.Store(0)
-	metadataRuns.Batch.Store(0)
-	metadataRuns.Chain.Store(0)
-}
-
-func withMetadataFastPath(on bool, fn func()) {
-	prev := metadataFastPath
-	metadataFastPath = on
-	defer func() { metadataFastPath = prev }()
-	fn()
+func resetMetadataRuns(b *Builder) {
+	b.metaRuns.Layout.Store(0)
+	b.metaRuns.Page.Store(0)
+	b.metaRuns.Data.Store(0)
+	b.metaRuns.Batch.Store(0)
+	b.metaRuns.Chain.Store(0)
 }
 
 // distHeads maps every built HTML file to its <head>.
@@ -161,6 +154,7 @@ func distHeads(t *testing.T, root string) map[string]string {
 // The per-page results through the faster paths equal those of the full
 // chain, results and errors alike, page by page.
 func TestMetadataFastPathMatchesFullChain(t *testing.T) {
+	t.Parallel()
 	b, root := hooksProject(t, metadataFixture())
 	b.Env = map[string]string{"APP_URL": "https://acme.example/"}
 	if err := b.BuildAll(); err != nil {
@@ -210,16 +204,16 @@ func TestMetadataFastPathMatchesFullChain(t *testing.T) {
 		}
 		want, werr := b.evalMetadata(page, segs, pageFiles, sets, bnd)
 		b.resetMetadataStatic()
-		resetMetadataRuns()
+		resetMetadataRuns(b)
 		got, gerr := b.resolveMetadataChain(page, segs, pageFiles, sets, bnd)
 		path := "chain"
 		switch {
-		case metadataRuns.Chain.Load() > 0:
-		case metadataRuns.Batch.Load() > 0:
+		case b.metaRuns.Chain.Load() > 0:
+		case b.metaRuns.Batch.Load() > 0:
 			path = "batch"
-		case metadataRuns.Data.Load() > 0:
+		case b.metaRuns.Data.Load() > 0:
 			path = "data"
-		case metadataRuns.Page.Load() > 0:
+		case b.metaRuns.Page.Load() > 0:
 			path = "page"
 		}
 		if w, ok := wantPath[rel]; ok && w != path {
@@ -241,16 +235,16 @@ func TestMetadataFastPathMatchesFullChain(t *testing.T) {
 
 // A whole build gives the same heads with and without the faster paths.
 func TestMetadataFastPathBuildMatches(t *testing.T) {
+	t.Parallel()
 	heads := map[bool]map[string]string{}
 	for _, on := range []bool{false, true} {
-		withMetadataFastPath(on, func() {
-			b, root := hooksProject(t, metadataFixture())
-			b.Env = map[string]string{"APP_URL": "https://acme.example/"}
-			if err := b.BuildAll(); err != nil {
-				t.Fatal(err)
-			}
-			heads[on] = distHeads(t, root)
-		})
+		b, root := hooksProject(t, metadataFixture())
+		b.noMetadataFastPath = !on
+		b.Env = map[string]string{"APP_URL": "https://acme.example/"}
+		if err := b.BuildAll(); err != nil {
+			t.Fatal(err)
+		}
+		heads[on] = distHeads(t, root)
 	}
 	if len(heads[true]) < 12 {
 		t.Fatalf("only %d pages built", len(heads[true]))
@@ -278,6 +272,7 @@ func TestMetadataFastPathBuildMatches(t *testing.T) {
 // Twenty literal pages under a static layout: the layout is evaluated once
 // and the pages need no run of their own.
 func TestMetadataStaticLayoutRunsOnce(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{
 		"src/config/site.ts": `export const SITE_NAME = 'Acme';`,
 		"src/pages/_layout.tsx": `import { SITE_NAME } from '../config/site';
@@ -295,15 +290,15 @@ export default function P() { return <p>%d</p>; }`, i, i)
 	}
 	heads := map[bool]map[string]string{}
 	for _, on := range []bool{false, true} {
-		withMetadataFastPath(on, func() {
+		func() {
 			b, root := hooksProject(t, files)
+			b.noMetadataFastPath = !on
 			b.Env = map[string]string{"APP_URL": "https://acme.example"}
-			resetMetadataRuns()
 			if err := b.BuildAll(); err != nil {
 				t.Fatal(err)
 			}
 			heads[on] = distHeads(t, root)
-			l, p, d, bt, c := metadataRuns.Layout.Load(), metadataRuns.Page.Load(), metadataRuns.Data.Load(), metadataRuns.Batch.Load(), metadataRuns.Chain.Load()
+			l, p, d, bt, c := b.metaRuns.Layout.Load(), b.metaRuns.Page.Load(), b.metaRuns.Data.Load(), b.metaRuns.Batch.Load(), b.metaRuns.Chain.Load()
 			t.Logf("fast=%v: layout=%d page=%d data=%d batch=%d chain=%d", on, l, p, d, bt, c)
 			if on && (l != 1 || p != 0 || d != 0 || bt != 1 || c != 0) {
 				t.Errorf("fast path: layout=%d page=%d data=%d batch=%d chain=%d, want 1 0 0 1 0", l, p, d, bt, c)
@@ -311,7 +306,7 @@ export default function P() { return <p>%d</p>; }`, i, i)
 			if !on && c < 20 {
 				t.Errorf("full chain ran %d times for 20 pages", c)
 			}
-		})
+		}()
 	}
 	if len(heads[true]) != 20 {
 		t.Fatalf("built %d pages", len(heads[true]))
@@ -327,6 +322,7 @@ export default function P() { return <p>%d</p>; }`, i, i)
 }
 
 func TestLiteralPageModuleForms(t *testing.T) {
+	t.Parallel()
 	b, root := hooksProject(t, map[string]string{
 		"src/config/site.ts":   "export const NAME = 'Acme';\nexport const ALIAS = NAME;\nexport function f() { return 1; }\n",
 		"src/config/impure.ts": "export const NAME = 'Acme';\nconsole.log('loaded');\n",

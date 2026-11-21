@@ -16,6 +16,7 @@ import (
 // The layout renders per request, so the value is sealed there; the form posts
 // to the running server and the action gets the session id back.
 func TestInlineActionInAsyncLayout(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/lib/auth.ts": `export async function getSession() { return { id: "sess-4711-SECRET", name: "ada" }; }`,
 		"src/pages/app/_layout.tsx": `import { getSession } from "../../lib/auth";
@@ -85,6 +86,7 @@ export default async function Layout({ children }: any) {
 // arrow and an action declared inside a list callback of an async page. Each
 // posted action gets its values back from the sealed token.
 func TestInlineActionNextCaptureShapes(t *testing.T) {
+	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/lib/db.ts": `export const db = { find: async (id: string) => ({ id, version: 7, at: new Date(0), tags: ["a", null] }) };`,
 		"src/components/DeleteButton.tsx": `export function DeleteButton({ id }: { id: string }) {

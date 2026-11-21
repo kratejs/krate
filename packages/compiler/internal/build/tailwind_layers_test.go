@@ -1,7 +1,6 @@
 package build
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,7 +36,9 @@ button { padding: 10px; background: green }
 .btn { @apply px-4 py-2; }
 `
 
-func buildTailwindProject(t *testing.T) (root, outDir, html string) {
+// buildTailwindProjectLogged builds the Tailwind fixture and returns its
+// root, output, index page and the warnings of the build.
+func buildTailwindProjectLogged(t *testing.T) (root, outDir, html, logged string) {
 	t.Helper()
 	root = t.TempDir()
 	pagesDir := filepath.Join(root, "src", "pages")
@@ -58,28 +59,21 @@ func buildTailwindProject(t *testing.T) (root, outDir, html string) {
 	cfg.Tailwind.Enabled = true
 	cfg.Tailwind.Preflight = true
 	cfg.Tailwind.Strict = true
-	if err := New(root, cfg).BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
+	logged, err := captureBuild(New(root, cfg))
+	if err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, logged)
 	}
 	data, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return root, cfg.OutDir, string(data)
+	return root, cfg.OutDir, string(data), logged
 }
 
 func TestTailwindLayeringAndDirectivesBuild(t *testing.T) {
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	orig := os.Stderr
-	os.Stderr = w
-	_, outDir, _ := buildTailwindProject(t)
-	os.Stderr = orig
-	_ = w.Close()
-	logged, _ := io.ReadAll(r)
-	if !strings.Contains(string(logged), "Tailwind strict") || !strings.Contains(string(logged), "not-a-real-utility-zz") {
+	t.Parallel()
+	_, outDir, _, logged := buildTailwindProjectLogged(t)
+	if !strings.Contains(logged, "Tailwind strict") || !strings.Contains(logged, "not-a-real-utility-zz") {
 		t.Errorf("strict mode did not report unknown classes; stderr:\n%s", logged)
 	}
 	all := readAllCSS(t, outDir)

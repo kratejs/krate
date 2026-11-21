@@ -19,6 +19,7 @@ func nativeProject(t *testing.T, files map[string]string) string {
 const nativePage = "export default function P() { return <div/>; }\n"
 
 func TestNativeCheckReportsDiagnostics(t *testing.T) {
+	t.Parallel()
 	root := nativeProject(t, map[string]string{
 		"krate.config.json":   `{"native":{"appId":"com.acme.app"}}`,
 		"src/pages/index.tsx": "export const dynamic = \"force-dynamic\";\n" + nativePage,
@@ -48,6 +49,7 @@ var nativeDeps = map[string]string{
 }
 
 func TestNativeInitThenBuild(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "hello-app")
 	code, out := runKrate(t, "native", "init", dir)
 	if code != 0 {
@@ -98,6 +100,7 @@ func TestNativeInitThenBuild(t *testing.T) {
 }
 
 func TestNativeBuildDerivesPermissions(t *testing.T) {
+	t.Parallel()
 	root := nativeProject(t, map[string]string{
 		"krate.config.json": `{"native":{"appId":"com.acme.app"}}`,
 		"src/pages/index.tsx": `import { writeText } from "@krate/app/clipboard";
@@ -123,6 +126,7 @@ void writeText;
 }
 
 func TestNativePackageEndToEnd(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "hello-app")
 	if code, out := runKrate(t, "native", "init", dir); code != 0 {
 		t.Fatalf("init exit %d:\n%s", code, out)

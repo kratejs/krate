@@ -16,6 +16,7 @@ import (
 // scene mounts from the compiled children of the @renderer Canvas, renders,
 // raycasts clicks and hovers, and follows state from outside the canvas.
 func TestBrowserThree(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -76,8 +77,7 @@ func TestBrowserThree(t *testing.T) {
 	cfg.OutDir = filepath.Join(root, "dist")
 	cfg.PublicDir = filepath.Join(root, "public")
 	cfg.Minify = true
-	t.Chdir(root)
-	if _, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+	if _, err := captureBuild(New(root, cfg)); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
 	out, err := exec.Command("node", script, cfg.OutDir, browser).CombinedOutput()

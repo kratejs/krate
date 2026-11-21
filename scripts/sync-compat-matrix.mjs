@@ -34,7 +34,7 @@ function escapeProse(value) {
       while (text[i + n] === "`") n++;
       const fence = text.slice(i, i + n);
       const end = text.indexOf(fence, i + n);
-      if (end >= 0) {
+      if (end !== -1) {
         out += text.slice(i, end + n);
         i = end + n;
         continue;

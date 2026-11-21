@@ -185,10 +185,11 @@ func islandSharedImports(t *testing.T, entry string) []string {
 // renders around every island of the page, so the island sees its context at
 // build time and in the browser, with one client for all of them.
 func TestLayoutProvidersReachIslands(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	providerSite(t, root)
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}

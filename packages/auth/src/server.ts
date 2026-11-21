@@ -89,8 +89,8 @@ function parseSetCookie(line: string): ParsedCookie | null {
   const options: Record<string, unknown> = { httpOnly: false, secure: false };
   for (const part of parts) {
     const i = part.indexOf("=");
-    const key = (i < 0 ? part : part.slice(0, i)).toLowerCase();
-    const val = i < 0 ? "" : part.slice(i + 1);
+    const key = (i === -1 ? part : part.slice(0, i)).toLowerCase();
+    const val = i === -1 ? "" : part.slice(i + 1);
     if (key === "path") options.path = val;
     else if (key === "domain") options.domain = val;
     else if (key === "max-age") options.maxAge = Number(val);

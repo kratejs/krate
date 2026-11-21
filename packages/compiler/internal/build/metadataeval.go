@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/evanw/esbuild/pkg/api"
@@ -50,8 +49,6 @@ type metadataKey struct {
 	page   string
 	params string
 }
-
-var metadataCache sync.Map // metadataKey -> metadataResult
 
 func paramsKey(params map[string]string) string {
 	keys := make([]string, 0, len(params))
@@ -196,7 +193,7 @@ func (b *Builder) evalMetadata(page string, segs []metaSegment, pageFiles string
 }
 
 func (b *Builder) evalMetadataModules(abs string, segs []metaSegment, pageFiles string, sets []map[string]string, bnd *bundler.Bundler, imports, virtual map[string]string) ([]metadataResult, error) {
-	metadataRuns.Chain.Add(1)
+	b.metaRuns.Chain.Add(1)
 	resolve := func(importer, spec string) (string, bool) {
 		if bnd != nil {
 			if p := bnd.ResolveForNode(importer, spec); p != "" {
@@ -377,7 +374,7 @@ func (b *Builder) prefetchMetadata(page string, sets []map[string]string, bnd *b
 		} else {
 			r = results[i]
 		}
-		metadataCache.Store(metadataKey{page, paramsKey(set)}, r)
+		b.metadataCache.Store(metadataKey{page, paramsKey(set)}, r)
 	}
 }
 
@@ -430,7 +427,7 @@ func (b *Builder) pageMetadataHeadFor(page, source string, requestTime bool, par
 			return tags
 		}
 	}
-	res, ok := metadataCache.Load(metadataKey{page, paramsKey(params)})
+	res, ok := b.metadataCache.Load(metadataKey{page, paramsKey(params)})
 	var r metadataResult
 	if ok {
 		r = res.(metadataResult)
@@ -441,7 +438,7 @@ func (b *Builder) pageMetadataHeadFor(page, source string, requestTime bool, par
 		} else {
 			r = results[0]
 		}
-		metadataCache.Store(metadataKey{page, paramsKey(params)}, r)
+		b.metadataCache.Store(metadataKey{page, paramsKey(params)}, r)
 	}
 	for i, msg := range r.Errors {
 		file := ""
@@ -524,7 +521,7 @@ func (b *Builder) warnMetadata(page string, line, col int, srcLine, msg, hint st
 	if r, err := filepath.Rel(b.Root, page); err == nil {
 		rel = filepath.ToSlash(r)
 	}
-	printWarningsOnce(os.Stderr, []diag.Diagnostic{{
+	b.printWarningsOnce([]diag.Diagnostic{{
 		File:     rel,
 		Line:     line,
 		Col:      col,

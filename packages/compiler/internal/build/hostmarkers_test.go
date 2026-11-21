@@ -10,6 +10,7 @@ import (
 )
 
 func TestWebBuildRejectsHostMarkers(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
 		"src/pages/index.tsx": "@host\nexport async function addTask(t: string) { return t; }\n" + devPage("home"),

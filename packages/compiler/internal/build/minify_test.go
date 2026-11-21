@@ -11,6 +11,7 @@ import (
 // TestMinifiedRuntimeIsValidJS runs the full runtime through the minifier and
 // verifies the result parses and keeps its window-exposed exports intact.
 func TestMinifiedRuntimeIsValidJS(t *testing.T) {
+	t.Parallel()
 	pkgDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

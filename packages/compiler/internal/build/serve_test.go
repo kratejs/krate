@@ -5,6 +5,7 @@ import (
 )
 
 func TestMatchRoute(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		urlPath    string
 		pattern    string

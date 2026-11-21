@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -182,6 +183,7 @@ func actionRequest(t *testing.T, srv *httptest.Server, path, contentType, body s
 }
 
 func TestActionSidecarTransport(t *testing.T) {
+	t.Parallel()
 	for _, runtime := range []string{"node", "bun"} {
 		t.Run(runtime, func(t *testing.T) {
 			srv := startActionSidecar(t, runtime, false)
@@ -303,6 +305,7 @@ func TestActionSidecarTransport(t *testing.T) {
 }
 
 func TestActionHandlerSecurity(t *testing.T) {
+	t.Parallel()
 	reached := 0
 	var lastReturn string
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -386,10 +389,9 @@ func TestActionSidecarSignsFlashCookie(t *testing.T) {
 		t.Fatalf("flash cookie is not signed: %q", value)
 	}
 
-	flashSecret.Store("flash-test-secret")
-	t.Cleanup(func() { flashSecret.Store("") })
 	get := func(v string) bool {
 		req := httptest.NewRequest("GET", "/todos", nil)
+		req = req.WithContext(context.WithValue(req.Context(), flashSecretKey{}, "flash-test-secret"))
 		req.AddCookie(&http.Cookie{Name: "krate_flash", Value: v})
 		_, p, ok := requestFlash(req)
 		return ok && p.A == "astep"

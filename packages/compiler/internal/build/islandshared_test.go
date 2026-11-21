@@ -41,7 +41,6 @@ func sharedCounterProject(t *testing.T, boundary bool) (string, *config.Config) 
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
 	realReactFixtureFrom(t, root, repo)
-	t.Chdir(root)
 	writeProjectFile(t, root, "src/lib/counter.ts", `let count = 0;
 export function next() {
 	if (count < 0) throw new Error('shared-counter-mark');
@@ -193,6 +192,7 @@ export default `+async+`function Page() { return <main><h1>home</h1><Scene /><Co
 // once, in shared chunks both import, and are not reported; a stateful module
 // that reaches React is reported with its import chain.
 func TestIslandModuleSharedAcrossFlavours(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
 	}
@@ -203,7 +203,7 @@ func TestIslandModuleSharedAcrossFlavours(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			root, cfg := sharedCounterProject(t, boundary)
-			out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+			out, err := captureBuild(New(root, cfg))
 			if err != nil {
 				t.Fatalf("BuildAll: %v\n%s", err, out)
 			}
@@ -278,6 +278,7 @@ func checkSharedChunks(t *testing.T, cfg *config.Config, out string) {
 // tally() and bump() from the shared modules once, so between them they see
 // 1,1,1 and 2,2,2.
 func TestBrowserIslandModuleSharedAcrossFlavours(t *testing.T) {
+	t.Parallel()
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
@@ -302,7 +303,7 @@ func TestBrowserIslandModuleSharedAcrossFlavours(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			root, cfg := sharedCounterProject(t, boundary)
-			if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+			if out, err := captureBuild(New(root, cfg)); err != nil {
 				t.Fatalf("BuildAll: %v\n%s", err, out)
 			}
 			base, err := startKrateServer(t, root, cfg)
@@ -321,6 +322,7 @@ func TestBrowserIslandModuleSharedAcrossFlavours(t *testing.T) {
 }
 
 func TestSharedImportsUsed(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{"/p/a.ts": "isn_aaaaaaaaaaaa.js", "/p/b.ts": "isn_bbbbbbbbbbbb.js", "/p/c.ts": "isn_cccccccccccc.js", "/p/d.ts": "isn_dddddddddddd.js", "/p/e.ts": "isn_eeeeeeeeeeee.js", "/p/f.ts": "isn_ffffffffffff.js", "/p/g.ts": "isn_999999999999.js"}
 	out := []api.OutputFile{{Path: "/out/island_1.js", Contents: []byte(
 		`import x,{next as o,prev}from"./isn_aaaaaaaaaaaa.js";import{"odd-name" as q}from"./isn_ffffffffffff.js";import*as N from"./isn_bbbbbbbbbbbb.js";` +
@@ -357,6 +359,7 @@ func TestSharedImportsUsed(t *testing.T) {
 // module (a page with client boundaries), which must not stop React-free
 // modules from being shared; the reasons name the real import chain.
 func TestIslandShareCheckChains(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeProjectFile(t, root, "src/uses-link.ts", "export const L = Link;\n")
 	imp := func(path, spec string) islandMetaImport {
@@ -426,6 +429,7 @@ func TestIslandShareCheckChains(t *testing.T) {
 }
 
 func TestFreeGlobalUse(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	names := regexp.MustCompile(`\b(Link|Image)\b`)
 	for src, want := range map[string]string{
@@ -453,6 +457,7 @@ func TestFreeGlobalUse(t *testing.T) {
 // the member the islands reach first, and a shared module that imports a
 // member does so through the member's facade.
 func TestIslandShareCheckCycle(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	imp := func(path, spec string) islandMetaImport {
 		return islandMetaImport{Path: path, Kind: "import-statement", Original: spec}
@@ -512,6 +517,7 @@ func TestIslandShareCheckCycle(t *testing.T) {
 // file names and in every file that names them, as replacing each name in
 // turn does, source map names included.
 func TestWriteIslandChunkFilesRenames(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	files := []api.OutputFile{
 		{Path: "/out/island_one.js", Contents: []byte(`import{a}from"./isl-AB2CD3EF.js";import"./isl-ZZ7Y6X5W.js";import"./isl-abc23456.js";a("isl-AB2CD3EF.js");`)},
@@ -565,6 +571,7 @@ func TestWriteIslandChunkFilesRenames(t *testing.T) {
 // TestSharedImportsUsedAcrossFiles: the needs of every built file are merged,
 // whatever file reads them first.
 func TestSharedImportsUsedAcrossFiles(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{"/p/a.ts": "isn_aaaaaaaaaaaa.js", "/p/b.ts": "isn_bbbbbbbbbbbb.js", "/p/c.ts": "isn_cccccccccccc.js", "/p/odd.ts": "isn_odd.js"}
 	var graph []api.OutputFile
 	for i := range 40 {
@@ -599,6 +606,7 @@ func TestSharedImportsUsedAcrossFiles(t *testing.T) {
 }
 
 func TestNeutralFileRefs(t *testing.T) {
+	t.Parallel()
 	text := `"./isn_0123456789ab.js" ./isn_0123456789ab.js ../isn_0123456789ab.js ./isn_0123456789AB.js ./isn_0123456789a.js ./isn_0123456789abc.js ./isn_ffffffffffff.mjs ./isn_ffffffffffff.js`
 	got := neutralFileRefs(text)
 	want := map[string]int{"isn_0123456789ab": 3, "isn_ffffffffffff": 1}
@@ -613,6 +621,7 @@ func TestNeutralFileRefs(t *testing.T) {
 }
 
 func TestForEachIndex(t *testing.T) {
+	t.Parallel()
 	for _, n := range []int{0, 1, 3, 500} {
 		seen := make([]atomic.Int32, n)
 		forEachIndex(n, func(i int) { seen[i].Add(1) })

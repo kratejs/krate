@@ -59,6 +59,7 @@ func postSCRegions(t *testing.T, base string, body map[string]any) []scFrame {
 // error and a nested async child) plus a synchronous page with an async child
 // under <Suspense>, boots the real SSR sidecar, and checks every frame.
 func TestAsyncServerComponentSidecarE2E(t *testing.T) {
+	t.Parallel()
 	ensureRuntimeDist(t)
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -195,7 +196,7 @@ export default function Feed() {
 // waits for its health endpoint.
 func startSidecar(t *testing.T, node, repoRoot, root, outDir string) (string, func()) {
 	t.Helper()
-	staged := stageServerRenderer(repoRoot, outDir)
+	staged := stageServerRenderer(os.Stderr, repoRoot, outDir)
 	if staged == "" {
 		t.Fatal("stageServerRenderer returned empty path")
 	}

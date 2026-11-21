@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -278,7 +277,7 @@ func warnStreamedHead(route, id string) {
 	if _, dup := streamedHeadWarned.LoadOrStore(route+"::"+id, true); dup {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "  %s! <Head> inside the streamed region %s of %s%s reaches the document only through the region's script; crawlers that do not run scripts will not see it. Move it into the page component outside <Suspense>.\n", cYellow, id, route, cReset)
+	eprintf("  %s! <Head> inside the streamed region %s of %s%s reaches the document only through the region's script; crawlers that do not run scripts will not see it. Move it into the page component outside <Suspense>.\n", cYellow, id, route, cReset)
 }
 
 // scriptJSON is a JS string literal that is safe inside an inline <script>.

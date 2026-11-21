@@ -106,7 +106,7 @@ export function createClient(options: ClientOptions = {}): Client {
       w.onAbort = () => {
         const r = w.rec;
         const i = r.waiters.indexOf(w);
-        if (i < 0) return;
+        if (i === -1) return;
         r.waiters.splice(i, 1);
         reject(abortReason(signal));
         if (r.waiters.length === 0) abandon(r);

@@ -25,6 +25,7 @@ import (
 // KRATE_E2E_DOCS=1 because it builds the shell and the whole site (about a
 // minute), and it needs the JS packages built (pnpm build).
 func TestNativeDocsSiteE2E(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("KRATE_E2E_DOCS") != "1" {
 		t.Skip("set KRATE_E2E_DOCS=1 to run the docs-site acceptance test")
 	}
@@ -286,20 +287,30 @@ func checkDocsInWindow(t *testing.T, shell, appDir string) {
 		if _, ok := send(fmt.Sprintf("eval location.assign(%q)", path), 10*time.Second); !ok {
 			t.Fatalf("navigating to %s: no reply", path)
 		}
-		var got string
-		for i := 0; i < 20 && !strings.Contains(got, path); i++ {
-			time.Sleep(500 * time.Millisecond)
-			if l, ok := send("query location.pathname + ' ' + document.readyState", 8*time.Second); ok {
-				got = l
-			}
-		}
-		if !strings.Contains(got, path) || !strings.Contains(got, "complete") {
+		if got, ok := waitPageLoaded(send, path); !ok {
 			t.Fatalf("after navigating to %s the page answered %q: the window did not load it", path, got)
 		}
 	}
 	if l, ok := send("memory", 10*time.Second); ok {
 		t.Logf("window memory: %.300s", l)
 	}
+}
+
+// waitPageLoaded polls the window until it shows path with the document
+// complete, and returns the last answer. A document that is still loading is
+// polled again, not taken as the answer.
+func waitPageLoaded(send func(string, time.Duration) (string, bool), path string) (string, bool) {
+	var got string
+	for i := 0; i < 20; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if l, ok := send("query location.pathname + ' ' + document.readyState", 8*time.Second); ok {
+			got = l
+		}
+		if strings.Contains(got, path) && strings.Contains(got, "complete") {
+			return got, true
+		}
+	}
+	return got, false
 }
 
 // checkRefusesDev checks that a distributed executable (an app next to it)

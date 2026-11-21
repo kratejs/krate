@@ -1,5 +1,6 @@
 import { jsx } from './jsx-runtime.js';
-import { type Component } from './dom.js';
+import type { Component } from './dom.js';
+
 export { jsx, jsxs, Fragment } from './jsx-runtime.js';
 export type { Component } from './dom.js';
 

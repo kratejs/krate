@@ -73,7 +73,7 @@ function endpoint(
 // params are merged over the provider's, like Auth.js.
 function mergeEndpoint(base: ReturnType<typeof endpoint>, over: ReturnType<typeof endpoint>): ReturnType<typeof endpoint> {
   const out = { ...base, ...over };
-  if (base.params || over.params) out.params = { ...(base.params ?? {}), ...(over.params ?? {}) };
+  if (base.params || over.params) out.params = { ...base.params, ...over.params };
   if (out.url === undefined) delete out.url;
   return out;
 }
@@ -92,7 +92,7 @@ export function defineOAuthProvider(spec: OAuthSpec): (options?: OAuthUserOption
     const tokenEndpoint = mergeEndpoint(endpoint(resolve(spec.token, options)), endpoint(userOptions.token));
     const userinfo = mergeEndpoint(endpoint(resolve(spec.userinfo, options)), endpoint(userOptions.userinfo));
     const scope = userOptions.scope ?? userAuthorization.params?.scope ?? spec.scope;
-    if (scope) authorization.params = { ...(authorization.params ?? {}), scope };
+    if (scope) authorization.params = { ...authorization.params, scope };
     const issuer = options.issuer ?? resolve(spec.issuer, options);
     const wellKnown = userOptions.wellKnown ?? resolve(spec.wellKnown, options);
     const type = spec.type ?? (issuer || wellKnown ? "oidc" : "oauth");
@@ -134,9 +134,9 @@ export function genericOAuth(options: OAuthUserOptions & { id: string; name?: st
   const issuer = rest.issuer ?? env.issuer;
   const resolvedType = type ?? (issuer || rest.wellKnown ? "oidc" : "oauth");
   const authorization = endpoint(rest.authorization);
-  if (rest.scope) authorization.params = { ...(authorization.params ?? {}), scope: rest.scope };
+  if (rest.scope) authorization.params = { ...authorization.params, scope: rest.scope };
   else if (resolvedType === "oidc" && !authorization.params?.scope) {
-    authorization.params = { ...(authorization.params ?? {}), scope: "openid profile email" };
+    authorization.params = { ...authorization.params, scope: "openid profile email" };
   }
   return {
     id,

@@ -24,6 +24,7 @@ import (
 var defaultImportRe = regexp.MustCompile(`(?m)^\s*import\s+[A-Za-z_$][\w$]*\s*(,|from)`)
 
 func TestScriptcEntryUsesNamedImportsOnly(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("proj", ".krate", "api-scriptc")
 	routes := []scriptcRoute{
 		{file: "users/[id].js", source: filepath.Join("proj", "src", "api", "users", "[id].ts"), methods: []string{"GET", "POST"}},
@@ -59,6 +60,7 @@ func TestScriptcEntryUsesNamedImportsOnly(t *testing.T) {
 }
 
 func TestScriptcCheckEntryCallsEachHandler(t *testing.T) {
+	t.Parallel()
 	src := scriptcCheckSource(filepath.Join("p", "check"), scriptcRoute{file: "a.js", source: filepath.Join("p", "src", "api", "a.ts"), methods: []string{"GET"}})
 	if !strings.Contains(src, "handler(probe") || !strings.Contains(src, `from "../src/api/a.ts"`) {
 		t.Errorf("check entry:\n%s", src)
@@ -69,6 +71,7 @@ func TestScriptcCheckEntryCallsEachHandler(t *testing.T) {
 }
 
 func TestScriptcParamSpec(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"json.js":              "[]",
 		"index.js":             "[]",
@@ -88,6 +91,7 @@ func TestScriptcParamSpec(t *testing.T) {
 }
 
 func TestScriptcAllow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		methods []string
 		want    string
@@ -105,6 +109,7 @@ func TestScriptcAllow(t *testing.T) {
 }
 
 func TestScriptcMethods(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, src string
 		methods   []string
@@ -465,6 +470,7 @@ func TestScriptcKeepsEmbeddedBundles(t *testing.T) {
 }
 
 func TestLoadScriptcServePlan(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if p := loadScriptcServePlan(root); p.warning == "" || !strings.Contains(p.warning, "krate build") {
 		t.Errorf("no manifest: %+v", p)
@@ -499,6 +505,7 @@ func TestLoadScriptcServePlan(t *testing.T) {
 // resolved (replacing a client's header), enforces the route budget with a
 // 504 and answers 503 while the server is not up.
 func TestScriptcSidecarProxy(t *testing.T) {
+	t.Parallel()
 	var seen http.Header
 	slow := make(chan struct{})
 	t.Cleanup(func() { close(slow) })
@@ -571,6 +578,7 @@ func TestScriptcSidecarProxy(t *testing.T) {
 }
 
 func TestScriptcSidecarSupervision(t *testing.T) {
+	t.Parallel()
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("needs a POSIX shell")
 	}

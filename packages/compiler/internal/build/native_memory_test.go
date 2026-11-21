@@ -22,8 +22,11 @@ func TestMain(m *testing.M) {
 		os.Exit(fakeShell(mode))
 	}
 	// Builds with no compress setting skip precompression in this package's
-	// tests; tests of the default restore it with defaultPrecompression(t).
+	// tests; tests of the default restore it with defaultPrecompression(b).
+	// Set once, before any test runs.
 	precompressByDefault = false
+	// Tests count the esbuild calls of their own project (esbuildCallsUnder).
+	esbuildDirStatsOn.Store(true)
 	code := m.Run()
 	cleanupAuditSite()
 	cleanupFakeScriptcCopy()
@@ -108,9 +111,8 @@ func bufioScanner(f *os.File) *bufio.Scanner {
 }
 
 // defaultPrecompression restores production's precompress-by-default for
-// one test.
-func defaultPrecompression(t *testing.T) {
-	t.Helper()
-	precompressByDefault = true
-	t.Cleanup(func() { precompressByDefault = false })
+// the builds of b.
+func defaultPrecompression(b *Builder) {
+	on := true
+	b.precompressDefault = &on
 }

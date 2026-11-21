@@ -210,7 +210,7 @@
     var bodyText = raw.hasBody ? __go_body_text() : '';
     var listeners = {};
     var req = {
-      url: raw.url.replace(/^[a-z]+:\/\/[^\/]+/i, ''), method: raw.method, headers: headers, body: bodyText,
+      url: raw.url.replace(/^[a-z]+:\/\/[^/]+/i, ''), method: raw.method, headers: headers, body: bodyText,
       socket: { remoteAddress: raw.remoteAddr || '127.0.0.1' },
       on: function (ev, cb) { (listeners[ev] = listeners[ev] || []).push(cb); return req; },
       once: function (ev, cb) { return req.on(ev, cb); },

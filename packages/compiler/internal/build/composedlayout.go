@@ -115,7 +115,7 @@ func (b *Builder) prepareLayoutCut(page string) (*layoutCut, error) {
 	if kind, ok := segmentKindOfFile(page); ok && kind == SegmentError {
 		// An error page answers while the app is failing, so it is prerendered
 		// and never depends on the renderer or on a layout that awaits data.
-		fmt.Fprintf(os.Stderr, "  %s*%s %s is prerendered without the async layout %s\n", cCyan, cReset, filepath.Base(page), filepath.Base(cut.Layouts[len(cut.Layouts)-1]))
+		fmt.Fprintf(b.stderr(), "  %s*%s %s is prerendered without the async layout %s\n", cCyan, cReset, filepath.Base(page), filepath.Base(cut.Layouts[len(cut.Layouts)-1]))
 		return &layoutCut{Covered: cut.Covered, Dropped: true}, nil
 	}
 	seen := map[string]bool{}

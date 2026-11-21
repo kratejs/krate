@@ -19,7 +19,7 @@ describe("base32", () => {
 
   it("round-trips and tolerates spacing and case", () => {
     for (let n = 1; n < 40; n++) {
-      const bytes = new Uint8Array(n).map((_, i) => (i * 53 + n) & 0xff);
+      const bytes = new Uint8Array(n).map((_, i) => (i * 53 + n) & 0xFF);
       expect(Array.from(base32Decode(base32Encode(bytes)))).toEqual(Array.from(bytes));
     }
     expect(new TextDecoder().decode(base32Decode("mzxw 6ytb-oi"))).toBe("foobar");

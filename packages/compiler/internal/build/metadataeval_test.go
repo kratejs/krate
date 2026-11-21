@@ -27,6 +27,7 @@ func headOf(html string) string {
 // generateStaticParams entry, merged under the layout's metadata, with the tags
 // in the page's own <head>.
 func TestGenerateMetadataBakesTagsPerStaticParam(t *testing.T) {
+	t.Parallel()
 	b, root := hooksProject(t, map[string]string{
 		"src/pages/index.tsx": `export default function Home() { return <p>home</p>; }`,
 		"src/pages/_layout.tsx": `export const metadata = { title: { default: "Site", template: "%s | Site" }, description: "layout", metadataBase: "https://x.example" };
@@ -68,6 +69,7 @@ export default function Post({ params }: any) { return <h1>{params.slug}</h1>; }
 // A page whose metadata is a call and that holds module-level JSX (local or
 // imported) still gets its tags, and the JSX still renders.
 func TestCallMetadataWithModuleLevelJSX(t *testing.T) {
+	t.Parallel()
 	b, root := hooksProject(t, map[string]string{
 		"src/lib/seo.ts":          `export function pageMetadata(title: string, description: string) { return { title, description, openGraph: { title } }; }`,
 		"src/components/hero.tsx": `export const hero = <h1>Imported Hero</h1>;`,
@@ -101,6 +103,7 @@ export default function Team() { return <main>{hero}<p>Text</p></main>; }`,
 }
 
 func TestMetadataExportPositionNamesTheExport(t *testing.T) {
+	t.Parallel()
 	name, line, col, text := metadataExportPosition("import x from 'y';\n\nexport const metadata = f();\n")
 	if name != "metadata" || line != 3 || col != 1 || text != "export const metadata = f();" {
 		t.Errorf("got %q %d:%d %q", name, line, col, text)
@@ -110,6 +113,7 @@ func TestMetadataExportPositionNamesTheExport(t *testing.T) {
 // The metadata call runs without the rest of the page module: browser code at
 // module scope in an imported component, a module that reads __dirname, and JSX that uses the Link global all stay out of it.
 func TestCallMetadataEvaluatesOnlyItsOwnClosure(t *testing.T) {
+	t.Parallel()
 	b, root := hooksProject(t, map[string]string{
 		"src/lib/seo.ts":           `export function pageMetadata(title: string, description: string) { return { title, description, openGraph: { title, images: ['/og.png'] } }; }`,
 		"src/components/chart.tsx": "const el = document.querySelector('#chart');\nexport function Chart() { return <i>{String(el)}</i>; }",
@@ -124,7 +128,7 @@ export default function About() { return <main>{nav}<Chart />{here}</main>; }`,
 export const metadata = pageMetadata('Missing', 'Not here');
 export default function NotFound() { return <h1>Missing</h1>; }`,
 	})
-	logs := captureStderrFile(t)
+	logs := builderStderr(b)
 	if err := b.BuildAll(); err != nil {
 		t.Fatal(err)
 	}
@@ -142,6 +146,7 @@ export default function NotFound() { return <h1>Missing</h1>; }`,
 // A failing metadata export is reported at its own line, also on a special
 // page, and a segment that fails is reported at that segment's export.
 func TestMetadataWarningCarriesThePosition(t *testing.T) {
+	t.Parallel()
 	b, _ := hooksProject(t, map[string]string{
 		"src/lib/seo.ts":      `export function pageMetadata(): never { throw new Error("no title"); }`,
 		"src/pages/index.tsx": `export default function Home() { return <p>home</p>; }`,
@@ -153,7 +158,7 @@ export default function NotFound() { return <h1>Missing</h1>; }`,
 export default function L({ children }: any) { return <div>{children}</div>; }`,
 		"src/pages/docs/intro.tsx": `export default function Intro() { return <p>intro</p>; }`,
 	})
-	logs := captureStderrFile(t)
+	logs := builderStderr(b)
 	if err := b.BuildAll(); err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +177,7 @@ export default function L({ children }: any) { return <div>{children}</div>; }`,
 // loader in an imported component does not matter to it, and the page still
 // builds and renders.
 func TestGenerateStaticParamsPageWithLazyBuilder(t *testing.T) {
+	t.Parallel()
 	b, root := hooksProject(t, map[string]string{
 		"src/components/builder.tsx": `import { lazy, Suspense, useState } from 'react';
 const Wizard = lazy(() => import('./setup-wizard').then((m) => m.SetupWizard));

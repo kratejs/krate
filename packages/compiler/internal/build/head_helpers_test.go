@@ -18,7 +18,7 @@ func buildWithOutput(t *testing.T, files map[string]string) (string, string) {
 	cfg.PagesDir = filepath.Join(root, "src", "pages")
 	cfg.OutDir = filepath.Join(root, "dist")
 	cfg.Minify = false
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	out, err := captureBuild(New(root, cfg))
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
@@ -31,6 +31,7 @@ const seoLib = "export const SITE = 'https://example.com';\n" +
 	"export function jsonLd(o: object) { return JSON.stringify({ '@context': 'https://schema.org', ...o }); }"
 
 func TestHeadHelperCallsResolveAtBuildTime(t *testing.T) {
+	t.Parallel()
 	html, out := buildWithOutput(t, map[string]string{
 		"src/lib/seo.ts": seoLib,
 		"src/pages/index.tsx": `import { createSignal } from '@krate/runtime';
@@ -57,6 +58,7 @@ export default function Page() {
 }
 
 func TestHeadValueTheBuildCannotEvaluateIsReported(t *testing.T) {
+	t.Parallel()
 	_, out := buildWithOutput(t, map[string]string{
 		"src/lib/seo.ts": seoLib,
 		"src/pages/index.tsx": `import { absoluteUrl } from '../lib/seo';

@@ -15,6 +15,7 @@ import (
 // imported from its module, so esbuild tree shakes its members; an index that
 // runs code of its own is left alone, and so is the text of a string.
 func TestNamespaceImportRewrite(t *testing.T) {
+	t.Parallel()
 	// The real path, as a build uses: Windows hands out temp dirs by their
 	// short (8.3) names, which esbuild keeps and Krate's resolver expands.
 	root, err := filepath.EvalSymlinks(t.TempDir())

@@ -11,11 +11,6 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 )
 
-// legacyNodeOnlyDetection makes compileSingleRoute find Node-only routes from
-// their full QuickJS bundle alone, as builds did before provablyNodeOnly.
-// Tests use it to compare the two.
-var legacyNodeOnlyDetection bool
-
 // apiRouteFamily is what the routes of one CompileAPIRoutes call share: the
 // resolutions of their Node bundles and detection builds, and the package
 // probes of provablyNodeOnly.

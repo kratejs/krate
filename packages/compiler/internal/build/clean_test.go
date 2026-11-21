@@ -19,6 +19,7 @@ func touchDir(t *testing.T, path string) {
 }
 
 func TestCleanRemovesDistAndCache(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dist := filepath.Join(root, "dist")
 	cache := filepath.Join(root, ".krate", "cache")
@@ -50,6 +51,7 @@ func TestCleanRemovesDistAndCache(t *testing.T) {
 }
 
 func TestCleanRefusesOutsideRoot(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	outside := t.TempDir()
 	touchDir(t, outside)
@@ -68,6 +70,7 @@ func TestCleanRefusesOutsideRoot(t *testing.T) {
 // An outDir that is or contains the project's sources must never be removed:
 // `outDir: "."` used to make `krate clean` delete the whole project.
 func TestCleanRefusesOutDirHoldingSources(t *testing.T) {
+	t.Parallel()
 	for _, outDir := range []string{".", "src", "src/pages", "public"} {
 		t.Run(outDir, func(t *testing.T) {
 			root := t.TempDir()

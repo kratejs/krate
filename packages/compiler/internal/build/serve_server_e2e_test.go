@@ -87,6 +87,7 @@ func buildW5(t *testing.T) (*Builder, string) {
 }
 
 func TestServeW5Behaviors(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	b, root := buildW5(t)
 	base, err := startKrateServer(t, root, b.Cfg)
@@ -229,6 +230,7 @@ func TestServeW5Behaviors(t *testing.T) {
 // TestMiddlewareCacheControlWinsOnSSRPages: a Cache-Control that middleware sets
 // on a request-time page replaces Krate's no-store default.
 func TestMiddlewareCacheControlWinsOnSSRPages(t *testing.T) {
+	t.Parallel()
 	e2eEnv(t)
 	b, root := scProject(t, map[string]string{
 		"src/pages/index.tsx": `export default async function Home() {

@@ -51,6 +51,7 @@ func resolveHandled(r api.OnResolveResult, err error) bool {
 }
 
 func TestPurePruneOnlyFileNamespaceImporters(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	mod := filepath.Join(root, "util.ts")
 	if err := os.WriteFile(mod, []byte("export const x = 1\n"), 0o644); err != nil {
@@ -84,6 +85,7 @@ func TestPurePruneOnlyFileNamespaceImporters(t *testing.T) {
 }
 
 func TestPreactExternalsFilterIsExact(t *testing.T) {
+	t.Parallel()
 	exts := []string{"preact", "preact/hooks", "preact/jsx-runtime"}
 	cbs := captureResolves(t, preactExternalsPlugin(exts), nil)
 	if len(cbs) != 1 {
@@ -109,6 +111,7 @@ func TestPreactExternalsFilterIsExact(t *testing.T) {
 }
 
 func TestExactSpecFilterEmptyMatchesNothing(t *testing.T) {
+	t.Parallel()
 	re := regexp.MustCompile(exactSpecFilter(nil))
 	for _, s := range []string{"", "a", "react", "./x", "/abs", `C:\x`, "\x00", "\U0010FFFF"} {
 		if re.MatchString(s) {
@@ -118,6 +121,7 @@ func TestExactSpecFilterEmptyMatchesNothing(t *testing.T) {
 }
 
 func TestIslandServerStubFilterCoversSpecs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "page.tsx")
 	stubs := &islandServerStubs{Specs: map[string]*islandStubSpec{
@@ -159,6 +163,7 @@ func TestIslandServerStubFilterCoversSpecs(t *testing.T) {
 }
 
 func TestExternalPackageFilter(t *testing.T) {
+	t.Parallel()
 	stub := func(string, api.ResolveOptions) api.ResolveResult {
 		return api.ResolveResult{External: true}
 	}
@@ -198,6 +203,7 @@ func TestExternalPackageFilter(t *testing.T) {
 }
 
 func TestPathAliasFilter(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for _, f := range []string{"src/components/Button.tsx", "src/lib.ts", "shared/util.ts"} {
 		p := filepath.Join(dir, filepath.FromSlash(f))
@@ -248,6 +254,7 @@ func TestPathAliasFilter(t *testing.T) {
 }
 
 func TestBuiltinGuardFilter(t *testing.T) {
+	t.Parallel()
 	old := regexp.MustCompile(`^(node:)?[a-z_]+(/[a-z_]+)?$`)
 	for _, target := range []string{"node", "cloudflare"} {
 		cbs := captureResolves(t, builtinGuardPlugin(target), nil)

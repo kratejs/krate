@@ -27,8 +27,6 @@ import { createEffect, onCleanup, krateRunEvent, krateTransitionWrites } from '.
 /** Field and query parameter carrying the JSON leading arguments of a form call. */
 export const ACTION_ARGS_FIELD = '__krate_args';
 
-type AnyFn = (...args: unknown[]) => unknown;
-
 /** A client proxy for a server action. */
 export interface ServerActionProxy {
   (...args: unknown[]): Promise<unknown>;
@@ -89,7 +87,7 @@ function navigateExternal(url: string): void {
 /** Only same-origin absolute paths are followed after an action. */
 function safeRedirect(url: string): string {
   if (!url || !url.startsWith('/') || url.startsWith('//')) return '';
-  if (url.includes('\\') || /[\u0000-\u001f\u007f]/.test(url)) return '';
+  if (url.includes('\\') || /[\u0000-\u001F\u007F]/.test(url)) return '';
   return url;
 }
 
@@ -470,7 +468,7 @@ function formDataFor(form: HTMLFormElement, submitter: HTMLElement | null): Form
  */
 export function stripActionURL(url: string): string {
   const i = url.indexOf('?');
-  if (i < 0) return url;
+  if (i === -1) return url;
   const base = url.slice(0, i);
   try {
     const raw = new URLSearchParams(url.slice(i + 1)).get(ACTION_ARGS_FIELD);

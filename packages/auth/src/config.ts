@@ -87,7 +87,7 @@ export function readDeclarative(): DeclarativeConfig {
 }
 
 function mergeObject<T extends object>(base: T | undefined, over: T | undefined): T {
-  return { ...(base ?? {}), ...(over ?? {}) } as T;
+  return { ...base, ...over } as T;
 }
 
 export function resolveConfig(options: AuthOptions = {}, declarative: DeclarativeConfig = readDeclarative()): ResolvedConfig {

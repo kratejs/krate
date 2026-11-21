@@ -8,6 +8,7 @@ import (
 )
 
 func TestJSRefs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		src     string
@@ -53,6 +54,7 @@ func TestJSRefs(t *testing.T) {
 // A name counts only when it survives minification too: a local the author
 // named like a runtime export is renamed, a global reference is not.
 func TestRecordRuntimeRefsDropsRenamedLocals(t *testing.T) {
+	t.Parallel()
 	raw := "(function(){function handleError(e){console.log(e)}handleError(1);cn('a')})();"
 	min := minifyJS(raw)
 	if strings.Contains(min, "handleError") {
@@ -65,6 +67,7 @@ func TestRecordRuntimeRefsDropsRenamedLocals(t *testing.T) {
 }
 
 func TestScanPageMarkup(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name            string
 		html            string
@@ -95,6 +98,7 @@ func TestScanPageMarkup(t *testing.T) {
 // Text that names runtime APIs (headings in props, slot ids, code samples)
 // must not decide the runtime; code and real markup must.
 func TestRuntimeUsageIgnoresText(t *testing.T) {
+	t.Parallel()
 	text := &PageResult{
 		HydrationJS: `__krate_props["a"]={toc:[{title:"requestFormReset"},{title:"Children, keys, and refs"},{title:"krateHighlight"}]};kbindRef("cn",()=>t,e=>{t=e})`,
 		HTML:        `<pre><code>&lt;form data-krate-action&gt;</code></pre><script type="application/ld+json">{"headline":"useParams"}</script>`,

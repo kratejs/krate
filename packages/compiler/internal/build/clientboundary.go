@@ -1153,7 +1153,7 @@ func runSubBatches(jobs []*roundJob, size, parallel int, run func([]*roundJob)) 
 }
 
 func (b *Builder) runClientChunkBatch(jobs []*roundJob) {
-	b.runClientChunkBatchWith(jobs, clientChunkSplit)
+	b.runClientChunkBatchWith(jobs, !b.noClientChunkSplit)
 }
 
 // runClientChunkBatchWith checks jobs in one batch, with code splitting when
@@ -1209,10 +1209,6 @@ func (b *Builder) runClientChunkBatchWith(jobs []*roundJob, split bool) {
 		j.output = b.buildClientChunk(j.input.(clientChunkReq))
 	}
 }
-
-// clientChunkSplit turns on code splitting for the batched client chunk
-// checks; tests turn it off to compare.
-var clientChunkSplit = true
 
 // batchJS is the code of an entry of a batched build: its entry output, then
 // the chunks it imports (split builds), newline separated. The checks read
@@ -1418,6 +1414,10 @@ type clientSSRImpls struct {
 	memo resolveMemo
 	// boundaries are the boundaries of the server bundles the impls are for.
 	boundaries []ClientBoundary
+	// separate builds every module on its own instead of in one combined
+	// build (tests compare the two); shareless builds every page server
+	// bundle as if it were alone.
+	separate, shareless bool
 }
 
 // clientSSRImpl is the build of one module's server render module. Its
@@ -1513,7 +1513,7 @@ func (c *clientSSRImpls) buildEach(claimed []claimedImpl) {
 // reported against the module that has it.
 func (c *clientSSRImpls) buildAll(boundaries []ClientBoundary) {
 	claimed := c.claim(boundaries)
-	if len(claimed) > 1 && combinedSSRModules {
+	if len(claimed) > 1 && !c.separate {
 		if err := safe.Run(func() error { return c.buildCombined(claimed) }); err == nil {
 			for _, ci := range claimed {
 				ci.e.finish(func() error { return nil })
@@ -1523,10 +1523,6 @@ func (c *clientSSRImpls) buildAll(boundaries []ClientBoundary) {
 	}
 	c.buildEach(claimed)
 }
-
-// combinedSSRModules turns on buildCombined; tests turn it off to compare
-// with separate builds.
-var combinedSSRModules = true
 
 // ssrChunkNames names the shared chunks of the combined build, under
 // server-bundles/client/chunks/. The hash follows the content, so the server,
