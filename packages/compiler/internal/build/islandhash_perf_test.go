@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -150,8 +151,13 @@ func TestNameOutputsByContentLargeSite(t *testing.T) {
 	}
 	t.Logf("named %d files, read %d, wrote %d in %v", len(n.renames), n.read, n.written, took)
 	limit := 2 * time.Second
-	if raceEnabled {
+	switch {
+	case raceEnabled:
 		limit = 20 * time.Second
+	case runtime.GOOS == "windows":
+		// Windows CI runners scan every one of the ~2700 writes and took 2 to
+		// 3 s; the regression this guards against took a minute.
+		limit = 10 * time.Second
 	}
 	if took > limit {
 		t.Errorf("naming took %v, want under %v", took, limit)
