@@ -1107,6 +1107,7 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			case "enabled":
 				if b, ok := v.(bool); ok {
 					cfg.Tailwind.Enabled = b
+					cfg.Tailwind.EnabledSet = true
 				}
 			case "scanDirs":
 				arr, ok := v.([]interface{})

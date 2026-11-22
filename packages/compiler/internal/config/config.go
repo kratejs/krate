@@ -192,8 +192,14 @@ type PluginConfig struct {
 }
 
 type TailwindCfg struct {
-	Enabled  bool     `json:"enabled,omitempty"`
-	ScanDirs []string `json:"scanDirs,omitempty"`
+	// Enabled turns on Tailwind. When the config does not set it, a project
+	// stylesheet with a Tailwind directive (`@import "tailwindcss"`) turns it
+	// on, as in Tailwind v4 (see EnabledSet).
+	Enabled bool `json:"enabled,omitempty"`
+	// EnabledSet records that the config set Enabled itself, so an explicit
+	// `enabled: false` is kept even when a stylesheet imports Tailwind.
+	EnabledSet bool     `json:"-"`
+	ScanDirs   []string `json:"scanDirs,omitempty"`
 	// Content is the Tailwind-style content glob list; when set it takes
 	// precedence over ScanDirs.
 	Content []string `json:"content,omitempty"`
@@ -206,6 +212,22 @@ type TailwindCfg struct {
 	DarkMode string `json:"darkMode,omitempty"`
 	// ExecuteConfig evaluates tailwind.config in-process instead of static parse.
 	ExecuteConfig bool `json:"executeConfig,omitempty"`
+}
+
+// UnmarshalJSON decodes the tailwind config and records whether it set
+// enabled. Fields the JSON leaves out keep their current values.
+func (t *TailwindCfg) UnmarshalJSON(data []byte) error {
+	type plain TailwindCfg
+	if err := json.Unmarshal(data, (*plain)(t)); err != nil {
+		return err
+	}
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(data, &keys) == nil {
+		if v, ok := keys["enabled"]; ok && string(bytes.TrimSpace(v)) != "null" {
+			t.EnabledSet = true
+		}
+	}
+	return nil
 }
 
 // HighlightConfig configures code highlighting that happens after the build:

@@ -325,7 +325,9 @@ func GenerateTailwindDirectives(root string, cfg *TailwindConfig, opts TailwindO
 		}
 	}
 	res.Warnings = append(res.Warnings, d.Warnings()...)
-	if len(classes) == 0 && userVars == 0 {
+	// Preflight is part of the sheet even when no class is used, as in
+	// Tailwind: dropping it left unstyled pages with browser-default buttons.
+	if len(classes) == 0 && userVars == 0 && !opts.Preflight {
 		sort.Strings(res.Warnings)
 		return res, nil
 	}
@@ -356,7 +358,7 @@ func GenerateTailwindDirectives(root string, cfg *TailwindConfig, opts TailwindO
 // assembleTailwindSheet lays the pieces out in cascade layers like Tailwind v4.
 func assembleTailwindSheet(theme *TailwindTheme, at *AtTheme, refs map[string]bool, utilities, keyframes string, preflight bool) string {
 	vars := themeLayerVars(theme, at, refs)
-	if utilities == "" && len(vars) == 0 && keyframes == "" {
+	if utilities == "" && len(vars) == 0 && keyframes == "" && !preflight {
 		return ""
 	}
 	var b strings.Builder

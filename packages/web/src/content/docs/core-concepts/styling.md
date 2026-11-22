@@ -61,10 +61,16 @@ tailwind: {
 }
 ```
 
-Tailwind is off until `enabled: true` is set. If a `tailwind.config.{ts,js,mjs}`
-file exists, or your CSS uses `@tailwind` or `@import "tailwindcss"`, while it
-is off, the build warns once ([KR7140](/docs/reference/diagnostics/)) instead of
-quietly shipping a nearly empty stylesheet.
+As in Tailwind v4, importing Tailwind turns it on: a project stylesheet with
+`@import "tailwindcss"` (or a v3 `@tailwind` directive) enables it without a
+`tailwind` key in the config. Set `enabled: false` to keep it off. The preflight
+reset is emitted whenever Tailwind is on, even before any utility class is used.
+
+If a `tailwind.config.{ts,js,mjs}` file exists, or your CSS uses `@tailwind` or
+`@import "tailwindcss"`, while Tailwind is off, the build warns once
+([KR7140](/docs/reference/diagnostics/)) instead of quietly shipping a stylesheet
+without the reset or utilities. A directive added while `krate dev` is running
+takes effect after a restart.
 
 ### CSS-first directives
 

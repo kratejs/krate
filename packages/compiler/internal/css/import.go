@@ -35,8 +35,8 @@ type ImportOptions struct {
 	Missing func(m MissingImport)
 	// Tailwind says how `@import "tailwindcss"` and `tailwindcss/*` are
 	// treated: TailwindResolve (default) resolves them like any package,
-	// TailwindKeep leaves them for the Tailwind directive pass, and
-	// TailwindOff leaves them and warns that Tailwind is not enabled.
+	// and TailwindKeep leaves them for the builder: the Tailwind directive
+	// pass, or its KR7140 warning when Tailwind is off.
 	Tailwind TailwindImportMode
 }
 
@@ -56,7 +56,6 @@ type TailwindImportMode int
 const (
 	TailwindResolve TailwindImportMode = iota
 	TailwindKeep
-	TailwindOff
 )
 
 // isTailwindImport reports `tailwindcss` and `tailwindcss/...` specifiers.
@@ -227,9 +226,6 @@ func (st *importer) expand(stmt importStmt, dir string, chain []string, depth in
 		return "", []string{stmt.text + ";"}, false
 	}
 	if st.opts.Tailwind != TailwindResolve && isTailwindImport(stmt.target) {
-		if st.opts.Tailwind == TailwindOff {
-			st.warn("@import %q needs Tailwind, which is not enabled; set tailwind.enabled in krate.config", stmt.target)
-		}
 		return "", nil, true
 	}
 	abs := st.locate(stmt.target, dir)
