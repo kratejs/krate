@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kratejs/krate/packages/compiler/internal/css"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
@@ -24,9 +25,19 @@ func (b *Builder) warnTailwindOff(file, found string) {
 	if seen {
 		return
 	}
+	fromConfigFile := file != ""
 	line, col := 1, 1
-	if file == "" {
+	if !fromConfigFile {
 		file, line, col = b.findTailwindDirective(found)
+	}
+	hint := "set `tailwind: { enabled: true }` in krate.config.ts, or remove the Tailwind config and directives if you do not use it"
+	switch {
+	case b.Cfg.Tailwind.EnabledSet:
+		hint = "krate.config.ts sets `tailwind.enabled: false`; remove it (or set it to true) to use Tailwind, or remove the Tailwind directives"
+	case !fromConfigFile && file != "" && b.DevMode:
+		// A project stylesheet with a directive turns Tailwind on when the
+		// builder starts, so this one was added while the dev server ran.
+		hint = "restart the dev server to turn Tailwind on, or set `tailwind: { enabled: true }` in krate.config.ts"
 	}
 	b.printWarningsOnce([]diag.Diagnostic{{
 		File:     file,
@@ -34,8 +45,8 @@ func (b *Builder) warnTailwindOff(file, found string) {
 		Col:      col,
 		Severity: diag.SeverityWarning,
 		Code:     diag.CodeTailwindDisabled,
-		Message:  fmt.Sprintf("%s found but Tailwind is not enabled, so no utility CSS is generated and Tailwind directives are removed", found),
-		Hint:     "set `tailwind: { enabled: true }` in krate.config.ts, or remove the Tailwind config and directives if you do not use it",
+		Message:  fmt.Sprintf("%s found but Tailwind is not enabled, so no Tailwind CSS (preflight or utilities) is generated", found),
+		Hint:     hint,
 	}})
 }
 
@@ -43,14 +54,51 @@ func (b *Builder) warnTailwindOff(file, found string) {
 // first occurrence of the directive text, so the warning points at it. It
 // returns an empty file when no stylesheet under the project holds it.
 func (b *Builder) findTailwindDirective(found string) (file string, line, col int) {
-	var skipDirs = map[string]bool{"node_modules": true, ".git": true, ".krate": true}
-	outDir, _ := filepath.Abs(b.Cfg.OutDir)
-	_ = filepath.WalkDir(b.Root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || file != "" {
+	walkProjectCSS(b.Root, b.Cfg.OutDir, func(path, text string) bool {
+		at := strings.Index(text, found)
+		if at < 0 {
+			return false
+		}
+		before := text[:at]
+		file = b.relPath(path)
+		line = strings.Count(before, "\n") + 1
+		col = len(before) - strings.LastIndexByte(before, '\n')
+		return true
+	})
+	if file == "" {
+		return "", 0, 0
+	}
+	return file, line, col
+}
+
+// projectUsesTailwind reports whether a stylesheet of the project holds a
+// Tailwind directive (`@import "tailwindcss"` or `@tailwind`).
+func projectUsesTailwind(root, outDir string) bool {
+	used := false
+	walkProjectCSS(root, outDir, func(_, text string) bool {
+		used = css.TailwindDirectiveUse(text) != ""
+		return used
+	})
+	return used
+}
+
+// walkProjectCSS calls fn with each .css file under root, outside
+// node_modules, .git, .krate and outDir, until fn returns true.
+func walkProjectCSS(root, outDir string, fn func(path, text string) bool) {
+	skipDirs := map[string]bool{"node_modules": true, ".git": true, ".krate": true}
+	if outDir != "" && !filepath.IsAbs(outDir) {
+		outDir, _ = filepath.Abs(outDir)
+	}
+	done := false
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if done {
+			return filepath.SkipAll
+		}
+		if err != nil {
 			return filepath.SkipDir
 		}
 		if d.IsDir() {
-			if skipDirs[d.Name()] || path == outDir {
+			if path != root && (skipDirs[d.Name()] || path == outDir) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -62,16 +110,7 @@ func (b *Builder) findTailwindDirective(found string) (file string, line, col in
 		if err != nil {
 			return nil
 		}
-		if at := strings.Index(string(data), found); at >= 0 {
-			text := string(data[:at])
-			file = b.relPath(path)
-			line = strings.Count(text, "\n") + 1
-			col = len(text) - strings.LastIndexByte(text, '\n')
-		}
+		done = fn(path, string(data))
 		return nil
 	})
-	if file == "" {
-		return "", 0, 0
-	}
-	return file, line, col
 }

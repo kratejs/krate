@@ -524,6 +524,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- Tailwind: a project stylesheet with `@import "tailwindcss"` (or a v3 `@tailwind` directive) now turns
+  Tailwind on, as in Tailwind v4, when `krate.config.ts` has no `tailwind.enabled`. Before, the import
+  alone generated nothing, so an app scaffolded without a `tailwind` key (the native scaffold has none)
+  shipped no preflight and no utilities: buttons kept the browser's bevelled default look and classes
+  such as `gap-2` did nothing. `tailwind: { enabled: false }` still keeps it off.
+
 - `krate serve`/`start` match routes and gzip responses faster. Route patterns are parsed once
   instead of on every request, the SSR page table is sorted by specificity once per manifest
   instead of per request, and a lookup that misses allocates nothing. Looking up a page among
@@ -597,6 +603,11 @@ host code runs in the native process. Names and options may change between relea
   the JSON report has an `info` list.
 
 ### Fixed
+
+- Tailwind: the preflight reset is emitted when Tailwind is on even if no utility class is found. A
+  project whose scan dirs held no class names (and whose CSS defined no `@theme` variables) silently lost
+  the whole Tailwind stylesheet, reset included. KR7140 is now reported once with its location; the
+  import was also reported a second time from `globals.css:0:0`.
 
 - Island entries are named by their content (`chunks/island_<id>.<hash>.js`) and cached as immutable. They
   were named from their source, so an entry kept its name while its code, or the content-hashed chunks it

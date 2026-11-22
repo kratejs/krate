@@ -523,6 +523,12 @@ func New(root string, cfg *config.Config) *Builder {
 	// the disk-cache config hash (and any other consumer) doesn't churn.
 	cfg.Markdown.Root = root
 	registerSourceRoot(root, cfg.OutputFileTracingRoot)
+	// Tailwind v4 is turned on by importing it: a stylesheet with a Tailwind
+	// directive enables it unless the config says otherwise. Without this the
+	// import alone produced no preflight and no utilities.
+	if !cfg.Tailwind.Enabled && !cfg.Tailwind.EnabledSet && projectUsesTailwind(root, cfg.OutDir) {
+		cfg.Tailwind.Enabled = true
+	}
 	cfgHash := ""
 	if data, err := json.Marshal(cfg); err == nil {
 		sum := sha256.Sum256(data)
@@ -1841,14 +1847,6 @@ func (b *Builder) affectedPages(changedFiles []string) []string {
 	return pages
 }
 
-// tailwindImportMode maps the Tailwind setting to the CSS import handling.
-func (b *Builder) tailwindImportMode() css.TailwindImportMode {
-	if b.Cfg.Tailwind.Enabled {
-		return css.TailwindKeep
-	}
-	return css.TailwindOff
-}
-
 // inlineImports inlines @import directives of merged authored CSS.
 func (b *Builder) inlineImports(cssText string) string {
 	if !b.Cfg.Tailwind.Enabled {
@@ -1862,7 +1860,7 @@ func (b *Builder) inlineImports(cssText string) string {
 		Root:       b.Root,
 		AllowRoots: bnd.CSSImportRoots(),
 		Resolve:    bundler.ResolveCSSSpecifier,
-		Tailwind:   b.tailwindImportMode(),
+		Tailwind:   css.TailwindKeep,
 	})
 }
 
@@ -2436,7 +2434,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 		bnd.SetSourceOverlays(b.nativeOverlays)
 	}
 	bnd.SetDevMode(b.DevMode)
-	bnd.SetTailwindImports(b.tailwindImportMode())
+	bnd.SetTailwindImports(css.TailwindKeep)
 	bnd.SetMarkdownConfig(b.Cfg.Markdown)
 	bnd.SetMarkdownBasePath(b.Cfg.BaseURLPath())
 	bnd.SetURLBasePath(b.Cfg.BaseURLPath())

@@ -3,6 +3,7 @@ package css
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -25,5 +26,23 @@ export default { darkMode: 'class', theme: { colors: { brand } } };
 	}
 	if got := cfg.Theme.Colors["brand"]["500"]; got != "#123456" {
 		t.Errorf("imported color not resolved: brand.500 = %q (colors=%v)", got, cfg.Theme.Colors)
+	}
+}
+
+func TestPreflightWithoutClasses(t *testing.T) {
+	root := t.TempDir()
+	res, err := GenerateTailwindDirectives(root, nil, TailwindOptions{Preflight: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.CSS, "@layer base{") || !strings.Contains(res.CSS, "border:0 solid") && !strings.Contains(res.CSS, "border: 0 solid") {
+		t.Errorf("a project without classes got no preflight:\n%s", res.CSS)
+	}
+	res, err = GenerateTailwindDirectives(root, nil, TailwindOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CSS != "" {
+		t.Errorf("preflight off and no classes should give an empty sheet, got:\n%s", res.CSS)
 	}
 }

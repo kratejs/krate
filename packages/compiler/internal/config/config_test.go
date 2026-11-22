@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -267,5 +268,33 @@ func TestRedirectStatusCode(t *testing.T) {
 		if !c.err && cfg.Redirects[0].Status() != c.want {
 			t.Errorf("%s: status %d, want %d", c.json, cfg.Redirects[0].Status(), c.want)
 		}
+	}
+}
+
+func TestTailwindEnabledSet(t *testing.T) {
+	for src, want := range map[string]bool{
+		`{"tailwind":{"scanDirs":["src"]}}`: false,
+		`{"tailwind":{"enabled":false}}`:    true,
+		`{"tailwind":{"enabled":true}}`:     true,
+		`{"tailwind":{"enabled":null}}`:     false,
+		`{"outDir":"dist"}`:                 false,
+	} {
+		cfg := Default()
+		if err := json.Unmarshal([]byte(src), cfg); err != nil {
+			t.Fatalf("%s: %v", src, err)
+		}
+		if cfg.Tailwind.EnabledSet != want {
+			t.Errorf("%s: EnabledSet = %v, want %v", src, cfg.Tailwind.EnabledSet, want)
+		}
+		if !cfg.Tailwind.Preflight {
+			t.Errorf("%s: decoding dropped the preflight default", src)
+		}
+	}
+	cfg := Default()
+	if err := applyConfigProp(cfg, "tailwind", map[string]interface{}{"enabled": false}); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Tailwind.EnabledSet {
+		t.Error("applyConfigProp did not record tailwind.enabled")
 	}
 }
