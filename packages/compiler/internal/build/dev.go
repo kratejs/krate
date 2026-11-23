@@ -41,15 +41,21 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 	root := b.Root
 	cfg := b.Cfg
 
-	// Safety net: if the builder has no dependency graph yet (no initial
-	// BuildAll ran), do one now so partial rebuilds work instead of every
-	// change taking the full-rebuild fallback in processChanges.
+	// Safety net: if no full build ran yet, do one now so partial rebuilds
+	// work instead of every change taking the full-rebuild fallback in
+	// processChanges. A build that already ran and failed leaves the graph
+	// empty too; it is not repeated, and a failure here keeps the watcher
+	// alive: the error is shown on the page (overlay) and the next save
+	// rebuilds.
 	b.depMu.Lock()
-	needsInitialBuild := len(b.depGraph) == 0
+	needsInitialBuild := len(b.depGraph) == 0 && !b.buildAttempted.Load()
 	b.depMu.Unlock()
 	if needsInitialBuild {
 		if err := b.BuildAll(); err != nil {
-			return fmt.Errorf("initial build: %w", err)
+			fmt.Fprintf(b.stderr(), "  %sBuild error:%s %s\n", cRed, cReset, BuildErrorSummary(err))
+			if hub != nil {
+				hub.Publish(DevEvent{Type: "reload", Diagnostics: DiagnosticsFromError(err)})
+			}
 		}
 	}
 

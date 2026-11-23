@@ -185,3 +185,56 @@ export default async function Page() { return <main><h1>toggle page two</h1><Tog
 		t.Errorf("an unrelated page broke: %d", code)
 	}
 }
+
+// A build error stops no one: when the first build fails the dev server stays
+// up and shows the error, a good page is served beside the broken one, and
+// the fix rebuilds without a restart.
+func TestDevStaysUpWhenTheFirstBuildFails(t *testing.T) {
+	d := startDevRun(t, map[string]string{
+		"src/pages/index.tsx": "export default function Home() { return <h1>home</h1>; }\n",
+		"src/pages/bad.tsx":   "export default function Bad() { const x = await Promise.resolve(1); return <h1>bad {x}</h1>; }\n",
+	})
+	select {
+	case err := <-d.errc:
+		t.Fatalf("a build error stopped the dev server: %v", err)
+	case <-time.After(1500 * time.Millisecond):
+	}
+	if code, body := httpGet(t, d.base+"/bad/", "text/html"); code == 200 && !strings.Contains(body, "Build failed") && !strings.Contains(body, "async") {
+		t.Errorf("the broken page should show the build error:\n%s", body)
+	}
+	snap := d.hub.Snapshot()
+	if snap.BuildOK || len(snap.Diagnostics) == 0 {
+		t.Fatalf("the error must reach the overlay: %+v", snap)
+	}
+	d.waitBody(t, "/", "home")
+
+	d.write(t, "src/pages/bad.tsx", "export default async function Bad() { const x = await Promise.resolve(1); return <h1>fixed {x}</h1>; }\n")
+	d.waitBody(t, "/bad/", "fixed 1")
+	select {
+	case err := <-d.errc:
+		t.Fatalf("the dev server stopped: %v", err)
+	default:
+	}
+	waitUntilTrue(t, 20*time.Second, "the build to be clean", func() bool { return d.hub.Snapshot().BuildOK })
+}
+
+// With no page building at all, the watcher must not give up (that ended the
+// whole dev process): the error stays on screen and the fix is picked up.
+func TestDevWatcherSurvivesAFirstBuildWithNoGoodPage(t *testing.T) {
+	d := startDevRun(t, map[string]string{
+		"src/pages/index.tsx": "export default function Home() { const x = await Promise.resolve(1); return <h1>home {x}</h1>; }\n",
+	})
+	select {
+	case err := <-d.watchErr:
+		t.Fatalf("the watcher returned after a failed first build: %v", err)
+	case err := <-d.errc:
+		t.Fatalf("the dev server stopped: %v", err)
+	case <-time.After(1500 * time.Millisecond):
+	}
+	if code, body := httpGet(t, d.base+"/", "text/html"); !strings.Contains(body, "Build failed") {
+		t.Errorf("the page should show the build error (%d):\n%s", code, body)
+	}
+	d.write(t, "src/pages/index.tsx", "export default function Home() { return <h1>home fixed</h1>; }\n")
+	d.waitBody(t, "/", "home fixed")
+	waitUntilTrue(t, 20*time.Second, "the build to be clean", func() bool { return d.hub.Snapshot().BuildOK })
+}

@@ -244,6 +244,7 @@ type Builder struct {
 	depGraph         map[string][]string // file path -> page source paths that depend on it
 	pageDeps         map[string][]string // page source path -> files it depends on
 	depMu            sync.Mutex          // protects depGraph/pageDeps
+	buildAttempted   atomic.Bool         // a full build has run, whether or not it succeeded
 	// needFullRebuild is set by a partial dev rebuild that finds the build
 	// manifests out of step with the pages it built (a page turned request-time
 	// or static); the watcher then rebuilds everything.
@@ -1051,6 +1052,7 @@ func (b *Builder) guardOutDir() error {
 }
 
 func (b *Builder) BuildAll() error {
+	b.buildAttempted.Store(true)
 	defer b.phase("build:total")()
 	bl := b.Prof.Laps("build:")
 	esbuild0 := esbuildStatsSnapshot()

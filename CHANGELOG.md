@@ -604,6 +604,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate dev` no longer shuts down when the first build fails. The watcher repeated the full build when the
+  dependency graph was empty (a build where no page compiled leaves it so) and returned that error, which ended
+  the whole dev process; an `await` in a non-async function was enough. The error now shows on the page and in
+  the overlay, the rest of the site keeps serving, and the next save rebuilds.
+
 - `krate dev`: a page added while the server runs is served without a restart. The Node renderer read its
   server manifest once at startup, so a new request-time page (such as `admin/staff/[id].tsx` next to
   `staff.tsx`) answered 500 with `no such page`; the renderer now re-reads the manifest on every rebuild. A
