@@ -279,6 +279,10 @@ async function main() {
   await buildSplitRuntime();
   await buildBundle('krate-dev.js', DEV_ENTRY, false);
   await buildIslandSwap();
+  // Opt-in typing bridge (@krate/runtime/react-types): a hand-written .d.ts
+  // that tsc does not emit, plus an empty module for the "default" condition.
+  fs.copyFileSync(path.join(__dirname, 'types', 'react-types.d.ts'), path.join(__dirname, 'dist', 'react-types.d.ts'));
+  fs.writeFileSync(path.join(__dirname, 'dist', 'react-types.js'), 'export {};\n');
   console.log('Runtime bundled! (krate-runtime.js + krate-hydrate.js + krate-hydrate-lite.js + krate-suspense.js + krate-dev.js)');
 }
 

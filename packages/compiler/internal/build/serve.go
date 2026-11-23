@@ -820,6 +820,8 @@ type regionPageResult struct {
 	denied int
 	// redirect is the Location for a page-region redirect response.
 	redirect string
+	// redirectStatus is 307 for redirect() and 308 for permanentRedirect().
+	redirectStatus int
 	// renderErr is non-empty when the page-region render reported a server
 	// error (status >= 500). The caller serves the baked shell / error page.
 	renderErr string
@@ -1305,6 +1307,7 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 				}
 				if res.redirect == "" {
 					res.redirect = frame.Redirect
+					res.redirectStatus = frame.Status
 				}
 				framesLeft--
 				continue
@@ -1323,6 +1326,7 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 					res.denied = frame.Denied
 				}
 				res.redirect = frame.Redirect
+				res.redirectStatus = frame.Status
 				// A page-region render that reported an error (or whose status is
 				// a server error) must not replace the baked body with empty HTML.
 				// Keep the baked content and surface the failure to the caller.
@@ -2336,6 +2340,10 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 				headers[k] = v[0]
 			}
 		}
+		// Go hoists Host out of r.Header; headers() in a page should see it.
+		if r.Host != "" {
+			headers["Host"] = r.Host
+		}
 
 		query := make(map[string]string)
 		for k, v := range r.URL.Query() {
@@ -2454,7 +2462,11 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 				return
 			}
 			if rr.redirect != "" {
-				http.Redirect(w, r, rr.redirect, http.StatusFound)
+				code := http.StatusTemporaryRedirect
+				if rr.redirectStatus == http.StatusPermanentRedirect {
+					code = http.StatusPermanentRedirect
+				}
+				http.Redirect(w, r, rr.redirect, code)
 				return
 			}
 			return
@@ -2557,6 +2569,10 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 			if len(v) > 0 {
 				headers[k] = v[0]
 			}
+		}
+		// Go hoists Host out of r.Header; headers() in a page should see it.
+		if r.Host != "" {
+			headers["Host"] = r.Host
 		}
 		query := make(map[string]string)
 		for k, v := range r.URL.Query() {

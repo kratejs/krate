@@ -241,9 +241,13 @@ export function redirect(url: string): never {
   throw err;
 }
 
-/** redirect() with a replace navigation. */
+/** redirect() that a page or API route answers with 308 instead of 307. */
 export function permanentRedirect(url: string): never {
-  return redirect(url);
+  if (typeof location !== 'undefined') void krateRouter.push(url);
+  const err = new Error('Server action redirect to ' + url) as Error & { __krateRedirect: string; __krateRedirectStatus: number };
+  err.__krateRedirect = url;
+  err.__krateRedirectStatus = 308;
+  throw err;
 }
 
 export { notFound, forbidden, unauthorized } from './request-context.js';

@@ -2032,6 +2032,9 @@ func (b *Builder) tailwindCSS() string {
 	for _, w := range res.Warnings {
 		b.warnOnce("Tailwind: " + w)
 	}
+	for _, d := range res.Dropped {
+		b.warnOnce("Tailwind: dropped class " + d + " (its CSS would have broken the stylesheet)")
+	}
 	if opts.Strict && len(res.Unknown) > 0 {
 		b.warnOnce("Tailwind strict: " + strconv.Itoa(len(res.Unknown)) + " class candidate(s) matched no utility: " + strings.Join(res.Unknown, ", "))
 	}

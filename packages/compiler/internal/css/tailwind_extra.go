@@ -51,7 +51,7 @@ func miscUtility(cls string, theme TailwindTheme) (string, bool) {
 		case "current":
 			return "fill: currentColor;", true
 		}
-		if v, isArb := unwrapArbitrary(rest); isArb {
+		if v, _, isArb := arbitraryValue(rest); isArb {
 			return "fill: " + v + ";", true
 		}
 		if v, ok := colorOf(rest, theme); ok {
@@ -80,7 +80,7 @@ func miscUtility(cls string, theme TailwindTheme) (string, bool) {
 		}
 	}
 	if rest, ok := strings.CutPrefix(cls, "placeholder-"); ok {
-		if v, isArb := unwrapArbitrary(rest); isArb {
+		if v, _, isArb := arbitraryValue(rest); isArb {
 			return "color: " + v + ";", true
 		}
 		if v, ok := colorOf(rest, theme); ok {

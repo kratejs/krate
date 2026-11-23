@@ -70,6 +70,10 @@
       "types": "./dist/jsx-types.d.ts",
       "default": "./dist/jsx-types.js"
     },
+    "./react-types": {
+      "types": "./dist/react-types.d.ts",
+      "default": "./dist/react-types.js"
+    },
     "./react": {
       "types": "./dist/react.d.ts",
       "default": "./dist/react.js"

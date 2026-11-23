@@ -90,6 +90,33 @@ func tsconfigPlan(root string, rep *Report) (PlannedFile, bool, string) {
 	return PlannedFile{Kind: KindConfig, Target: "tsconfig.json", Content: append(out, '\n')}, true, ""
 }
 
+// reactTypesBridgeTarget is where the bridge declaration file is written. The
+// tsconfig written by tsconfigPlan includes src.
+const reactTypesBridgeTarget = "src/krate-react.d.ts"
+
+// reactTypesBridgePlan adds a declaration file importing
+// @krate/runtime/react-types when the project keeps @types/react. Without it,
+// Krate's JSX Element is not a React node and React-typed props (children:
+// ReactNode) reject every element. Projects without @types/react are left
+// alone: they type-check against Krate's own JSX types.
+func reactTypesBridgePlan(root string) (PlannedFile, bool) {
+	data, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		return PlannedFile{}, false
+	}
+	var pkg map[string]any
+	if json.Unmarshal(data, &pkg) != nil || !hasDependency(pkg, "@types/react") {
+		return PlannedFile{}, false
+	}
+	if fileExists(filepath.Join(root, filepath.FromSlash(reactTypesBridgeTarget))) {
+		return PlannedFile{}, false
+	}
+	content := "// Makes Krate's JSX element type a React element, so React-typed props\n" +
+		"// (children: ReactNode) accept it. Delete this file if you remove @types/react.\n" +
+		"import \"@krate/runtime/react-types\";\n"
+	return PlannedFile{Kind: KindConfig, Target: reactTypesBridgeTarget, Content: []byte(content)}, true
+}
+
 func krateIncludes(v any) []any {
 	var out []any
 	seen := map[string]bool{}

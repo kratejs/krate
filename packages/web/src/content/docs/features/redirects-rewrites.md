@@ -78,6 +78,8 @@ can front an API route.
 ## Difference
 
 - **Redirects** - the browser is sent to a new URL (`301`/`302`).
+  A redirect from code differs: `redirect()` in a page or an API route answers
+  `307` and `permanentRedirect()` `308`, as in Next.js.
 - **Rewrites** - the request is served from a different internal path; the URL
   in the address bar is unchanged.
 

@@ -252,7 +252,7 @@ export default async function Layout({ children }: any) {
 		t.Errorf("the layout dropped its children:\n%s", html)
 	}
 	status, header, html := getBody(t, base+"/app/admin/")
-	if status != 302 && status != 307 || header.Get("Location") != "/app" {
+	if status != 307 || header.Get("Location") != "/app" {
 		t.Errorf("the nested layout must redirect a guest: status %d location %q\n%s", status, header.Get("Location"), html)
 	}
 	if strings.Contains(html, "admin") {

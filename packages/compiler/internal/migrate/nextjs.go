@@ -389,6 +389,9 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	if ts, ok, note := tsconfigPlan(abs, rep); ok {
 		rep.Files = append(rep.Files, ts)
 		rep.Warnings = append(rep.Warnings, "merged/generated tsconfig.json for Krate JSX and route types")
+		if bridge, ok := reactTypesBridgePlan(abs); ok {
+			rep.Files = append(rep.Files, bridge)
+		}
 	} else if note != "" {
 		rep.Manual = append(rep.Manual, ManualItem{Source: "tsconfig.json", Reason: note, Hint: "set jsxImportSource to @krate/runtime and include .krate/types"})
 	}
