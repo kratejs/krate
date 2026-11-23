@@ -604,6 +604,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate dev` / `krate serve`: a client leaving an open streamed response (an SSE route behind the API
+  sidecar) no longer logs an ERROR "panic recovered" with a full stack and a superfluous WriteHeader.
+  `http.ErrAbortHandler`, which `httputil.ReverseProxy` panics with on purpose, is passed on to net/http.
+
 - Tailwind: the preflight reset is emitted when Tailwind is on even if no utility class is found. A
   project whose scan dirs held no class names (and whose CSS defined no `@theme` variables) silently lost
   the whole Tailwind stylesheet, reset included. KR7140 is now reported once with its location; the

@@ -334,11 +334,17 @@ func requestIDFrom(ctx context.Context) string {
 
 // panicRecoveryMiddleware catches panics from downstream handlers so a single
 // bad request cannot take the whole process down. It logs the panic and stack
-// and returns 500 (JSON for /api/*, plain text otherwise).
+// and returns 500 (JSON for /api/*, plain text otherwise). http.ErrAbortHandler
+// is the exception: httputil.ReverseProxy and net/http use it to abort a
+// response whose client went away, so it is passed back up to net/http, which
+// closes the connection without logging and without a 500 after headers.
 func panicRecoveryMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
+				if rec == http.ErrAbortHandler {
+					panic(rec)
+				}
 				logger.Error("panic recovered",
 					"id", requestIDFrom(r.Context()),
 					"method", r.Method,
