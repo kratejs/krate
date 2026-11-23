@@ -624,6 +624,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- With `ssr.apiRuntime: "deno"` the API sidecar no longer restarts every two seconds. Its check that the
+  Krate host is still alive (`process.kill(pid, 0)`) needs `--allow-run`, which the sidecar does not have, and
+  the refused check was taken for a dead host, so the sidecar exited and requests in the restart gap answered
+  502. Only a missing process (`ESRCH`) ends the sidecar now; a check that cannot run stops the watch.
+
 - The Node, Bun and Deno API sidecar no longer exits when a route leaves an error behind outside its own promise
   chain. A route that started a promise nobody awaited and that rejected, or threw from a timer or callback,
   ended the sidecar process (or one cluster worker), and the API routes answered 503 until the host restarted

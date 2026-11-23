@@ -167,3 +167,42 @@ func TestAPIRouteErrorsThatEscapeTheRequestKeepTheSidecarUp(t *testing.T) {
 		})
 	}
 }
+
+// TestDenoAPISidecarOutlivesTheParentWatch: the sidecar checks every two
+// seconds that the Krate host is alive with process.kill(pid, 0). Deno runs it
+// without --allow-run, so the check throws a permission error, which the watch
+// took for a dead host: the sidecar exited every two seconds and requests in
+// the gap answered 502.
+func TestDenoAPISidecarOutlivesTheParentWatch(t *testing.T) {
+	if _, err := exec.LookPath("deno"); err != nil {
+		t.Skip("deno is not installed")
+	}
+	t.Parallel()
+	ensureRuntimeDist(t)
+	b, root := scProject(t, map[string]string{
+		"src/pages/index.tsx": `export default function Home() { return <main>home</main>; }`,
+		"src/api/pid.ts":      `export function GET() { return new Response(String(process.pid)); }`,
+	})
+	b.Cfg.SSR.APIRuntime = "deno"
+	b.Cfg.SSR.NodeWorkers = 1
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	// A restart is quick enough that most requests never see the gap, so
+	// compare the process id instead of only the status.
+	status, first := get(t, base+"/api/pid")
+	if status != 200 {
+		t.Fatalf("/api/pid answered %d: %s", status, first)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		if status, pid := get(t, base+"/api/pid"); status != 200 || pid != first {
+			t.Fatalf("the Deno API sidecar was restarted: /api/pid answered %d %q, first %q", status, pid, first)
+		}
+	}
+}

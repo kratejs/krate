@@ -68,7 +68,11 @@ if (PARENT_PID > 0) {
     try {
       process.kill(PARENT_PID, 0);
     } catch (e) {
-      if (!e || e.code !== 'EPERM') process.exit(0);
+      // ESRCH: the host is gone. Any other error (Deno without --allow-run
+      // refuses the check) means the parent cannot be watched; stop watching
+      // instead of exiting every two seconds.
+      if (e && e.code === 'ESRCH') process.exit(0);
+      if (!e || e.code !== 'EPERM') clearInterval(parentWatch);
     }
   }, 2000);
   if (parentWatch.unref) parentWatch.unref();
@@ -511,7 +515,11 @@ if (PARENT_PID > 0) {
     try {
       process.kill(PARENT_PID, 0);
     } catch (e) {
-      if (!e || e.code !== 'EPERM') process.exit(0);
+      // ESRCH: the host is gone. Any other error (Deno without --allow-run
+      // refuses the check) means the parent cannot be watched; stop watching
+      // instead of exiting every two seconds.
+      if (e && e.code === 'ESRCH') process.exit(0);
+      if (!e || e.code !== 'EPERM') clearInterval(parentWatch);
     }
   }, 2000);
   if (parentWatch.unref) parentWatch.unref();
