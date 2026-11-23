@@ -81,7 +81,12 @@ export function compareRouteSpecificity(a: string, b: string): number {
     if (sa[i].kind !== sb[i].kind) return sa[i].kind - sb[i].kind;
     if (sa[i].kind === 0 && sa[i].text !== sb[i].text) return strCompare(sa[i].text, sb[i].text);
   }
-  if (sa.length !== sb.length) return sb.length - sa.length;
+  if (sa.length !== sb.length) {
+    // A trailing optional catch-all is the less specific: "shop" answers /shop before "shop/[[...x]]".
+    if (sa.length > sb.length && sa[sb.length].kind === 3) return 1;
+    if (sb.length > sa.length && sb[sa.length].kind === 3) return -1;
+    return sb.length - sa.length;
+  }
   return strCompare(a, b);
 }
 

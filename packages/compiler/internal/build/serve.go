@@ -2013,6 +2013,9 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		printf("  %s*%s Dynamic routes: %d patterns\n", cCyan, cReset, len(dynRoutes))
 	}
 
+	// Prerendered page routes, to rank them against request-time pages.
+	ssgRoutes := &staticPageRoutes{}
+
 	// Opt-in User-Agent document selection (compat.mode hybrid + userAgent).
 	uaOn := uaOptIn(cfg.Compat)
 
@@ -2034,7 +2037,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 				return true
 			}
 			page, _ := ssr.FindPageForRoute(requestRoute(r.URL.Path))
-			return page != nil && page.Mode != RenderSSG.String()
+			return page != nil && page.Mode != RenderSSG.String() && !ssgRoutes.shadows(absOut, r.URL.Path, page)
 		}, fileServer)
 	}
 
@@ -2344,7 +2347,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		// no fresh region content). Only pages that are NOT request-time (SSG /
 		// plain static) give precedence to their concrete static file over a
 		// sibling dynamic [param] template.
-		if shouldServeStatic(absOut, r.URL.Path, page) {
+		if shouldServeStatic(absOut, r.URL.Path, page) || ssgRoutes.shadows(absOut, r.URL.Path, page) {
 			handlerWith404.ServeHTTP(w, r)
 			return
 		}
@@ -3147,6 +3150,64 @@ func shouldServeStatic(absOut, urlPath string, page *ManifestPage) bool {
 		return isBakedAsset(absOut, urlPath)
 	}
 	return staticRouteExists(absOut, urlPath)
+}
+
+// staticPageRoutes lists the prerendered (SSG) page routes of the build in
+// dist/manifest.json. The file is re-read when it changes, so a dev rebuild
+// that adds or removes a page is seen by the next request.
+type staticPageRoutes struct {
+	mu       sync.Mutex
+	path     string
+	modTime  time.Time
+	size     int64
+	patterns []string
+}
+
+func (s *staticPageRoutes) load(absOut string) []string {
+	path := ResolveManifestPath(absOut, "manifest.json")
+	fi, err := os.Stat(path)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.path, s.patterns = "", nil
+		return nil
+	}
+	if path == s.path && fi.ModTime().Equal(s.modTime) && fi.Size() == s.size {
+		return s.patterns
+	}
+	s.path, s.modTime, s.size, s.patterns = path, fi.ModTime(), fi.Size(), nil
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var m Manifest
+	if json.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	for _, p := range m.Pages {
+		if p.Mode == RenderSSG {
+			s.patterns = append(s.patterns, p.Route)
+		}
+	}
+	return s.patterns
+}
+
+// shadows reports whether a prerendered page matches urlPath with a more
+// specific route than page, the request-time page that matched it. A static
+// route beats a [param], a [param] a [...catchAll], and a catch-all a
+// [[...optional]], whichever render mode each page has.
+func (s *staticPageRoutes) shadows(absOut, urlPath string, page *ManifestPage) bool {
+	if page == nil || page.Mode == RenderSSG.String() {
+		return false
+	}
+	for _, p := range s.load(absOut) {
+		if compareRouteSpecificity(p, page.Route) < 0 {
+			if _, ok := matchRoutePattern(urlPath, p); ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isBakedAsset reports whether urlPath names an existing non-HTML file in the

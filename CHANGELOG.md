@@ -624,6 +624,16 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Routes rank the way Next.js ranks them in every host. A request-time dynamic page (an async `[slug].tsx`) no
+  longer answers a URL that a prerendered page owns: `about.tsx` beside `(site)/[slug].tsx` served
+  `catch-all about`, and `blog/new.tsx`, a static `shop/index.tsx` next to `shop/[[...filter]].tsx` and a
+  `generateStaticParams` page next to a request-time `[...rest]` were shadowed the same way. The order is an
+  exact static path, then `[param]`, then `[...catchAll]`, then `[[...optional]]`, and a static `shop` now
+  outranks `shop/[[...filter]]` (the longer pattern used to win). `krate start`, `krate serve`, `krate dev` and
+  the Node, Netlify and Cloudflare handler apply it; the Vercel function now carries the prerendered pages a
+  request-time route would otherwise capture, because Vercel sends that route's glob to the function before its
+  filesystem.
+
 - With `ssr.apiRuntime: "deno"` the API sidecar no longer restarts every two seconds. Its check that the
   Krate host is still alive (`process.kill(pid, 0)`) needs `--allow-run`, which the sidecar does not have, and
   the refused check was taken for a dead host, so the sidecar exited and requests in the restart gap answered
