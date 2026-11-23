@@ -60,6 +60,12 @@ type DevHub struct {
 	lastEventAt time.Time
 	rebuilds    int
 
+	// builds counts the rebuilds running; idle is closed while there are none
+	// (nil then). Requests wait on it (see devBuildGate).
+	buildMu sync.Mutex
+	builds  int
+	idle    chan struct{}
+
 	// serverErrs are failed server-side parts (sidecars, middleware) that have
 	// not recovered yet, by source, so a tab opened later still shows them.
 	serverErrs    map[string]ClientError
@@ -69,6 +75,40 @@ type DevHub struct {
 // NewDevHub creates an empty hub.
 func NewDevHub() *DevHub {
 	return &DevHub{subs: make(map[chan DevEvent]struct{}), restart: make(chan struct{})}
+}
+
+// BeginBuild marks a rebuild as running: the dev server holds requests for
+// pages and assets until EndBuild, since a rebuild rewrites the output they
+// are served from. Calls nest.
+func (h *DevHub) BeginBuild() {
+	h.buildMu.Lock()
+	defer h.buildMu.Unlock()
+	if h.builds == 0 {
+		h.idle = make(chan struct{})
+	}
+	h.builds++
+}
+
+// EndBuild ends a rebuild started with BeginBuild.
+func (h *DevHub) EndBuild() {
+	h.buildMu.Lock()
+	defer h.buildMu.Unlock()
+	if h.builds == 0 {
+		return
+	}
+	h.builds--
+	if h.builds == 0 {
+		close(h.idle)
+		h.idle = nil
+	}
+}
+
+// buildIdle returns a channel closed when no rebuild is running, or nil when
+// none is.
+func (h *DevHub) buildIdle() <-chan struct{} {
+	h.buildMu.Lock()
+	defer h.buildMu.Unlock()
+	return h.idle
 }
 
 // SetReloadHook installs fn to run once for every "reload" event published.

@@ -665,6 +665,13 @@ host code runs in the native process. Names and options may change between relea
   (`/chunks/preact-*.js`, the targets of the import map) were remembered from the first build and not written
   again into the emptied output directory, so every island failed to load until a restart.
 
+- `krate dev`: requests that arrive while a rebuild runs wait for it instead of failing. A rebuild of the whole
+  site emptied the output directory first, so pages, scripts and styles answered 404 until it finished, and a
+  rebuild of some pages rewrote the server bundles under a request. A page served just before a rebuild, or
+  still open in a browser, also named island chunks the rebuild had deleted, which failed with `Failed to fetch
+  dynamically imported module`. Requests for pages and assets now wait for the running rebuild (up to a minute),
+  and the chunks a rebuild replaced stay served from `.krate/dev-retired-chunks` for 30 minutes.
+
 - Types: apps that keep `@types/react` (migrated Next.js apps) failed to type-check because Krate's
   `JSX.Element` is a DOM `Node`, which React's `ReactNode` rejects: `<Link>`/`<Head>` gave TS2786 under
   `jsx: "react-jsx"`, and every element gave TS2322 against React-typed props under `jsx: "preserve"` with

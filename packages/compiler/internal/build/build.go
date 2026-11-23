@@ -1074,6 +1074,9 @@ func (b *Builder) BuildAll() error {
 	if err := b.prepareNativeHost(); err != nil {
 		return err
 	}
+	if b.DevMode {
+		retireOutputChunks(b.Root, b.Cfg.OutDir)
+	}
 	if err := os.RemoveAll(b.Cfg.OutDir); err != nil {
 		return fmt.Errorf("cleaning output dir: %w", err)
 	}
