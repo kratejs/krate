@@ -255,17 +255,24 @@ function versionBundleGraph() {
   const register = (nodeModule as { register?: (specifier: string, options: object) => void }).register;
   if (typeof register !== "function") return;
   const hooks =
-    "let prefix = '';\n" +
-    "export function initialize(data) { prefix = data.prefix; }\n" +
+    "let prefixes = [];\n" +
+    "export function initialize(data) { prefixes = data.prefixes; }\n" +
     "export async function resolve(specifier, context, nextResolve) {\n" +
     "  const out = await nextResolve(specifier, context);\n" +
     "  const parent = context.parentURL ? new URL(context.parentURL) : null;\n" +
-    "  if (parent && parent.search && out.url.startsWith(prefix) && !out.url.includes('?')) return { ...out, url: out.url + parent.search };\n" +
+    "  if (parent && parent.search && prefixes.some((p) => out.url.startsWith(p)) && !out.url.includes('?')) return { ...out, url: out.url + parent.search };\n" +
     "  return out;\n" +
     "}\n";
   try {
-    const prefix = pathToFileURL(path.join(OUT_DIR, ".krate", "server-bundles")).href + "/";
-    register("data:text/javascript," + encodeURIComponent(hooks), { parentURL: import.meta.url, data: { prefix } });
+    // Node resolves module URLs to real paths, so a symlinked project root
+    // (macOS /var is /private/var) needs the real path as well.
+    const dir = path.join(OUT_DIR, ".krate", "server-bundles");
+    const prefixes = [pathToFileURL(dir).href + "/"];
+    try {
+      const real = pathToFileURL(fs.realpathSync(dir)).href + "/";
+      if (real !== prefixes[0]) prefixes.push(real);
+    } catch {}
+    register("data:text/javascript," + encodeURIComponent(hooks), { parentURL: import.meta.url, data: { prefixes } });
   } catch (err: any) {
     console.error("[krate-ssr] Could not version the page module graph; client components may render stale code in dev:", err.message);
   }
