@@ -473,9 +473,13 @@ export function stripActionURL(url: string): string {
   try {
     const raw = new URLSearchParams(url.slice(i + 1)).get(ACTION_ARGS_FIELD);
     const leading = raw ? (JSON.parse(raw) as unknown) : null;
+    const bound = new URLSearchParams(url.slice(i + 1)).get('__krate_bound');
+    const keep: string[] = [];
     if (Array.isArray(leading) && typeof leading[0] === 'string' && leading[0].startsWith('k1.')) {
-      return base + '?' + ACTION_ARGS_FIELD + '=' + encodeURIComponent(JSON.stringify([leading[0]]));
+      keep.push(ACTION_ARGS_FIELD + '=' + encodeURIComponent(JSON.stringify([leading[0]])));
     }
+    if (bound && bound.startsWith('k1.')) keep.push('__krate_bound=' + encodeURIComponent(bound));
+    if (keep.length > 0) return base + '?' + keep.join('&');
   } catch {
     // not a token: strip like any native query
   }

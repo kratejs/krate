@@ -626,8 +626,11 @@ host code runs in the native process. Names and options may change between relea
 - A server action passed as a prop to a `"use client"` component (and one imported straight into a client
   module) now posts a `FormData` argument as multipart, like the runtime's own proxy, so
   `useActionState(actionFromProps)` with `<form action={run}>` receives the form instead of `{}`
-  (`e.get is not a function`). The revived prop also carries `$$krateAction`, `$$krateBound` and
-  `.bind()`, and arguments pre-filled with `.bind()` on the server survive the trip to the island.
+  (`e.get is not a function`). The revived prop also supports
+  `.bind()`. Arguments pre-filled with `.bind()` on the server survive the trip to the island sealed
+  (AES-256-GCM, bound to the action id, like inline action captures) in the action URL: the browser never
+  sees or sends them, and the action endpoint rejects a forged token or one for another action. The
+  action manifest now carries the sealing key for any app with server actions.
 
 - `headers()` in a page now includes `host` (the request's Host, as route handlers already saw it), in
   `krate serve` and in the Node/edge server handler. `x-forwarded-host` is still only what the client or

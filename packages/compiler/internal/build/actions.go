@@ -145,7 +145,7 @@ func (b *Builder) prepareActions() error {
 
 	manifest := actionManifest{Actions: reg.Entries}
 	perm := os.FileMode(0644)
-	if len(inlineMods) > 0 {
+	if len(reg.Entries) > 0 {
 		secret, fromEnv, err := b.actionSecret()
 		if err != nil {
 			return err

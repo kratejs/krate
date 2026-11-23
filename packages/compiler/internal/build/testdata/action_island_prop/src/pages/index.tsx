@@ -6,7 +6,7 @@ export default async function Home() {
   return (
     <main>
       <SaveForm id="plain" action={save} />
-      <SaveForm id="bound" action={saveTagged.bind(null, "tag")} />
+      <SaveForm id="bound" action={saveTagged.bind(null, "s3cret-tag")} />
       <DirectForm id="direct" action={ping} />
     </main>
   );

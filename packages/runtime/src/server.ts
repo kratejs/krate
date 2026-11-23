@@ -4,6 +4,7 @@
 import { ATTR_ALIASES } from './htmlspec-attributes.js';
 import { withBase } from './base-path.js';
 import { highlight as highlightCode, trimSpace } from './highlight.js';
+import { sealBoundArgs } from './action-seal.js';
 import { accessDeniedStatus, isNotFoundSignal, redirectTarget } from './request-context.js';
 import { sha256Hex } from './sha256.js';
 import { markErrorCaught } from './cache-scope.js';
@@ -771,6 +772,7 @@ function serializeClientProp(v: unknown, path: string, component: string): unkno
   if (v === undefined) return undefined;
   return encodeProp(v, path, {
     isAction: flightIsAction,
+    sealBound: sealBoundArgs,
     isJSX: flightIsJSX,
     fail: (p, what, hint) => clientPropError(p, component, what, hint),
   });

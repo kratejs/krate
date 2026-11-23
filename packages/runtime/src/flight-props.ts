@@ -10,9 +10,11 @@ export type FlightHooks = {
   isAction(v: unknown): string | undefined;
   isJSX(v: unknown): boolean;
   fail(path: string, what: string, hint?: string): Error;
+  /** Seals the arguments an action was bound to (see action-seal.ts); absent where nothing can be sealed. */
+  sealBound?(id: string, bound: unknown[], path: string): string;
 };
 
-const RESERVED = ["__krateT", "__krateAction", "__krateBound", "__krateSlotHTML", "__krateSlotTree", "__krateChildren", "__krateTree"];
+const RESERVED = ["__krateT", "__krateAction", "__krateSlotHTML", "__krateSlotTree", "__krateChildren", "__krateTree"];
 
 const TYPED_ARRAYS: Record<string, true> = {
   Int8Array: true, Uint8Array: true, Uint8ClampedArray: true, Int16Array: true, Uint16Array: true,
@@ -63,11 +65,15 @@ export function encodeProp(v: unknown, path: string, hooks: FlightHooks): unknow
   }
   const action = hooks.isAction(v);
   if (action !== undefined) {
-    // Arguments pre-filled with .bind() travel along; an inline action's sealed
-    // closure token is already part of its URL.
-    const bound = (v as { $$krateBound?: unknown }).$$krateBound;
-    if (Array.isArray(bound) && bound.length > 0 && !action.includes("__krate_args=")) {
-      return { __krateAction: action, __krateBound: bound.map((x, i) => encodeProp(x, `${path}.bind[${i}]`, hooks)) };
+    // Arguments pre-filled with .bind() travel sealed in the action URL, never in
+    // the clear; an inline action's closure token is already part of its URL.
+    const f = v as { $$krateBound?: unknown; $$krateAction?: unknown };
+    if (Array.isArray(f.$$krateBound) && f.$$krateBound.length > 0 && !action.includes("__krate_args=")) {
+      if (!hooks.sealBound || typeof f.$$krateAction !== "string") {
+        throw hooks.fail(path, "a server action with bound arguments", "bound arguments can only be sealed for a \"use server\" function; pass the values as props instead");
+      }
+      const token = hooks.sealBound(f.$$krateAction, f.$$krateBound, path);
+      return { __krateAction: action + (action.includes("?") ? "&" : "?") + "__krate_bound=" + encodeURIComponent(token) };
     }
     return { __krateAction: action };
   }

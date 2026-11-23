@@ -239,7 +239,7 @@ function __krateRevive(v, h, call, comp) {
   if (v && typeof v === "object") {
     if (typeof v.__krateT === "string") return __krateTagged(v, h, call, comp);
     if (typeof v.__krateAction === "string") {
-      return __krateActionFn(v.__krateAction, Array.isArray(v.__krateBound) ? __krateRevive(v.__krateBound, h, call, comp) : [], call);
+      return __krateActionFn(v.__krateAction, [], call);
     }
     if (typeof v.__krateSlotHTML === "string") return __krateSlot(h, v.__krateSlotHTML);
     if (typeof v.__krateSlotRef === "string") return __krateSlot(h, "", v.__krateSlotRef);

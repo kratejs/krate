@@ -86,18 +86,29 @@ describe('server actions passed as props', () => {
     return revive(wire, null, call, null).a;
   }
 
-  it('revives to a callable carrying its URL and bound arguments', () => {
+  it('revives to a callable that posts to its URL; client bind adds client arguments', () => {
     const calls: unknown[][] = [];
-    const fn = revived(['t', { n: 1 }], (url, args) => calls.push([url, args]));
-    expect(fn.$$krateAction).toBeUndefined();
+    const fn = revived([], (url, args) => calls.push([url, args]));
     expect(fn.actionUrl).toBe('/__krate/action/abc');
-    expect(fn.$$krateBound).toEqual(['t', { n: 1 }]);
     fn('prev', 'form');
     fn.bind(null, 'more')('x');
     expect(calls).toEqual([
-      ['/__krate/action/abc', ['t', { n: 1 }, 'prev', 'form']],
-      ['/__krate/action/abc', ['t', { n: 1 }, 'more', 'x']],
+      ['/__krate/action/abc', ['prev', 'form']],
+      ['/__krate/action/abc', ['more', 'x']],
     ]);
+  });
+
+  it('sends arguments bound on the server sealed in the URL, never in the clear', () => {
+    const sealed: unknown[][] = [];
+    const h: FlightHooks = { ...actionHooks, sealBound: (id, bound, path) => (sealed.push([id, bound, path]), 'k1.TOKEN') };
+    const wire = JSON.parse(JSON.stringify(encodeProp({ a: makeAction(['secret-id', { n: 1 }]) }, 'props', h)));
+    expect(wire.a).toEqual({ __krateAction: '/__krate/action/abc?__krate_bound=k1.TOKEN' });
+    expect(JSON.stringify(wire)).not.toContain('secret-id');
+    expect(sealed).toEqual([['abc', ['secret-id', { n: 1 }], 'props.a']]);
+  });
+
+  it('refuses bound arguments when nothing can seal them', () => {
+    expect(() => encodeProp({ a: makeAction(['x']) }, 'props', actionHooks)).toThrow('props.a: a server action with bound arguments');
   });
 
   it('does not repeat the sealed token of an inline action that is already in its URL', () => {

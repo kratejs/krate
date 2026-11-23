@@ -480,6 +480,13 @@ function decodeInlineValue(v: unknown): unknown {
  * key derived from the action secret (the format the server renderer seals).
  */
 export async function openInlineToken(token: unknown, entry: ActionEntry, secret: string): Promise<unknown[]> {
+  const values = await openSealedToken(token, entry, secret);
+  if (values.length !== (entry.captures || []).length) throw new Error("closure token does not match the action");
+  return values;
+}
+
+/** Opens a "k1." token for the action: inline captures, or the arguments a module action was bound to. */
+export async function openSealedToken(token: unknown, entry: ActionEntry, secret: string): Promise<unknown[]> {
   if (typeof token !== "string" || !token.startsWith("k1.")) throw new Error("missing closure token");
   if (!secret) throw new Error("no action encryption key");
   const b64 = token.slice(3).replace(/-/g, "+").replace(/_/g, "/");
@@ -491,7 +498,7 @@ export async function openInlineToken(token: unknown, entry: ActionEntry, secret
   const key = await crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["decrypt"]);
   const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.subarray(0, 12), additionalData: enc.encode(entry.id) }, key, raw.subarray(12));
   const values = JSON.parse(new TextDecoder().decode(plain));
-  if (!Array.isArray(values) || values.length !== (entry.captures || []).length) throw new Error("closure token does not match the action");
+  if (!Array.isArray(values)) throw new Error("closure token does not match the action");
   return values.map(decodeInlineValue);
 }
 
@@ -2073,6 +2080,19 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
         args.unshift(...(await openInlineToken(token, entry, actionSecret)));
       } catch (e) {
         console.error(`[krate] rejected closure data for server action ${entry.source || id}: ${(e as Error).message}`);
+        return withHeaders(rs, actionFail(400, "Invalid server action request"));
+      }
+    }
+
+    // Arguments a module action was bound to before it crossed into a client
+    // component: sealed in the URL, so the client cannot choose them.
+    const boundToken = query.get("__krate_bound");
+    if (boundToken !== null) {
+      try {
+        if (entry.inline) throw new Error("an inline action has no bound arguments");
+        args.unshift(...(await openSealedToken(boundToken, entry, actionSecret)));
+      } catch (e) {
+        console.error(`[krate] rejected bound arguments for server action ${entry.source || id}: ${(e as Error).message}`);
         return withHeaders(rs, actionFail(400, "Invalid server action request"));
       }
     }

@@ -68,16 +68,20 @@ func TestServerActionPropOfIslandInBrowser(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	var got struct {
-		Plain  string   `json:"plain"`
-		Bound  string   `json:"bound"`
-		URL    string   `json:"url"`
-		Direct string   `json:"direct"`
-		Errors []string `json:"errors"`
+		Plain       string   `json:"plain"`
+		Bound       string   `json:"bound"`
+		URL         string   `json:"url"`
+		Direct      string   `json:"direct"`
+		Leaked      bool     `json:"leaked"`
+		TokenURLs   int      `json:"tokenURLs"`
+		Tampered    int      `json:"tampered"`
+		OtherAction int      `json:"otherAction"`
+		Errors      []string `json:"errors"`
 	}
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &got); err != nil {
 		t.Fatalf("bad output: %v\n%s", err, out)
 	}
-	if got.Plain != "saved ada-plain" || got.Bound != "tag:ada-bound" || got.URL != "/" || got.Direct != "/done/?n=x" || len(got.Errors) != 0 {
+	if got.Plain != "saved ada-plain" || got.Bound != "s3cret-tag:ada-bound" || got.Leaked || got.TokenURLs == 0 || got.Tampered != 400 || got.OtherAction != 400 || got.URL != "/" || got.Direct != "/done/?n=x" || len(got.Errors) != 0 {
 		t.Fatalf("got %+v\n%s", got, out)
 	}
 }
