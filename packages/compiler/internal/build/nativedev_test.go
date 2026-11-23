@@ -26,6 +26,8 @@ type devFrameClient struct {
 	t     *testing.T
 	base  string
 	token string
+	// diag, when set, describes the dev session for a timeout message.
+	diag func() string
 }
 
 func (c *devFrameClient) do(method, path string, body []byte) (*http.Response, error) {
@@ -85,8 +87,25 @@ func (c *devFrameClient) waitCall(fn, args, contains string, timeout time.Durati
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+	if c.diag != nil {
+		c.t.Logf("diagnostics:\n%s", c.diag())
+	}
 	c.t.Fatalf("%s never returned %q; last: %s", fn, contains, last)
 	return ""
+}
+
+// buildGoroutines returns the stacks of the goroutines running build package
+// code, to show where a dev rebuild is stuck when a test times out.
+func buildGoroutines() string {
+	buf := make([]byte, 8<<20)
+	buf = buf[:runtime.Stack(buf, true)]
+	var out []string
+	for _, g := range strings.Split(string(buf), "\n\n") {
+		if strings.Contains(g, "internal/build.") && !strings.Contains(g, "buildGoroutines") {
+			out = append(out, g)
+		}
+	}
+	return strings.Join(out, "\n\n")
 }
 
 func replaceInFile(t *testing.T, path, old, new string) {
@@ -186,6 +205,7 @@ func TestNativeDevSession(t *testing.T) {
 		t.Fatalf("no url; shell output:\n%s", stderr.String())
 	}
 	c := &devFrameClient{t: t, base: "http://" + u.Host, token: u.Query().Get("krate_token")}
+	c.diag = func() string { return "native dev stderr:\n" + stderr.String() + "\ngoroutines:\n" + buildGoroutines() }
 	appDir := filepath.Join(root, ".krate", "native", "dev", "app")
 	add := manifestID(t, appDir, "Add")
 	greet := "src/lib/notes.host.greet"
