@@ -6,6 +6,7 @@ import cluster from "node:cluster";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import nodeModule from "node:module";
 import { pathToFileURL } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -141,6 +142,25 @@ if (PARENT_PID > 0) {
 
 let manifest: ServerManifest | null = null;
 
+// manifestFile returns the server manifest on disk: KRATE_MANIFEST, else the
+// one under the output directory.
+function manifestFile(): string {
+  if (manifestPath && fs.existsSync(manifestPath)) return manifestPath;
+  const krateDefault = path.join(OUT_DIR, ".krate", "server-manifest.json");
+  return fs.existsSync(krateDefault) ? krateDefault : path.join(OUT_DIR, "server-manifest.json");
+}
+
+let manifestStamp = "";
+
+function statStamp(file: string): string {
+  try {
+    const st = fs.statSync(file);
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return "";
+  }
+}
+
 if (manifestPath && fs.existsSync(manifestPath)) {
   const data = fs.readFileSync(manifestPath, "utf-8");
   manifest = JSON.parse(data);
@@ -217,6 +237,47 @@ async function loadPageModule(page: ManifestPage): Promise<any> {
   }
 }
 
+// A page bundle is re-imported with a new query on every dev rebuild, but the
+// modules it imports (the client component render modules under
+// server-bundles/client/ and their chunks) were cached by URL for good: an
+// edited client component kept rendering its old code, and a module first
+// loaded after a rebuild came from a newer build than the layout's, so two
+// copies of a module that creates a context could meet in one render. Once
+// the first dev rebuild arrives, imports inside server-bundles take over the
+// query of the module that imports them, so each reload of a page bundle
+// loads its whole graph afresh and the graph is consistent. Node only; other
+// runtimes keep the cached behaviour.
+let bundleGraphVersioned = false;
+
+function versionBundleGraph() {
+  if (bundleGraphVersioned) return;
+  bundleGraphVersioned = true;
+  const register = (nodeModule as { register?: (specifier: string, options: object) => void }).register;
+  if (typeof register !== "function") return;
+  const hooks =
+    "let prefixes = [];\n" +
+    "export function initialize(data) { prefixes = data.prefixes; }\n" +
+    "export async function resolve(specifier, context, nextResolve) {\n" +
+    "  const out = await nextResolve(specifier, context);\n" +
+    "  const parent = context.parentURL ? new URL(context.parentURL) : null;\n" +
+    "  if (parent && parent.search && prefixes.some((p) => out.url.startsWith(p)) && !out.url.includes('?')) return { ...out, url: out.url + parent.search };\n" +
+    "  return out;\n" +
+    "}\n";
+  try {
+    // Node resolves module URLs to real paths, so a symlinked project root
+    // (macOS /var is /private/var) needs the real path as well.
+    const dir = path.join(OUT_DIR, ".krate", "server-bundles");
+    const prefixes = [pathToFileURL(dir).href + "/"];
+    try {
+      const real = pathToFileURL(fs.realpathSync(dir)).href + "/";
+      if (real !== prefixes[0]) prefixes.push(real);
+    } catch {}
+    register("data:text/javascript," + encodeURIComponent(hooks), { parentURL: import.meta.url, data: { prefixes } });
+  } catch (err: any) {
+    console.error("[krate-ssr] Could not version the page module graph; client components may render stale code in dev:", err.message);
+  }
+}
+
 const runtimeBundleCache = new Map<string, (props: string | Record<string, any>) => string>();
 
 // loadRuntimeRenderer loads a compiled runtime component bundle and returns its
@@ -269,6 +330,25 @@ const core = createSSRCore({
 });
 const isrCache = isrMemory.cache;
 const { findPage, renderPage, renderRegion, renderPageRegion } = core;
+manifestStamp = statStamp(manifestFile());
+
+// reloadManifest re-reads the server manifest when a dev rebuild changed it,
+// so pages added while `krate dev` runs resolve without a restart. A manifest
+// that cannot be read keeps the last good one.
+function reloadManifest() {
+  const file = manifestFile();
+  const stamp = statStamp(file);
+  if (!stamp || stamp === manifestStamp) return;
+  try {
+    const next = JSON.parse(fs.readFileSync(file, "utf-8")) as ServerManifest;
+    manifest = next;
+    core.setManifest(next);
+    manifestStamp = stamp;
+    console.log(`[krate-ssr] Reloaded manifest: ${next.pages.length} SSR/ISR/streaming pages`);
+  } catch (err: any) {
+    console.error("[krate-ssr] Manifest not reloaded, keeping the last good one:", err.message);
+  }
+}
 
 // ISR cache persistence - survives renderer restarts so a bounce doesn't
 // cold-render every ISR variant. Written debounced (coalesced) to the build
@@ -334,6 +414,9 @@ const INTERNAL_OPS: Record<string, InternalOp> = {
 async function applyInternalOp(op: InternalOp, payload: any): Promise<Record<string, any>> {
   if (op !== "dev-invalidate") return core.applyInternalOp(op, payload);
   const { route: targetRoute, source, bundlePath } = payload;
+  reloadManifest();
+  versionBundleGraph();
+  if (!targetRoute) return { ok: true };
   // Invalidate the page and region caches for this route, then the module
   // cache for the source file or bundle.
   const key = bundlePath || source;

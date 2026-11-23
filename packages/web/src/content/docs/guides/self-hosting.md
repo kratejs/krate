@@ -263,7 +263,8 @@ ports derived from it (`port + 1` for the API sidecar, `port + 10` for the
 renderer; `ssr.rendererPort` pins the renderer). When that port is taken, or
 lies in the OS ephemeral port range (where outgoing connections could take it
 before the sidecar binds), a free port below that range is used instead, so two
-instances on one machine do not collide. Sidecars are restarted with a growing
+instances on one machine do not collide. `krate dev` skips the derived ports and always
+takes a free port below that range. Sidecars are restarted with a growing
 delay if they crash, and they exit with the host.
 
 The node target is a single Node process: pages, API routes, actions and

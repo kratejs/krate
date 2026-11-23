@@ -124,6 +124,12 @@ func (s *SSRServer) InvalidateDevRoutes(routes []string) {
 		}
 	}
 	s.mu.Unlock()
+	// The renderer re-reads its manifest on every invalidation, so pages
+	// added by this rebuild resolve. Send one even when no known page matches
+	// (a rebuild that adds the first request-time page).
+	if len(pages) == 0 {
+		_ = s.InvalidateDev("", "", "")
+	}
 	for _, p := range pages {
 		if err := s.InvalidateDev(p.Route, p.Source, p.BundlePath); err != nil && !errors.Is(err, errSSRNotRunning) {
 			fmt.Fprintf(os.Stderr, "  %sSSR invalidation failed (%s):%s %v\n", cYellow, p.Route, cReset, err)

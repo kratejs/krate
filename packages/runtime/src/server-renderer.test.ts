@@ -193,6 +193,56 @@ describe.skipIf(!built)("server-renderer sidecar", () => {
     });
   });
 
+  describe("dev manifest reload", () => {
+    it("serves a page added to the manifest after startup once the host invalidates", async () => {
+      const probe = { route: "/added/[id]", url: "/added/1", regions: [{ id: "page", kind: "page" }], params: { id: "1" } };
+      expect((await regions(probe)).frames[0]).toMatchObject({ type: "error", status: 404 });
+
+      write("pages/added.mjs", jsxImport + `export default (props) => jsx("p", { children: "added " + props.params.id });\n`);
+      const file = path.join(out, ".krate", "server-manifest.json");
+      const manifest = JSON.parse(fs.readFileSync(file, "utf-8"));
+      manifest.pages.push({ route: "/added/[id]", source: "/added/[id].tsx", mode: "ssr", bundlePath: "pages/added.mjs" });
+      fs.writeFileSync(file, JSON.stringify(manifest));
+
+      // A rebuild that adds a page sends an invalidation without a route when
+      // no known page matched.
+      const res = await fetch(url("/__krate/ssr/invalidate"), { method: "POST", headers: secret, body: JSON.stringify({ route: "", source: "", bundlePath: "" }) });
+      expect(res.status).toBe(200);
+      const { frames } = await regions(probe);
+      expect(frames.find((f) => f.type === "region" || f.html)).toBeTruthy();
+      expect(JSON.stringify(frames)).toContain("added 1");
+    });
+  });
+
+  describe("page module graph in dev", () => {
+    it("loads the modules a page bundle imports afresh after each dev invalidation", async () => {
+      const page = { route: "/graph", url: "/graph", regions: [{ id: "page", kind: "page" }] };
+      const dep = (v: string) => `export const label = ${JSON.stringify(v)};\nexport const identity = globalThis.__graphId = (globalThis.__graphId || 0) + 1;\n`;
+      write(".krate/server-bundles/client/dep.mjs", dep("one"));
+      write(
+        ".krate/server-bundles/graph.server.mjs",
+        jsxImport + `import { label } from "./client/dep.mjs";\nexport default () => jsx("p", { children: "graph " + label });\n`,
+      );
+      const file = path.join(out, ".krate", "server-manifest.json");
+      const manifest = JSON.parse(fs.readFileSync(file, "utf-8"));
+      manifest.pages.push({ route: "/graph", source: "/graph.tsx", mode: "ssr", bundlePath: ".krate/server-bundles/graph.server.mjs" });
+      fs.writeFileSync(file, JSON.stringify(manifest));
+      const invalidate = () =>
+        fetch(url("/__krate/ssr/invalidate"), {
+          method: "POST",
+          headers: secret,
+          body: JSON.stringify({ route: "/graph", source: "/graph.tsx", bundlePath: ".krate/server-bundles/graph.server.mjs" }),
+        });
+      expect((await invalidate()).status).toBe(200);
+      expect(JSON.stringify((await regions(page)).frames)).toContain("graph one");
+
+      // The page bundle does not change; a module it imports does.
+      write(".krate/server-bundles/client/dep.mjs", dep("two"));
+      expect((await invalidate()).status).toBe(200);
+      expect(JSON.stringify((await regions(page)).frames)).toContain("graph two");
+    });
+  });
+
   describe("region frame formats", () => {
     const page = { id: "page", kind: "page" };
     const cases: Array<[string, object]> = [

@@ -90,7 +90,9 @@ Set a different port:
 devServer: { port: 3210 }
 ```
 
-The SSR renderer uses `devServer.port + 10` (override with `ssr.rendererPort`).
+In `krate dev` the SSR renderer and the other sidecars listen on free loopback ports the OS
+picks, so dev servers on neighbouring ports do not collide (`ssr.rendererPort` pins the renderer).
+`krate serve` and `krate start` derive them from the server port (`port + 10` for the renderer).
 
 ## Generated JS is larger than expected
 

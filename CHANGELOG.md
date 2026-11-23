@@ -524,6 +524,21 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- KR8009 for a client component that pulls in Node built-ins is one error per island instead of one per
+  file of the offending package (a database driver printed about 2,000 lines). It names the built-ins, how
+  many imports there are, and the import chain from the component to the package that brought the Node-only
+  code in (`components/editor.tsx -> components/markdown.tsx -> @acme/shared (package root) ->
+  mongodb`), points at the import in project code that starts the chain, and hints at a browser-safe subpath or
+  moving the code to the server. `--verbose` lists every import after the summary.
+
+- `krate dev --port <n>` fails with a clear error when the port is busy, as `krate serve` and `krate start`
+  do, instead of moving to another port. Without `--port` (the default 3000, or `devServer.port`) a busy
+  port still moves to the next free one and the terminal names it. The dev sidecars (API, Go API, script
+  compiler, SSR renderer) no longer sit on the ports next to the dev server's (`port + 1`, `+ 2`, `+ 3`,
+  `+ 10`): they take a free loopback port the OS range leaves alone, so dev servers on neighbouring ports
+  (3252, 3253, ...) no longer take each other's sidecar port and force a move. `krate serve` and `krate start`
+  keep their derived ports.
+
 - `redirect()` in a page now answers `307` (it was `302`) and the new `permanentRedirect()` answers `308`,
   as in Next.js, in `krate serve` and the Node server handler; API routes already answered `307` and
   now answer `308` for `permanentRedirect()`. Browsers treat 302 and 307 alike for GET, but a POST is now
@@ -608,6 +623,33 @@ host code runs in the native process. Names and options may change between relea
   the JSON report has an `info` list.
 
 ### Fixed
+
+- `krate dev`: an edited "use client" component renders its new code on the server. The renderer re-imported a
+  page bundle with a new query after each rebuild, but the render modules of the client components it imports
+  (`server-bundles/client/*.ssr.mjs` and their chunks) stayed cached under their old URLs, so SSR kept serving the
+  first version of a client component until a restart, and a module first loaded after a rebuild came from a
+  newer build than the layout's provider module. The two copies of a context-owning module could then meet in one
+  render (a hook failing with its own "needs the layout" guard after several reloads). Imports inside
+  `server-bundles` now take the query of the module that imports them, so each reload loads one consistent
+  graph (Node only).
+
+- `krate dev`: a route whose client chunk failed to build (KR8009) is served again once the import is fixed.
+  A full rebuild during the failure left the page out of the server manifest, and the later single-page
+  rebuild only updated entries that already existed, so the route kept its static shell with an empty body
+  (`Refreshed 4 server bundle(s)` and nothing else) until a restart. A page missing from the manifest, or one
+  that changed between static and request-time rendering, now rebuilds the whole site.
+
+- `krate dev` no longer shuts down when the first build fails. The watcher repeated the full build when the
+  dependency graph was empty (a build where no page compiled leaves it so) and returned that error, which ended
+  the whole dev process; an `await` in a non-async function was enough. The error now shows on the page and in
+  the overlay, the rest of the site keeps serving, and the next save rebuilds.
+
+- `krate dev`: a page added while the server runs is served without a restart. The Node renderer read its
+  server manifest once at startup, so a new request-time page (such as `admin/staff/[id].tsx` next to
+  `staff.tsx`) answered 500 with `no such page`; the renderer now re-reads the manifest on every rebuild. A
+  renderer that was not running at startup (the first build failed, or no page was request-time yet) starts
+  when a rebuild brings the first request-time page, and a page that changes between static and request-time
+  rendering rebuilds the whole site instead of leaving the server manifest behind.
 
 - Types: apps that keep `@types/react` (migrated Next.js apps) failed to type-check because Krate's
   `JSX.Element` is a DOM `Node`, which React's `ReactNode` rejects: `<Link>`/`<Head>` gave TS2786 under

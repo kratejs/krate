@@ -41,15 +41,21 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 	root := b.Root
 	cfg := b.Cfg
 
-	// Safety net: if the builder has no dependency graph yet (no initial
-	// BuildAll ran), do one now so partial rebuilds work instead of every
-	// change taking the full-rebuild fallback in processChanges.
+	// Safety net: if no full build ran yet, do one now so partial rebuilds
+	// work instead of every change taking the full-rebuild fallback in
+	// processChanges. A build that already ran and failed leaves the graph
+	// empty too; it is not repeated, and a failure here keeps the watcher
+	// alive: the error is shown on the page (overlay) and the next save
+	// rebuilds.
 	b.depMu.Lock()
-	needsInitialBuild := len(b.depGraph) == 0
+	needsInitialBuild := len(b.depGraph) == 0 && !b.buildAttempted.Load()
 	b.depMu.Unlock()
 	if needsInitialBuild {
 		if err := b.BuildAll(); err != nil {
-			return fmt.Errorf("initial build: %w", err)
+			fmt.Fprintf(b.stderr(), "  %sBuild error:%s %s\n", cRed, cReset, BuildErrorSummary(err))
+			if hub != nil {
+				hub.Publish(DevEvent{Type: "reload", Diagnostics: DiagnosticsFromError(err)})
+			}
 		}
 	}
 
@@ -553,6 +559,22 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 		}
 	}
 
+	if b.needFullRebuild.Swap(false) {
+		printf("  %sA page changed between static and request-time rendering; rebuilding all...%s\n", cYellow, cReset)
+		if err := b.BuildAll(); err != nil {
+			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
+			addDiags("", err)
+		}
+		if err := b.BuildAllAPI(); err != nil {
+			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
+			addDiags("", err)
+		}
+		if hub != nil {
+			hub.Publish(DevEvent{Type: "reload", Diagnostics: diags})
+		}
+		return
+	}
+
 	if len(apiToBuild) > 0 {
 		printf("  %sCompiling changed API endpoints...%s\n", cCyan, cReset)
 		if err := b.CompileAPIRoutes(apiToBuild); err != nil {
@@ -749,9 +771,10 @@ func isWithin(path, dir string) bool {
 }
 
 // bindServerListener binds the HTTP listener. A port that is already taken is
-// an error with a hint for `krate serve`; in dev it moves to the next free
-// port and says so, since a second dev server in another terminal is common.
-func bindServerListener(host string, port int, dev bool) (net.Listener, error) {
+// an error naming the options that change it. With autoMove (the dev server
+// on a port nobody asked for by flag) it moves to the next free port and says
+// so instead, since a second dev server in another terminal is common.
+func bindServerListener(host string, port int, autoMove bool) (net.Listener, error) {
 	try := func(p int) (net.Listener, error) {
 		addr := fmt.Sprintf(":%d", p)
 		if host != "" {
@@ -763,9 +786,9 @@ func bindServerListener(host string, port int, dev bool) (net.Listener, error) {
 	if err == nil {
 		return ln, nil
 	}
-	if !dev || port == 0 || !isAddrInUse(err) {
+	if !autoMove || port == 0 || !isAddrInUse(err) {
 		if isAddrInUse(err) {
-			return nil, fmt.Errorf("port %d is already in use (%w); stop the other process or choose another port with --port or server.port", port, err)
+			return nil, fmt.Errorf("port %d is already in use (%w); stop the other process or choose another port with --port, server.port or devServer.port", port, err)
 		}
 		return nil, fmt.Errorf("listen on port %d: %w", port, err)
 	}

@@ -49,6 +49,7 @@ func applyServerFlags(command string, flags cliFlags, cfg *config.Config, getenv
 		cfg.Server.Port = port
 		if command == "dev" {
 			cfg.DevServer.Port = port
+			cfg.DevServer.PortFixed = flags.PortSet
 		}
 	}
 	switch {

@@ -50,6 +50,10 @@ func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS st
 	// and recompile just those.
 	runtimeBundles := b.refreshRuntimeComponents(results)
 
+	if b.serverManifestOutOfStep(results) {
+		b.needFullRebuild.Store(true)
+	}
+
 	if len(serverBundles) == 0 && len(runtimeBundles) == 0 {
 		return nil
 	}
@@ -69,6 +73,30 @@ func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS st
 		return fmt.Errorf("refreshing the build manifest under %s: %w", b.Cfg.OutDir, err)
 	}
 	return nil
+}
+
+// serverManifestOutOfStep reports whether a rebuilt page's render mode no
+// longer matches its presence in the server manifest: the merge below only
+// updates entries that exist, so a page that became request-time (or static)
+// needs the whole manifest written again.
+func (b *Builder) serverManifestOutOfStep(results []*PageResult) bool {
+	known := map[string]bool{}
+	if sm, err := readServerManifest(b.Cfg.OutDir); err == nil {
+		for _, p := range sm.Pages {
+			if !p.Segment {
+				known[filepath.ToSlash(p.Source)] = true
+			}
+		}
+	}
+	for _, r := range results {
+		if r.SourcePath == "" {
+			continue
+		}
+		if (r.Mode != RenderSSG) != known[filepath.ToSlash(r.SourcePath)] {
+			return true
+		}
+	}
+	return false
 }
 
 // refreshRuntimeComponents recompiles the runtime component bundles referenced by

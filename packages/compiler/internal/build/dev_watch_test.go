@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -177,4 +178,36 @@ func TestServeDevRestartsOnRequestAndShowsErrorShell(t *testing.T) {
 		t.Fatalf("port not released after restart: %v", err)
 	}
 	_ = ln.Close()
+}
+
+// A busy port is an error with the options that change it, unless the caller
+// lets it move (a dev server on a port nobody asked for), which says where it
+// went.
+func TestBindServerListenerBusyPort(t *testing.T) {
+	t.Parallel()
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	port := held.Addr().(*net.TCPAddr).Port
+
+	_, err = bindServerListener("127.0.0.1", port, false)
+	if err == nil {
+		t.Fatal("a busy port must fail when it may not move")
+	}
+	for _, want := range []string{strconv.Itoa(port), "already in use", "--port"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
+	}
+
+	ln, err := bindServerListener("127.0.0.1", port, true)
+	if err != nil {
+		t.Skipf("no free port next to %d: %v", port, err)
+	}
+	defer ln.Close()
+	if got := ln.Addr().(*net.TCPAddr).Port; got <= port || got > port+50 {
+		t.Errorf("moved to %d, want a port just above %d", got, port)
+	}
 }

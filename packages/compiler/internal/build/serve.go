@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -1431,7 +1432,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		// Dev binds loopback unless devServer.host/server.host says otherwise.
 		bindHost = devBindHost(cfg)
 	}
-	listener, err := bindServerListener(bindHost, port, hub != nil)
+	listener, err := bindServerListener(bindHost, port, hub != nil && !cfg.DevServer.PortFixed)
 	if err != nil {
 		return err
 	}
@@ -1460,7 +1461,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	// Chosen after the revalidation host listens on an OS-chosen port: the OS
 	// can hand out port+1 (macOS assigns ports in sequence), which the
 	// sidecar would then fail to bind.
-	apiPort := internalPort(port + 1)
+	apiPort := internalPort(sidecarOffset(hub != nil, port+1))
 	sidecarPorts.Store(port, apiPort)
 	defer sidecarPorts.Delete(port)
 
@@ -1696,7 +1697,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	var goAPI *goAPISupervisor
 	goAPIManifestPath := gohost.RoutesManifestPath(root)
 	if _, err := os.Stat(goAPIManifestPath); err == nil {
-		goAPIPort := internalPort(port + 2)
+		goAPIPort := internalPort(sidecarOffset(hub != nil, port+2))
 		goAPI = newGoAPISupervisor(goAPIServerBinPath(root), goAPIManifestPath, goAPIPort)
 		// Prefer an AF_UNIX socket so the sidecar needs no port and the hop
 		// skips the loopback TCP stack. The path is chosen here and handed to
@@ -1794,7 +1795,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		} else if plan := loadScriptcServePlan(root); plan.warning != "" {
 			eprintf("  %s! %s%s\n", cYellow, plan.warning, cReset)
 		} else if plan.exe != "" && apiRT != nil {
-			scriptcPort := internalPort(port + 3)
+			scriptcPort := internalPort(sidecarOffset(hub != nil, port+3))
 			scriptc = newScriptcSidecar(plan.exe, scriptcPort, revalHost.secret, revalHost.EnvList(), apiBudgets)
 			scriptcRoutes = plan.routes
 			printf("  %s*%s scriptc API server (%d routes) -> %shttp://localhost:%d%s\n", cCyan, cReset, len(plan.routes), cCyan, scriptcPort, cReset)
@@ -1934,7 +1935,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	// alone (no node/bun process).
 	ssrPort := cfg.SSR.RendererPort
 	if ssrPort == 0 {
-		ssrPort = internalPort(port + 10)
+		ssrPort = internalPort(sidecarOffset(hub != nil, port+10))
 	}
 	ssr := NewSSRServer(root, ssrPort, cfg.SSR.SSRRuntime)
 	ssr.SetOutDir(absOut)
@@ -1943,33 +1944,54 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	ssr.SetTuning(cfg.SSR.Timeout, cfg.SSR.MaxCacheSize)
 	ssr.SetPPR(cfg.PPR, cfg.PPRRevalidate)
 	ssr.SetRendererWorkers(cfg.SSR.RendererWorkers)
-	ssrStarted := false
+	var ssrOn atomic.Bool
 	ssrStop := make(chan struct{})
 	var ssrStopOnce sync.Once
-	if err := ssr.LoadManifest(); err != nil {
-		if !errors.Is(err, errServerManifestMissing) {
-			return err
+	// startSSR launches the renderer when the manifest has request-time pages
+	// that need it. Dev calls it again after every rebuild, so a page that
+	// becomes request-time (or a first build that failed) starts it late.
+	startSSR := func(quiet bool) {
+		if err := ssr.LoadManifest(); err != nil {
+			if !errors.Is(err, errServerManifestMissing) {
+				fmt.Fprintf(os.Stderr, "  %s! SSR renderer not started:%s %v\n", cYellow, cReset, err)
+			}
+			// No request-time pages: nothing routes through the renderer.
+			return
 		}
-		// No request-time pages: nothing routes through the renderer.
-	} else if !ssr.NeedsNodeRenderer() {
-		printf("  %s*%s SSR renderer skipped (all request-time regions render on the Go host)\n", cCyan, cReset)
-	} else if err := ssr.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "  %s! SSR renderer not started:%s %v\n", cYellow, cReset, err)
-	} else {
-		ssrStarted = true
+		if !ssr.NeedsNodeRenderer() {
+			if !quiet {
+				printf("  %s*%s SSR renderer skipped (all request-time regions render on the Go host)\n", cCyan, cReset)
+			}
+			return
+		}
+		if err := ssr.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "  %s! SSR renderer not started:%s %v\n", cYellow, cReset, err)
+			return
+		}
 		revalHost.SetSSR(ssr, ssrPort)
 		go ssr.Supervise(ssrStop)
+		ssrOn.Store(true)
 		printf("  %s*%s SSR renderer -> %shttp://localhost:%d%s\n", cCyan, cReset, cCyan, ssrPort, cReset)
 	}
+	if err := ssr.LoadManifest(); err != nil && !errors.Is(err, errServerManifestMissing) {
+		return err
+	}
+	startSSR(false)
 
 	// SSR/ISR/Streaming route handler - intercepts before static file server
-	if ssrStarted {
+	if ssrOn.Load() || hub != nil {
 		mux.HandleFunc("/__krate/ssr/", ssrInternalProxy(revalHost, ssrPort))
+	}
+	if hub != nil {
 		// Dev: invalidate the renderer's caches once per rebuild, not once per
 		// connected tab.
-		if hub != nil {
-			hub.SetReloadHook(func(ev DevEvent) { ssr.InvalidateDevRoutes(ev.Routes) })
-		}
+		hub.SetReloadHook(func(ev DevEvent) {
+			if !ssrOn.Load() {
+				startSSR(true)
+				return
+			}
+			ssr.InvalidateDevRoutes(ev.Routes)
+		})
 	}
 
 	devMode := hub != nil
@@ -2388,7 +2410,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		// 0 when no Node renderer runs: streamRegionPage only dials the sidecar
 		// if the page has a region it must render.
 		regionPort := 0
-		if ssrStarted {
+		if ssrOn.Load() {
 			regionPort = ssrPort
 		}
 		outOfOrder := page != nil && page.Mode == RenderStreaming.String()
@@ -2592,7 +2614,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 			}
 		}
 		regionPort := 0
-		if ssrStarted {
+		if ssrOn.Load() {
 			regionPort = ssrPort
 		}
 		flusher, _ := w.(http.Flusher)
@@ -2654,7 +2676,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	})
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		if ssrStarted && !ssr.IsRunning() {
+		if ssrOn.Load() && !ssr.IsRunning() {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = io.WriteString(w, "ssr-unavailable\n")
 			return
@@ -2714,7 +2736,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	var isrWg sync.WaitGroup
 	isrDone := make(chan struct{})
 	var isrDoneOnce sync.Once
-	if ssrStarted {
+	if ssrOn.Load() {
 		isrPages := ssr.GetISRPages()
 		if len(isrPages) > 0 {
 			printf("  %s*%s ISR revalidation: %d pages\n", cCyan, cReset, len(isrPages))
@@ -2785,7 +2807,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		}()
 		isrDoneOnce.Do(func() { close(isrDone) })
 		nodeAPIStopOnce.Do(func() { close(nodeAPIStop) })
-		if ssrStarted {
+		if ssrOn.Load() {
 			ssrStopOnce.Do(func() { close(ssrStop) })
 			ssr.Shutdown()
 			printf("  %s+%s SSR renderer stopped\n", cGreen, cReset)
@@ -3454,7 +3476,18 @@ func portFree(port int) bool {
 	return true
 }
 
-// internalPort returns preferred when it can be bound, has not been handed
+// sidecarOffset is the port a sidecar should prefer: the offset from the server
+// port in production, none (an OS-free port) in dev. Dev servers run side by
+// side on neighbouring ports, and a sidecar sitting on the next one's port
+// made the second server move.
+func sidecarOffset(dev bool, offset int) int {
+	if dev {
+		return 0
+	}
+	return offset
+}
+
+// internalPort returns preferred (when above 0) when it can be bound, has not been handed
 // out already and lies outside the OS ephemeral range; otherwise a free port
 // below that range. Sidecars default to fixed offsets from the server port,
 // which collide when several servers run at once. A sidecar binds its port
@@ -3473,7 +3506,7 @@ func internalPort(preferred int) int {
 		handedOutPorts[p] = time.Now()
 		return true
 	}
-	if !inEphemeralRange(preferred) && take(preferred) {
+	if preferred > 0 && !inEphemeralRange(preferred) && take(preferred) {
 		return preferred
 	}
 	lo, _ := ephemeralPortRange()

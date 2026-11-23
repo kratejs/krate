@@ -341,7 +341,8 @@ DNS-rebinding and cross-site calls to `/__krate/open`). Set `devServer.host`
 `port` is the dev server port and takes precedence over `server.port` in
 `krate dev` (`krate serve` uses `server.port`, then `devServer.port`). If the
 port is busy, dev moves to the next free one and says so; `serve` fails with a
-hint instead.
+hint instead, and so does `krate dev --port <n>`, since a port given on the
+command line is not negotiable.
 
 `editor` is the editor command (for example `"code"`, `"cursor"`, `"idea"`,
 `"subl"`, `"vim"` or `"zed"`) and may include flags. Krate adds the right
