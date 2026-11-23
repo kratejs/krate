@@ -3,6 +3,7 @@
 // rendered per request sees its own URL. See navigation.ts for the browser side.
 
 import { getRequestContext } from './request-context.js';
+
 export { permanentRedirect } from './action-context.js';
 
 type ParamValue = string | string[];

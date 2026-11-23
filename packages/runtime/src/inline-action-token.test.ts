@@ -39,6 +39,7 @@ describe('sealed bound arguments of a module action', () => {
   const secret = 'bound-secret-bound-secret-1234';
   const prev = process.env.KRATE_ACTION_SECRET;
   beforeAll(() => { process.env.KRATE_ACTION_SECRET = secret; });
+
   afterAll(() => { if (prev === undefined) delete process.env.KRATE_ACTION_SECRET; else process.env.KRATE_ACTION_SECRET = prev; });
   const moduleEntry = { id: 'act1', export: 'del', file: 'x.mjs' };
 
