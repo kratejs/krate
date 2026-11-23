@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
 // devRun is a project served the way `krate dev` serves it: the first build,
@@ -28,7 +30,7 @@ type devRun struct {
 // startDevRun builds files with the real runtime linked in and serves them
 // with ServeDevContext and Watch. A failed first build does not stop it, as in
 // runDevOnce.
-func startDevRun(t *testing.T, files map[string]string) *devRun {
+func startDevRun(t *testing.T, files map[string]string, opts ...func(*config.Config)) *devRun {
 	t.Helper()
 	e2eEnv(t)
 	b, root := scProject(t, files)
@@ -39,14 +41,17 @@ func startDevRun(t *testing.T, files map[string]string) *devRun {
 	captureProgress(t)
 	logs := builderStderr(b)
 	b.DevMode = true
+	b.Cfg.DevServer.Port = freePort(t)
+	for _, o := range opts {
+		o(b.Cfg)
+	}
 	hub := NewDevHub()
 	if err := b.BuildAll(); err != nil {
 		hub.Publish(DevEvent{Type: "reload", Diagnostics: DiagnosticsFromError(err)})
 	}
 	cfg := b.Cfg
 	cfg.Server.Host = "127.0.0.1"
-	port := freePort(t)
-	cfg.DevServer.Port = port
+	port := cfg.DevServer.Port
 
 	ctx, stop := context.WithCancel(context.Background())
 	b.SetContext(ctx)

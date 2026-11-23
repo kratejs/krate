@@ -771,9 +771,10 @@ func isWithin(path, dir string) bool {
 }
 
 // bindServerListener binds the HTTP listener. A port that is already taken is
-// an error with a hint for `krate serve`; in dev it moves to the next free
-// port and says so, since a second dev server in another terminal is common.
-func bindServerListener(host string, port int, dev bool) (net.Listener, error) {
+// an error naming the options that change it. With autoMove (the dev server
+// on a port nobody asked for by flag) it moves to the next free port and says
+// so instead, since a second dev server in another terminal is common.
+func bindServerListener(host string, port int, autoMove bool) (net.Listener, error) {
 	try := func(p int) (net.Listener, error) {
 		addr := fmt.Sprintf(":%d", p)
 		if host != "" {
@@ -785,9 +786,9 @@ func bindServerListener(host string, port int, dev bool) (net.Listener, error) {
 	if err == nil {
 		return ln, nil
 	}
-	if !dev || port == 0 || !isAddrInUse(err) {
+	if !autoMove || port == 0 || !isAddrInUse(err) {
 		if isAddrInUse(err) {
-			return nil, fmt.Errorf("port %d is already in use (%w); stop the other process or choose another port with --port or server.port", port, err)
+			return nil, fmt.Errorf("port %d is already in use (%w); stop the other process or choose another port with --port, server.port or devServer.port", port, err)
 		}
 		return nil, fmt.Errorf("listen on port %d: %w", port, err)
 	}

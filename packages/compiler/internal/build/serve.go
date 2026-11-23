@@ -1428,7 +1428,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		// Dev binds loopback unless devServer.host/server.host says otherwise.
 		bindHost = devBindHost(cfg)
 	}
-	listener, err := bindServerListener(bindHost, port, hub != nil)
+	listener, err := bindServerListener(bindHost, port, hub != nil && !cfg.DevServer.PortFixed)
 	if err != nil {
 		return err
 	}
@@ -1457,7 +1457,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	// Chosen after the revalidation host listens on an OS-chosen port: the OS
 	// can hand out port+1 (macOS assigns ports in sequence), which the
 	// sidecar would then fail to bind.
-	apiPort := internalPort(port + 1)
+	apiPort := internalPort(sidecarOffset(hub != nil, port+1))
 	sidecarPorts.Store(port, apiPort)
 	defer sidecarPorts.Delete(port)
 
@@ -1693,7 +1693,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	var goAPI *goAPISupervisor
 	goAPIManifestPath := gohost.RoutesManifestPath(root)
 	if _, err := os.Stat(goAPIManifestPath); err == nil {
-		goAPIPort := internalPort(port + 2)
+		goAPIPort := internalPort(sidecarOffset(hub != nil, port+2))
 		goAPI = newGoAPISupervisor(goAPIServerBinPath(root), goAPIManifestPath, goAPIPort)
 		// Prefer an AF_UNIX socket so the sidecar needs no port and the hop
 		// skips the loopback TCP stack. The path is chosen here and handed to
@@ -1791,7 +1791,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		} else if plan := loadScriptcServePlan(root); plan.warning != "" {
 			eprintf("  %s! %s%s\n", cYellow, plan.warning, cReset)
 		} else if plan.exe != "" && apiRT != nil {
-			scriptcPort := internalPort(port + 3)
+			scriptcPort := internalPort(sidecarOffset(hub != nil, port+3))
 			scriptc = newScriptcSidecar(plan.exe, scriptcPort, revalHost.secret, revalHost.EnvList(), apiBudgets)
 			scriptcRoutes = plan.routes
 			printf("  %s*%s scriptc API server (%d routes) -> %shttp://localhost:%d%s\n", cCyan, cReset, len(plan.routes), cCyan, scriptcPort, cReset)
@@ -1931,7 +1931,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	// alone (no node/bun process).
 	ssrPort := cfg.SSR.RendererPort
 	if ssrPort == 0 {
-		ssrPort = internalPort(port + 10)
+		ssrPort = internalPort(sidecarOffset(hub != nil, port+10))
 	}
 	ssr := NewSSRServer(root, ssrPort, cfg.SSR.SSRRuntime)
 	ssr.SetOutDir(absOut)
@@ -3460,7 +3460,18 @@ func portFree(port int) bool {
 	return true
 }
 
-// internalPort returns preferred when it can be bound, has not been handed
+// sidecarOffset is the port a sidecar should prefer: the offset from the server
+// port in production, none (an OS-free port) in dev. Dev servers run side by
+// side on neighbouring ports, and a sidecar sitting on the next one's port
+// made the second server move.
+func sidecarOffset(dev bool, offset int) int {
+	if dev {
+		return 0
+	}
+	return offset
+}
+
+// internalPort returns preferred (when above 0) when it can be bound, has not been handed
 // out already and lies outside the OS ephemeral range; otherwise a free port
 // below that range. Sidecars default to fixed offsets from the server port,
 // which collide when several servers run at once. A sidecar binds its port
@@ -3479,7 +3490,7 @@ func internalPort(preferred int) int {
 		handedOutPorts[p] = time.Now()
 		return true
 	}
-	if !inEphemeralRange(preferred) && take(preferred) {
+	if preferred > 0 && !inEphemeralRange(preferred) && take(preferred) {
 		return preferred
 	}
 	lo, _ := ephemeralPortRange()

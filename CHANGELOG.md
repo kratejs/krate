@@ -524,6 +524,14 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `krate dev --port <n>` fails with a clear error when the port is busy, as `krate serve` and `krate start`
+  do, instead of moving to another port. Without `--port` (the default 3000, or `devServer.port`) a busy
+  port still moves to the next free one and the terminal names it. The dev sidecars (API, Go API, script
+  compiler, SSR renderer) no longer sit on the ports next to the dev server's (`port + 1`, `+ 2`, `+ 3`,
+  `+ 10`): they take a free loopback port the OS range leaves alone, so dev servers on neighbouring ports
+  (3252, 3253, ...) no longer take each other's sidecar port and force a move. `krate serve` and `krate start`
+  keep their derived ports.
+
 - Tailwind: a project stylesheet with `@import "tailwindcss"` (or a v3 `@tailwind` directive) now turns
   Tailwind on, as in Tailwind v4, when `krate.config.ts` has no `tailwind.enabled`. Before, the import
   alone generated nothing, so an app scaffolded without a `tailwind` key (the native scaffold has none)

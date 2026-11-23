@@ -243,7 +243,8 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "  --open        Open the browser once the server is up\n")
 		fmt.Fprintf(w, "  --host 0.0.0.0  Listen on the network; the LAN URL is printed for phone testing\n")
 		fmt.Fprintf(w, "  --qr          Print a QR code for the network URL (with --host)\n")
-		fmt.Fprintf(w, "  --repl        Terminal shortcuts: r + enter restarts, o opens the browser, c clears, h helps\nA busy port moves to the next free one.\n")
+		fmt.Fprintf(w, "  --repl        Terminal shortcuts: r + enter restarts, o opens the browser, c clears, h helps\n")
+		fmt.Fprintf(w, "  --port <n>    Listen port. Without it a busy port moves to the next free one; with it a busy port is an error\n")
 	case "serve", "preview", "start":
 		noBuildFlag := " [--no-build]"
 		if cmd == "start" {

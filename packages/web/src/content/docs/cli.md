@@ -153,7 +153,7 @@ krate dev --open                # open the browser once the server is up
 krate dev --host 0.0.0.0        # listen on the network and print a LAN URL
 krate dev --host 0.0.0.0 --qr   # ...and a QR code a phone can scan
 krate dev --repl                # terminal shortcuts: r restart, o open, c clear, h help
-krate dev --port 4000           # a busy port moves to the next free one
+krate dev --port 4000           # fails with an error if 4000 is busy
 ```
 
 - Prints the network URL when the server listens beyond loopback; with `--qr`, in
@@ -166,8 +166,11 @@ krate dev --port 4000           # a busy port moves to the next free one
   and prints a one-line hint.
 - Serves the site on port 3000 (configurable via `devServer.port`, which wins
   over `server.port` in dev), bound to `127.0.0.1` only. Use `devServer.host` to
-  expose it on the network. If the port is taken, the next free one is used and
-  the terminal says so.
+  expose it on the network. If that port is taken and you did not pass `--port`,
+  the next free one is used and the terminal says which. With `--port <n>` a
+  busy port is an error and nothing starts, as with `krate serve`. The sidecars
+  (API, Go API, renderer) listen on loopback ports the OS picks, not on ports
+  next to the dev server's, so dev servers on neighbouring ports do not collide.
 - Watches source files, including new, renamed and deleted pages and
   directories, and rebuilds only what changed. `public/` edits are mirrored into
   the output immediately.
@@ -221,8 +224,10 @@ krate start
 and `start` the port is resolved as: `--port`, then `KRATE_SERVE_PORT`, then
 `PORT`, then `server.port` / `devServer.port` (default 3000); `krate dev` uses
 `--port` then the config. `KRATE_SERVE_HOST` sets the bind address the same
-way. An invalid value (`--port abc`, `PORT=70000`) is an error. Internal
-sidecars pick free ports automatically.
+way. An invalid value (`--port abc`, `PORT=70000`) is an error. A busy port is an
+error for `serve` and `start`, and for `krate dev --port <n>`; `krate dev` without
+`--port` moves to the next free port and prints the one it chose. Internal
+sidecars pick free ports automatically (in dev, never next to the server port).
 
 On `SIGINT`/`SIGTERM` the server drains in-flight requests (see
 `server.shutdownTimeout`) and exits with status 0.

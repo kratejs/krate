@@ -32,6 +32,9 @@ type DevServer struct {
 	// REPL turns on the terminal shortcuts (`krate dev --repl`). Command line
 	// only, not a config key.
 	REPL bool `json:"-"`
+	// PortFixed is set by `krate dev --port`: a busy port is an error instead
+	// of moving to the next free one. Command line only, not a config key.
+	PortFixed bool `json:"-"`
 	// Overlay toggles the dev error overlay (default true). A pointer so an
 	// explicit `false` is distinguishable from "unset".
 	Overlay *bool `json:"overlay,omitempty"`
