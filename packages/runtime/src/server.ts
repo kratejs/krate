@@ -569,7 +569,7 @@ async function expandComponent(node: JSXElement, vals?: ContextValues): Promise<
     return { out: consumerChild(callProps)(vals?.has(ctx) ? vals.get(ctx) : ctx._currentValue), vals };
   }
   // A client boundary also gets the context values in scope (slotValues).
-  let out: unknown = fn.__krateClient ? fn(callProps, vals) : fn(callProps);
+  let out: unknown = fn.__krateClient ? fn(callProps, vals, RENDER_CALL) : fn(callProps);
   if (isThenable(out)) out = await out;
   if (fn.__krateForeignProvider) {
     return { out, vals: new Map(vals).set(fn.__krateForeignProvider as ForeignContext, props.value) };
@@ -614,7 +614,7 @@ function renderElement(el: JSXElement): string {
         return renderNode(classFallback(type, instance, error) as JSXNode);
       }
     }
-    const result = type({ ...props, children });
+    const result = (type as any).__krateClient ? (type as any)({ ...props, children }, undefined, RENDER_CALL) : type({ ...props, children });
     if (isThenable(result)) throw asyncInSyncRender(`<${componentName(type)}>`);
     return withProviderValue(type, props, () => renderNode(result));
   }
@@ -966,6 +966,22 @@ function islandIdPrefix(moduleId: string, exportName: string): string {
 
 const warnedUncloneable = new Set<string>();
 
+// RENDER_CALL is the third argument the renderer passes when it renders a
+// client boundary as a component (a registered symbol: the renderer bundles its own
+// copy of this module). A call without it is user code calling an
+// export of a "use client" module as a function.
+const RENDER_CALL = Symbol.for("krate.render");
+
+function clientCallError(exportName: string, name: string): Error {
+  const what = exportName === "default" ? name : exportName;
+  return new Error(
+    `Attempted to call ${what}() from the server but ${what} is on the client. ` +
+      `It is exported by a "use client" module, so a server component can render it as <${what} /> ` +
+      `or pass it to a client component, but cannot call it. ` +
+      `Move the function into a module without "use client" and import it from both sides.`,
+  );
+}
+
 // warnUncloneable reports an asChild component whose child reached the
 // client as server-rendered HTML (raw HTML, a deferred slot), which its Slot
 // cannot clone or merge props into.
@@ -1035,7 +1051,14 @@ export function clientBoundary(
   }
   if (typeof impl !== "function") return impl;
   const name = (impl as any).displayName || (impl as any).name || exportName;
-  const Boundary = async (props: Record<string, any>, vals?: ContextValues) => {
+  // Called by user code, the boundary fails here and now. An async function
+  // would hand back a rejected promise the caller never awaits, and that
+  // unhandled rejection would take the renderer process down.
+  const Boundary = (props: Record<string, any>, vals?: ContextValues, from?: symbol): Promise<unknown> => {
+    if (from !== RENDER_CALL) throw clientCallError(exportName, name);
+    return renderBoundary(props, vals);
+  };
+  const renderBoundary = async (props: Record<string, any>, vals?: ContextValues) => {
     // Taken before the first await, so islands number in render order.
     const ids = islandIdPrefix(moduleId, exportName);
     const { children, ...rest } = props || {};

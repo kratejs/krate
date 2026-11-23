@@ -624,6 +624,15 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A server component that calls a function exported by a `"use client"` module (`parseUi(cookie)` from a
+  module that also exports a component) now fails clearly instead of running the island renderer on the
+  arguments. The build reports `[KR7118]` at the call, naming the import and suggesting a module without
+  `"use client"` that both sides import; a call the build cannot see (a namespace import, a callback) throws
+  `Attempted to call parseUi() from the server but parseUi is on the client` when the page renders, at the call
+  and not as a rejected promise that nobody awaits, so it ends that one request with a 500. Exports that are not
+  functions (constants, plain objects) still read normally on the server, which is more permissive than Next.js.
+  See docs features/server-components.
+
 - The SSR renderer no longer exits when a render leaves an error behind outside its own promise chain. A server
   component that started a promise nobody awaited and that rejected, or threw from a timer or callback, ended the
   renderer process (Node's default for an unhandled rejection), and every page then answered 503 until the

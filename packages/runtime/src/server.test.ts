@@ -108,6 +108,31 @@ describe('clientBoundary', () => {
     expect(ids(first.result)[2].endsWith('_0')).toBe(true);
   });
 
+  it('throws at once, naming the export, when server code calls a client export as a function', async () => {
+    const parseUi = clientBoundary('mc', 'parseUi', '/c.js', function parseUi() { return null; }, render) as any;
+    // A synchronous throw: a rejected promise nobody awaits would crash the renderer.
+    let thrown: unknown;
+    let result: unknown;
+    try {
+      result = parseUi('dark|1');
+    } catch (e) {
+      thrown = e;
+    }
+    expect(result).toBeUndefined();
+    expect(String(thrown)).toContain('Attempted to call parseUi() from the server but parseUi is on the client');
+    expect(String(thrown)).toContain('without "use client"');
+    const Def = clientBoundary('md', 'default', '/c.js', function Panel() { return null; }, render) as any;
+    expect(() => Def({})).toThrow('Attempted to call Panel() from the server');
+    // Rendering it as a component still works.
+    expect(await renderToStringAsync(jsx(parseUi, { a: 1 }))).toContain('<!--krate-island:');
+  });
+
+  it('passes non-function exports of a client module through unchanged', () => {
+    expect(clientBoundary('me', 'LIMIT', '/c.js', 10, render)).toBe(10);
+    const cfg = { a: 1 };
+    expect(clientBoundary('mf', 'cfg', '/c.js', cfg, render)).toEqual({ a: 1 });
+  });
+
   it('keeps an element and a props script for a real-React island', async () => {
     const Box = clientBoundary('m22', 'Box', '/c.js', function Box() { return null; }, render, true, true) as any;
     const html = await renderToStringAsync(jsx(Box, { id: 'x' }));

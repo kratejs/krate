@@ -825,6 +825,11 @@ func checkServerTree(ann *irtree.Annotations, roots []string, clientMods map[str
 		irtree.WalkAST(fn.Body, func(n any) bool {
 			switch x := n.(type) {
 			case *ast.CallExpr:
+				if id, ok := x.Callee.(*ast.Identifier); ok && isClient(id.Name) && !declaresName(fn, id.Name) {
+					at(name, x.Position, diag.CodeClientExportCalled,
+						"`"+id.Name+"` is exported from a client module ("+filepath.Base(ann.ComponentSources[id.Name])+") and cannot be called on the server; "+name+" runs there",
+						"move "+id.Name+" into a module without \"use client\" and import it from both sides; a server component can only render a client export (<"+id.Name+" />) or pass it to a client component")
+				}
 				if hook := calleeName(x.Callee); clientOnlyHooks[hook] {
 					// The bundler lowers React hooks to Krate primitives
 					// (useState -> createSignal); name what the author wrote.
@@ -869,6 +874,46 @@ func checkServerTree(ann *irtree.Annotations, roots []string, clientMods map[str
 		visit(r)
 	}
 	return errs
+}
+
+// declaresName reports whether fn binds name itself (a parameter or a local
+// declaration), which then shadows an import of the same name.
+func declaresName(fn *ast.FnDecl, name string) bool {
+	for _, p := range fn.Params {
+		if p != nil && (p.Name == name || strings.Contains(p.Pattern, name)) {
+			return true
+		}
+	}
+	found := false
+	bound := func(d *ast.VarDecl) {
+		if d == nil {
+			return
+		}
+		if d.Name == name || d.RestName == name || strings.Contains(d.Pattern, name) {
+			found = true
+		}
+		for _, nm := range d.Names {
+			if nm == name {
+				found = true
+			}
+		}
+	}
+	irtree.WalkAST(fn.Body, func(n any) bool {
+		switch d := n.(type) {
+		case *ast.VarStmt:
+			for _, v := range d.Decls {
+				bound(v)
+			}
+		case *ast.VarDecl:
+			bound(d)
+		case *ast.FnDecl:
+			if d.Name == name {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 // checkClientCallSite reports function-literal props passed from a server

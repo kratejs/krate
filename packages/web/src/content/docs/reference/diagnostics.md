@@ -380,6 +380,12 @@ Two modules export the same name and a page imports it from both, for example `i
 
 A component marked `@renderer` (or with a `"use renderer"` or `"@renderer"` string at the top of its body) hands its children to a non-DOM renderer in the browser, so it always hydrates on the client. It cannot be async, and it cannot also be a static, server or runtime component, whichever way that tier is written (a decorator, a body directive, a leading `// @tier` comment, a `.server`/`.runtime`/`.static` file name or a config list). Remove the other tier, use `@client`, or move the renderer component into its own client module.
 
+### KR7118
+
+**Export of a client module called on the server**
+
+Every export of a `"use client"` module that is a function is a client reference on the server: a server component can render it (`<Shell />`) or pass it to a client component as a prop, but calling it (`parseUi(cookie)`) is an error, as in Next.js ("Attempted to call X() from the server but X is on the client"). It used to run Krate's region renderer on the arguments and fail deep inside the renderer. Move the function into a module without `"use client"` and import it from both sides. Exports that are not functions (constants, plain objects) are not references and read normally on the server. A call the build cannot see, such as one through a namespace import or a callback, fails when the page renders, with the same message.
+
 ### KR7120
 
 **API route file in the pages directory**
