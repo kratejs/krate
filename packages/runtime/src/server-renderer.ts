@@ -141,6 +141,25 @@ if (PARENT_PID > 0) {
 
 let manifest: ServerManifest | null = null;
 
+// manifestFile returns the server manifest on disk: KRATE_MANIFEST, else the
+// one under the output directory.
+function manifestFile(): string {
+  if (manifestPath && fs.existsSync(manifestPath)) return manifestPath;
+  const krateDefault = path.join(OUT_DIR, ".krate", "server-manifest.json");
+  return fs.existsSync(krateDefault) ? krateDefault : path.join(OUT_DIR, "server-manifest.json");
+}
+
+let manifestStamp = "";
+
+function statStamp(file: string): string {
+  try {
+    const st = fs.statSync(file);
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return "";
+  }
+}
+
 if (manifestPath && fs.existsSync(manifestPath)) {
   const data = fs.readFileSync(manifestPath, "utf-8");
   manifest = JSON.parse(data);
@@ -269,6 +288,25 @@ const core = createSSRCore({
 });
 const isrCache = isrMemory.cache;
 const { findPage, renderPage, renderRegion, renderPageRegion } = core;
+manifestStamp = statStamp(manifestFile());
+
+// reloadManifest re-reads the server manifest when a dev rebuild changed it,
+// so pages added while `krate dev` runs resolve without a restart. A manifest
+// that cannot be read keeps the last good one.
+function reloadManifest() {
+  const file = manifestFile();
+  const stamp = statStamp(file);
+  if (!stamp || stamp === manifestStamp) return;
+  try {
+    const next = JSON.parse(fs.readFileSync(file, "utf-8")) as ServerManifest;
+    manifest = next;
+    core.setManifest(next);
+    manifestStamp = stamp;
+    console.log(`[krate-ssr] Reloaded manifest: ${next.pages.length} SSR/ISR/streaming pages`);
+  } catch (err: any) {
+    console.error("[krate-ssr] Manifest not reloaded, keeping the last good one:", err.message);
+  }
+}
 
 // ISR cache persistence - survives renderer restarts so a bounce doesn't
 // cold-render every ISR variant. Written debounced (coalesced) to the build
@@ -334,6 +372,8 @@ const INTERNAL_OPS: Record<string, InternalOp> = {
 async function applyInternalOp(op: InternalOp, payload: any): Promise<Record<string, any>> {
   if (op !== "dev-invalidate") return core.applyInternalOp(op, payload);
   const { route: targetRoute, source, bundlePath } = payload;
+  reloadManifest();
+  if (!targetRoute) return { ok: true };
   // Invalidate the page and region caches for this route, then the module
   // cache for the source file or bundle.
   const key = bundlePath || source;

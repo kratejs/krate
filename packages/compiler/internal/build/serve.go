@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -1939,33 +1940,54 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	ssr.SetTuning(cfg.SSR.Timeout, cfg.SSR.MaxCacheSize)
 	ssr.SetPPR(cfg.PPR, cfg.PPRRevalidate)
 	ssr.SetRendererWorkers(cfg.SSR.RendererWorkers)
-	ssrStarted := false
+	var ssrOn atomic.Bool
 	ssrStop := make(chan struct{})
 	var ssrStopOnce sync.Once
-	if err := ssr.LoadManifest(); err != nil {
-		if !errors.Is(err, errServerManifestMissing) {
-			return err
+	// startSSR launches the renderer when the manifest has request-time pages
+	// that need it. Dev calls it again after every rebuild, so a page that
+	// becomes request-time (or a first build that failed) starts it late.
+	startSSR := func(quiet bool) {
+		if err := ssr.LoadManifest(); err != nil {
+			if !errors.Is(err, errServerManifestMissing) {
+				fmt.Fprintf(os.Stderr, "  %s! SSR renderer not started:%s %v\n", cYellow, cReset, err)
+			}
+			// No request-time pages: nothing routes through the renderer.
+			return
 		}
-		// No request-time pages: nothing routes through the renderer.
-	} else if !ssr.NeedsNodeRenderer() {
-		printf("  %s*%s SSR renderer skipped (all request-time regions render on the Go host)\n", cCyan, cReset)
-	} else if err := ssr.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "  %s! SSR renderer not started:%s %v\n", cYellow, cReset, err)
-	} else {
-		ssrStarted = true
+		if !ssr.NeedsNodeRenderer() {
+			if !quiet {
+				printf("  %s*%s SSR renderer skipped (all request-time regions render on the Go host)\n", cCyan, cReset)
+			}
+			return
+		}
+		if err := ssr.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "  %s! SSR renderer not started:%s %v\n", cYellow, cReset, err)
+			return
+		}
 		revalHost.SetSSR(ssr, ssrPort)
 		go ssr.Supervise(ssrStop)
+		ssrOn.Store(true)
 		printf("  %s*%s SSR renderer -> %shttp://localhost:%d%s\n", cCyan, cReset, cCyan, ssrPort, cReset)
 	}
+	if err := ssr.LoadManifest(); err != nil && !errors.Is(err, errServerManifestMissing) {
+		return err
+	}
+	startSSR(false)
 
 	// SSR/ISR/Streaming route handler - intercepts before static file server
-	if ssrStarted {
+	if ssrOn.Load() || hub != nil {
 		mux.HandleFunc("/__krate/ssr/", ssrInternalProxy(revalHost, ssrPort))
+	}
+	if hub != nil {
 		// Dev: invalidate the renderer's caches once per rebuild, not once per
 		// connected tab.
-		if hub != nil {
-			hub.SetReloadHook(func(ev DevEvent) { ssr.InvalidateDevRoutes(ev.Routes) })
-		}
+		hub.SetReloadHook(func(ev DevEvent) {
+			if !ssrOn.Load() {
+				startSSR(true)
+				return
+			}
+			ssr.InvalidateDevRoutes(ev.Routes)
+		})
 	}
 
 	devMode := hub != nil
@@ -2380,7 +2402,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		// 0 when no Node renderer runs: streamRegionPage only dials the sidecar
 		// if the page has a region it must render.
 		regionPort := 0
-		if ssrStarted {
+		if ssrOn.Load() {
 			regionPort = ssrPort
 		}
 		outOfOrder := page != nil && page.Mode == RenderStreaming.String()
@@ -2576,7 +2598,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 			}
 		}
 		regionPort := 0
-		if ssrStarted {
+		if ssrOn.Load() {
 			regionPort = ssrPort
 		}
 		flusher, _ := w.(http.Flusher)
@@ -2638,7 +2660,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	})
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		if ssrStarted && !ssr.IsRunning() {
+		if ssrOn.Load() && !ssr.IsRunning() {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = io.WriteString(w, "ssr-unavailable\n")
 			return
@@ -2698,7 +2720,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	var isrWg sync.WaitGroup
 	isrDone := make(chan struct{})
 	var isrDoneOnce sync.Once
-	if ssrStarted {
+	if ssrOn.Load() {
 		isrPages := ssr.GetISRPages()
 		if len(isrPages) > 0 {
 			printf("  %s*%s ISR revalidation: %d pages\n", cCyan, cReset, len(isrPages))
@@ -2769,7 +2791,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		}()
 		isrDoneOnce.Do(func() { close(isrDone) })
 		nodeAPIStopOnce.Do(func() { close(nodeAPIStop) })
-		if ssrStarted {
+		if ssrOn.Load() {
 			ssrStopOnce.Do(func() { close(ssrStop) })
 			ssr.Shutdown()
 			printf("  %s+%s SSR renderer stopped\n", cGreen, cReset)

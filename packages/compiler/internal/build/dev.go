@@ -553,6 +553,22 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 		}
 	}
 
+	if b.needFullRebuild.Swap(false) {
+		printf("  %sA page changed between static and request-time rendering; rebuilding all...%s\n", cYellow, cReset)
+		if err := b.BuildAll(); err != nil {
+			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
+			addDiags("", err)
+		}
+		if err := b.BuildAllAPI(); err != nil {
+			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
+			addDiags("", err)
+		}
+		if hub != nil {
+			hub.Publish(DevEvent{Type: "reload", Diagnostics: diags})
+		}
+		return
+	}
+
 	if len(apiToBuild) > 0 {
 		printf("  %sCompiling changed API endpoints...%s\n", cCyan, cReset)
 		if err := b.CompileAPIRoutes(apiToBuild); err != nil {

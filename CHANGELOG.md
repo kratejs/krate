@@ -604,6 +604,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate dev`: a page added while the server runs is served without a restart. The Node renderer read its
+  server manifest once at startup, so a new request-time page (such as `admin/staff/[id].tsx` next to
+  `staff.tsx`) answered 500 with `no such page`; the renderer now re-reads the manifest on every rebuild. A
+  renderer that was not running at startup (the first build failed, or no page was request-time yet) starts
+  when a rebuild brings the first request-time page, and a page that changes between static and request-time
+  rendering rebuilds the whole site instead of leaving the server manifest behind.
+
 - Tailwind: the preflight reset is emitted when Tailwind is on even if no utility class is found. A
   project whose scan dirs held no class names (and whose CSS defined no `@theme` variables) silently lost
   the whole Tailwind stylesheet, reset included. KR7140 is now reported once with its location; the

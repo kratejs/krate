@@ -385,6 +385,8 @@ export interface SSRCore {
   applyInternalOp(op: CoreInternalOp, payload: any): Promise<Record<string, any>>;
   /** Drops every cached variant of a route and all region caches (dev reload). */
   devInvalidate(route: string): void;
+  /** Replaces the manifest findPage reads, so pages added while dev runs resolve. */
+  setManifest(next: ServerManifest | null): void;
 }
 
 /**
@@ -520,7 +522,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   }
   // Renderer
 
-  const manifest: ServerManifest | null = opts.manifest;
+  let manifest: ServerManifest | null = opts.manifest;
 
   function findPage(route: string): ManifestPage | undefined {
     if (!manifest) return undefined;
@@ -1164,6 +1166,9 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     devInvalidate(route: string) {
       void isrStore.deleteRoute(route);
       clearRegionCache();
+    },
+    setManifest(next: ServerManifest | null) {
+      manifest = next;
     },
   };
 }
