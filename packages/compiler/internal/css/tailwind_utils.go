@@ -9,7 +9,7 @@ import (
 // normalized like Tailwind v4 (see normalizeArbitrary), and whether v was a
 // bracketed arbitrary value.
 func unwrapArbitrary(v string) (string, bool) {
-	if len(v) >= 2 && v[0] == '[' && v[len(v)-1] == ']' {
+	if isArbitrary(v) {
 		return normalizeArbitrary(v[1 : len(v)-1]), true
 	}
 	return "", false
@@ -37,8 +37,35 @@ func arbitraryValue(v string) (val, hint string, ok bool) {
 }
 
 // isArbitrary reports whether key is a bracketed arbitrary value.
+// The opening bracket must be the one the final bracket closes: "[#fff]/[.5]"
+// is a value with a modifier, not one arbitrary value.
 func isArbitrary(key string) bool {
-	return len(key) >= 2 && key[0] == '[' && key[len(key)-1] == ']'
+	if len(key) < 2 || key[0] != '[' || key[len(key)-1] != ']' {
+		return false
+	}
+	depth := 0
+	var quote byte
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		switch {
+		case c == '\\':
+			i++
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '[':
+			depth++
+		case c == ']':
+			depth--
+			if depth == 0 {
+				return i == len(key)-1
+			}
+		}
+	}
+	return false
 }
 
 // arbType returns the value of an arbitrary key and its data type: the type

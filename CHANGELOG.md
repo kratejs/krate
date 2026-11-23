@@ -609,6 +609,16 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Built-in Tailwind: an arbitrary colour with an arbitrary opacity (`bg-[#d81f26]/[.16]`, `/[16%]`,
+  `/(--my-alpha)`) emitted `background-color: #d81f26]/[.16`, and the unbalanced `]` made browsers drop
+  every later rule in `@layer utilities`. The bracket check now requires the first `[` to close at the
+  end of the value, so the `/[...]` modifier is split off like `/15`. In the same families, `/(--alpha)`
+  after a bracketed colour containing parentheses (`border-[rgb(1_2_3)]/(--a)`) now resolves,
+  `[color:var(--x)]` no longer leaks its `color:` hint into `fill-`, `placeholder-` or a modified `bg-`,
+  and underscores in a modified arbitrary colour become spaces. As a last gate, a generated rule with
+  unbalanced brackets, a stray `;` or `}` or an unterminated string is dropped, with a build warning
+  that names the class, instead of reaching the stylesheet.
+
 - KR7122 "No matching export ... for import `useId`": the React compat module (`@krate/runtime/react`,
   which build-time metadata evaluation bundles in place of React) now exports `useId`, so a layout whose
   `metadata` depends on a module that imports `useId` evaluates and keeps its title and robots tags. A test
