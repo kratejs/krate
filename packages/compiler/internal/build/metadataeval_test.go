@@ -198,3 +198,34 @@ export default function Site() { return <main><h1>Site page</h1><Builder /></mai
 		t.Errorf("the generated page is missing its content:\n%s", html)
 	}
 }
+
+// A layout's metadata is evaluated at build time with React bundled as the
+// compat module; a client module in the layout's imports that calls useId must
+// still bundle (the compat module lacked a useId export, KR7122).
+func TestLayoutMetadataEvaluatesWithUseIdInImports(t *testing.T) {
+	t.Parallel()
+	b, root := hooksProject(t, map[string]string{
+		"src/components/bits.tsx": `"use client";
+import { useId } from "react";
+export const BOARD_TITLE = "CAD board";
+function useUid() { return useId(); }
+export function Field({ label }: { label: string }) {
+  const id = useUid();
+  return <label htmlFor={id}>{label}<input id={id} /></label>;
+}`,
+		"src/pages/cad/_layout.tsx": `import { Field, BOARD_TITLE } from "../../components/bits";
+export const metadata = { title: BOARD_TITLE, robots: { index: false } };
+export default function L({ children }: any) { return <div><Field label="Name" />{children}</div>; }`,
+		"src/pages/cad/index.tsx": `export default function Board() { return <p>board</p>; }`,
+	})
+	logs := builderStderr(b)
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	if out := logs(); strings.Contains(out, "KR7122") || strings.Contains(out, "No matching export") {
+		t.Errorf("metadata evaluation failed:\n%s", out)
+	}
+	if head := headOf(readMetaDist(t, root, "cad/index.html")); !strings.Contains(head, "<title>CAD board</title>") || !strings.Contains(head, "noindex") {
+		t.Errorf("the layout's metadata is missing:\n%s", head)
+	}
+}

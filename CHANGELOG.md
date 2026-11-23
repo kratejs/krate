@@ -604,6 +604,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- KR7122 "No matching export ... for import `useId`": the React compat module (`@krate/runtime/react`,
+  which build-time metadata evaluation bundles in place of React) now exports `useId`, so a layout whose
+  `metadata` depends on a module that imports `useId` evaluates and keeps its title and robots tags. A test
+  keeps every hook the React compatibility guide lists exported from it.
+
 - A server action called from a client island that answers with `redirect("/path?x=1")` is followed: the
   island's redirect safety check used a mangled character class and rejected any path containing digits,
   upper case letters, `?`, `=` and similar, so only plain lowercase paths worked.
