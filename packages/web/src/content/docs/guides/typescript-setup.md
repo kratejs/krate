@@ -87,6 +87,45 @@ git-ignored by the scaffold, so run `krate types` once after cloning for editors
 and `tsc` to see it. The scaffold's `typecheck` script does exactly that:
 `krate typecheck`.
 
+## Apps that keep React types
+
+Krate's `JSX.Element` is a DOM `Node`, which React's `ReactNode` does not
+accept. An app that keeps `@types/react` (a migrated Next.js app, or one that
+shares React-typed components) therefore fails to type-check in either JSX mode:
+
+- `"jsx": "react-jsx"`: the globals `<Link>`, `<Head>` and friends are rejected with
+  `TS2786: 'Link' cannot be used as a JSX component`.
+- `"jsx": "preserve"` with `"jsxImportSource": "@krate/runtime"` (what
+  `krate migrate nextjs` writes): every element is a Krate `Element`, so
+  React-typed props such as `children: ReactNode` reject it (`TS2322`).
+
+Import the opt-in bridge once, from any ambient `.d.ts` that your `tsconfig`
+includes:
+
+```ts
+// src/krate-react.d.ts
+import "@krate/runtime/react-types";
+```
+
+It makes `JSX.Element` also a `React.ReactElement`, which fixes both modes. The
+rest of `tsconfig.json` stays as above; a migrated app uses:
+
+```json
+{
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "@krate/runtime",
+    "moduleResolution": "bundler",
+    "strict": true
+  },
+  "include": ["src", ".krate/types"]
+}
+```
+
+`krate migrate nextjs` writes `src/krate-react.d.ts` for you when `package.json`
+lists `@types/react`. Apps without React types must not import the bridge.
+A hand-written bridge that makes `JSX.Element` extend `ReactElement` can be deleted.
+
 ## Typechecking in CI
 
 ```sh

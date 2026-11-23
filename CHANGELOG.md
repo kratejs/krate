@@ -609,6 +609,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Types: apps that keep `@types/react` (migrated Next.js apps) failed to type-check because Krate's
+  `JSX.Element` is a DOM `Node`, which React's `ReactNode` rejects: `<Link>`/`<Head>` gave TS2786 under
+  `jsx: "react-jsx"`, and every element gave TS2322 against React-typed props under `jsx: "preserve"` with
+  `jsxImportSource: "@krate/runtime"` (468 errors in one app). New opt-in `@krate/runtime/react-types`
+  makes `JSX.Element` also a `React.ReactElement`, fixing both modes; plain Krate apps are unaffected.
+  `krate migrate nextjs` writes `src/krate-react.d.ts` importing it when `@types/react` is a dependency.
+  See the TypeScript Setup guide.
 - Built-in Tailwind: an arbitrary colour with an arbitrary opacity (`bg-[#d81f26]/[.16]`, `/[16%]`,
   `/(--my-alpha)`) emitted `background-color: #d81f26]/[.16`, and the unbalanced `]` made browsers drop
   every later rule in `@layer utilities`. The bracket check now requires the first `[` to close at the
