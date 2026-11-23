@@ -660,6 +660,11 @@ host code runs in the native process. Names and options may change between relea
   render modules of every client component together, as a full build does, and a render module finds its
   siblings among those of its own generation.
 
+- `krate dev`: after a rebuild of the whole site (a page added, removed or renamed, or a page changing between
+  static and request-time rendering) the island pages loaded with a missing Preact. The shared Preact chunks
+  (`/chunks/preact-*.js`, the targets of the import map) were remembered from the first build and not written
+  again into the emptied output directory, so every island failed to load until a restart.
+
 - Types: apps that keep `@types/react` (migrated Next.js apps) failed to type-check because Krate's
   `JSX.Element` is a DOM `Node`, which React's `ReactNode` rejects: `<Link>`/`<Head>` gave TS2786 under
   `jsx: "react-jsx"`, and every element gave TS2322 against React-typed props under `jsx: "preserve"` with

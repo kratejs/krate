@@ -86,9 +86,14 @@ func (b *Builder) takeIslandDirty() bool {
 }
 
 // resetIslandEntries forgets every registered entry (a full build starts over).
+// The shared Preact chunks are forgotten too: the output directory they were
+// written to is emptied, and a build that kept the memo left the import map
+// pointing at files that no longer exist (dev rebuilds the whole site on a new
+// page, a renamed file, a page turning request-time).
 func (b *Builder) resetIslandEntries() {
 	b.islandMu.Lock()
 	b.islandEntries = nil
+	b.preactChunks = nil
 	b.islandDirty = true
 	b.islandMu.Unlock()
 }
