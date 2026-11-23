@@ -524,6 +524,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `redirect()` in a page now answers `307` (it was `302`) and the new `permanentRedirect()` answers `308`,
+  as in Next.js, in `krate serve` and the Node server handler; API routes already answered `307` and
+  now answer `308` for `permanentRedirect()`. Browsers treat 302 and 307 alike for GET, but a POST is now
+  repeated against the new URL. Config `redirects` rules are unchanged (301/302 or `statusCode`).
+
 - Tailwind: a project stylesheet with `@import "tailwindcss"` (or a v3 `@tailwind` directive) now turns
   Tailwind on, as in Tailwind v4, when `krate.config.ts` has no `tailwind.enabled`. Before, the import
   alone generated nothing, so an app scaffolded without a `tailwind` key (the native scaffold has none)

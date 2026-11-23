@@ -1138,6 +1138,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     let notFound = false;
     let denied: 401 | 403 | 0 = 0;
     let redirect = "";
+    let redirectCode = 307;
     let renderErr = "";
     let fatalErr = "";
     let errStack = "";
@@ -1151,7 +1152,10 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
           if (id !== "page" && (frame.notFound || frame.denied || frame.redirect)) {
             notFound = notFound || !!frame.notFound;
             denied = denied || frame.denied || 0;
-            if (!redirect) redirect = frame.redirect || "";
+            if (!redirect && frame.redirect) {
+              redirect = frame.redirect;
+              redirectCode = frame.status === 308 ? 308 : 307;
+            }
             continue;
           }
           if (frame.noStore) noStore = true;
@@ -1162,6 +1166,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
             notFound = !!frame.notFound;
             denied = denied || frame.denied || 0;
             redirect = frame.redirect || "";
+            if (redirect) redirectCode = frame.status === 308 ? 308 : 307;
             if ((frame.status || 0) >= 500 || frame.error) {
               renderErr = frame.error || `page-region render failed with status ${frame.status}`;
               errStack = frame.stack || "";
@@ -1211,7 +1216,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       return finish(rs, 500, segError ? segError.html : PLAIN_500);
     }
     if (notFound || denied || redirect) {
-      if (redirect) return goRedirect(redirect, rs.path, rs.method, 302, rs.res);
+      if (redirect) return goRedirect(redirect, rs.path, rs.method, redirectCode, rs.res);
       if (denied) return accessDenied(rs, denied, routeRef);
       const page404 = errorPage(rs.path, 404, routeRef);
       if (page404) return custom404(rs, page404);
@@ -1867,7 +1872,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   // Runs an API route inside the action store so headers(), cookies() and
   // redirect() work in it like in a server action: cookies it sets are added to
-  // the response and a redirect() signal becomes a 307.
+  // the response and a redirect() signal becomes a 307 (308 for permanentRedirect()).
   async function runRoute(request: Request, run: () => Promise<Response>): Promise<Response> {
     const ctx = makeActionContext(request.headers, "", new URL(request.url).pathname);
     ctx.method = request.method;
@@ -1876,7 +1881,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       out = await actionStore.run(ctx, run);
     } catch (e: any) {
       if (!e || typeof e.__krateRedirect !== "string") throw e;
-      out = new Response(null, { status: 307, headers: { location: e.__krateRedirect, "cache-control": "no-store" } });
+      out = new Response(null, { status: e.__krateRedirectStatus === 308 ? 308 : 307, headers: { location: e.__krateRedirect, "cache-control": "no-store" } });
     }
     if (ctx.setCookies.length > 0) {
       const h = new Headers(out.headers);

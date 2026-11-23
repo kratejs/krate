@@ -70,7 +70,7 @@ renders (and inside server actions):
 | `headers()` | Request `Headers`, including `host`; also awaitable. `x-forwarded-host` is there only if the client or proxy sent it |
 | `cookies()` | Read-only view: `get(name)` returns `{ name, value }`, plus `getAll()` / `has()`; `set()` throws during a render |
 | `notFound()` | Stops rendering and answers 404 (the custom 404 page when present) |
-| `redirect(url)` | Stops rendering and redirects |
+| `redirect(url)` | Stops rendering and redirects with `307` (a server action navigates the client). `permanentRedirect(url)` does the same with `308`, as in Next.js |
 | `fetch` | The runtime's `fetch` |
 
 ## Errors

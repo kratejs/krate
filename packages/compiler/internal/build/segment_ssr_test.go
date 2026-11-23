@@ -1,6 +1,7 @@
 package build
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -320,5 +321,40 @@ export default async function Who() { const h = await headers(); return <p>host 
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "host header: example.test") {
 		t.Errorf("status %d, want the request host in headers():\n%s", resp.StatusCode, body)
+	}
+}
+
+// TestPageRedirectStatuses: redirect() in a page answers 307 and
+// permanentRedirect() 308, as in Next.js; config redirects keep their own codes.
+func TestPageRedirectStatuses(t *testing.T) {
+	t.Parallel()
+	b, root := scProject(t, map[string]string{
+		"src/pages/index.tsx": `export default function Home() { return <h1>home</h1>; }`,
+		"src/pages/go.tsx": `import { redirect } from "@krate/runtime/server";
+export const dynamic = "force-dynamic";
+export default async function Go() { redirect("/auth/login?next=%2Fgo"); }`,
+		"src/pages/moved.tsx": `import { permanentRedirect } from "@krate/runtime/server";
+export const dynamic = "force-dynamic";
+export default async function Moved() { permanentRedirect("/new-home"); }`,
+	})
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	for path, want := range map[string][2]string{
+		"/go/":    {"307", "/auth/login?next=%2Fgo"},
+		"/moved/": {"308", "/new-home"},
+	} {
+		status, header, body := getWith(t, base+path, nil)
+		if fmt.Sprint(status) != want[0] || header.Get("Location") != want[1] {
+			t.Errorf("%s: status %d location %q, want %s %s\n%s", path, status, header.Get("Location"), want[0], want[1], body)
+		}
 	}
 }

@@ -144,3 +144,11 @@ export function redirect(url: string): never {
   err.__krateRedirect = url;
   throw err;
 }
+
+/** redirect() that a page or API route answers with 308 instead of 307 (a server action still navigates the client). */
+export function permanentRedirect(url: string): never {
+  const err = new Error('Server action redirect to ' + url) as Error & { __krateRedirect: string; __krateRedirectStatus: number };
+  err.__krateRedirect = url;
+  err.__krateRedirectStatus = 308;
+  throw err;
+}

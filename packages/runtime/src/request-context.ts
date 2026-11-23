@@ -176,6 +176,21 @@ export function httpFallbackStatus(err: unknown): 401 | 403 | 404 | 0 {
   return accessDeniedStatus(err);
 }
 
+/**
+ * redirectStatus is the HTTP status of a redirect() signal: 307, or 308 for
+ * permanentRedirect() (Next.js's NEXT_REDIRECT digest carries it as well).
+ */
+export function redirectStatus(err: unknown): 307 | 308 {
+  if (!err || typeof err !== 'object') return 307;
+  const e = err as Record<string, unknown>;
+  if (e.__krateRedirectStatus === 308) return 308;
+  if (typeof e.digest === 'string' && e.digest.startsWith('NEXT_REDIRECT;')) {
+    const parts = e.digest.split(';');
+    if (parts[3] === '308' || parts[3] === '301') return 308;
+  }
+  return 307;
+}
+
 /** redirectTarget returns the URL of a redirect() signal, or "" for other errors. */
 export function redirectTarget(err: unknown): string {
   if (!err || typeof err !== 'object') return '';

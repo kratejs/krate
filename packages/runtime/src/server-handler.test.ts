@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createKrateHandler, matchMetaRoute, type HandlerConfig, type KrateServerData } from "./server-handler.js";
 import { jsx, ServerErrorBoundary } from "./server.js";
-import { headers } from "./action-context.js";
+import { headers, redirect, permanentRedirect } from "./action-context.js";
 
 const config: HandlerConfig = {
   basePath: "",
@@ -586,5 +586,38 @@ describe("page headers()", () => {
     });
     const body = await (await h(new Request("http://example.test:8080/who/", { headers: { accept: "text/html" } }))).text();
     expect(body).toContain("host=example.test:8080");
+  });
+});
+
+describe("page redirect statuses", () => {
+  const shell =
+    "<html><head><title>t</title></head><body><!--suspense:page-->baked<!--/suspense:page--></body></html>";
+  const mk = () =>
+    createKrateHandler({
+      target: "node",
+      data: data({
+        hasMiddleware: false,
+        pages: [
+          { route: "/temp", mode: "ssr", bundlePath: "temp" },
+          { route: "/perm", mode: "ssr", bundlePath: "perm" },
+        ],
+        allPages: [{ route: "/temp", mode: "ssr" }, { route: "/perm", mode: "ssr" }],
+        shells: { "/temp": shell, "/perm": shell },
+      }),
+      modules: {
+        pages: {
+          temp: { default: () => redirect("/login") },
+          perm: { default: () => permanentRedirect("/new") },
+        },
+      },
+    });
+  const get = (h: ReturnType<typeof mk>, path: string) => h(new Request("http://localhost" + path, { redirect: "manual" }));
+
+  it("redirect() answers 307 and permanentRedirect() 308", async () => {
+    const h = mk();
+    const t = await get(h, "/temp/");
+    expect([t.status, t.headers.get("location")]).toEqual([307, "/login"]);
+    const p = await get(h, "/perm/");
+    expect([p.status, p.headers.get("location")]).toEqual([308, "/new"]);
   });
 });
