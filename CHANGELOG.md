@@ -624,6 +624,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The SSR renderer no longer exits when a render leaves an error behind outside its own promise chain. A server
+  component that started a promise nobody awaited and that rejected, or threw from a timer or callback, ended the
+  renderer process (Node's default for an unhandled rejection), and every page then answered 503 until the
+  supervisor restarted it ("SSR renderer exited unexpectedly"). An unhandled rejection is now logged with the
+  request it came from and the renderer keeps serving; an uncaught exception raised inside a request is logged the
+  same way, and one outside any request still exits. `krate dev` and `krate start` use the same renderer.
+
 - `useId()` is unique across the islands of a page. Each `"use client"` island and external island numbered
   its ids from the start (`P0-0`, `P0-1`, ...), so two islands repeated each other's ids: Radix's
   `radix-${useId()}` collided between a menu and a command palette, cmdk's `getElementById` focused the wrong
