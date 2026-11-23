@@ -384,7 +384,7 @@ A component marked `@renderer` (or with a `"use renderer"` or `"@renderer"` stri
 
 **Export of a client module called on the server**
 
-Every export of a `"use client"` module that is a function is a client reference on the server: a server component can render it (`<Shell />`) or pass it to a client component as a prop, but calling it (`parseUi(cookie)`) is an error, as in Next.js ("Attempted to call X() from the server but X is on the client"). It used to run Krate's region renderer on the arguments and fail deep inside the renderer. Move the function into a module without `"use client"` and import it from both sides. Exports that are not functions (constants, plain objects) are not references and read normally on the server. A call the build cannot see, such as one through a namespace import or a callback, fails when the page renders, with the same message.
+Every export of a `"use client"` module that is a function is a client reference on the server: a server component can render it (`<Shell />`) or pass it to a client component as a prop, but calling it (`parseTheme(cookie)`) is an error, as in Next.js ("Attempted to call X() from the server but X is on the client"). It used to run Krate's region renderer on the arguments and fail deep inside the renderer. Move the function into a module without `"use client"` and import it from both sides. Exports that are not functions (constants, plain objects) are not references and read normally on the server. A call the build cannot see, such as one through a namespace import or a callback, fails when the page renders, with the same message.
 
 ### KR7120
 

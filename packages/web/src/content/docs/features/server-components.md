@@ -257,9 +257,9 @@ export default async function Settings() {
 - **A client module's exports are references, not functions you can call.**
   As in Next.js, a server component can render an export of a `"use client"`
   module (`<Shell />`) or pass it to a client component, but calling it
-  (`parseUi(cookie)`) fails: with `[KR7118]` at build time when the call is
+  (`parseTheme(cookie)`) fails: with `[KR7118]` at build time when the call is
   visible in the component, and otherwise when the page renders, with
-  `Attempted to call parseUi() from the server but parseUi is on the client`.
+  `Attempted to call parseTheme() from the server but parseTheme is on the client`.
   Only that request fails with a 500; the renderer keeps serving other pages.
   Move a plain function into a module without `"use client"` and import it from
   both the server and the client side. Exports that are not functions

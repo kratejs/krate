@@ -639,11 +639,11 @@ host code runs in the native process. Names and options may change between relea
   the first when the request went to the SSR renderer; the lines are now joined as one cookie list. A value
   holding `=` or `&` was never cut short by Krate, in pages, routes, middleware or actions.
 
-- A server component that calls a function exported by a `"use client"` module (`parseUi(cookie)` from a
+- A server component that calls a function exported by a `"use client"` module (`parseTheme(cookie)` from a
   module that also exports a component) now fails clearly instead of running the island renderer on the
   arguments. The build reports `[KR7118]` at the call, naming the import and suggesting a module without
   `"use client"` that both sides import; a call the build cannot see (a namespace import, a callback) throws
-  `Attempted to call parseUi() from the server but parseUi is on the client` when the page renders, at the call
+  `Attempted to call parseTheme() from the server but parseTheme is on the client` when the page renders, at the call
   and not as a rejected promise that nobody awaits, so it ends that one request with a 500. Exports that are not
   functions (constants, plain objects) still read normally on the server, which is more permissive than Next.js.
   See docs features/server-components.

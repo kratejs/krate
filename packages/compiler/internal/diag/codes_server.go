@@ -173,7 +173,7 @@ func init() {
 			Title: "Export of a client module called on the server",
 			Explanation: "Every export of a `\"use client\"` module that is a function is a client reference on the " +
 				"server: a server component can render it (`<Shell />`) or pass it to a client component as a prop, " +
-				"but calling it (`parseUi(cookie)`) is an error, as in Next.js (\"Attempted to call X() from the " +
+				"but calling it (`parseTheme(cookie)`) is an error, as in Next.js (\"Attempted to call X() from the " +
 				"server but X is on the client\"). It used to run Krate's region renderer on the arguments and fail " +
 				"deep inside the renderer. Move the function into a module without `\"use client\"` and import it " +
 				"from both sides. Exports that are not functions (constants, plain objects) are not references and " +

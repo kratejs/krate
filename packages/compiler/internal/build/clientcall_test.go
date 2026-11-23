@@ -10,7 +10,7 @@ import (
 
 const clientShellSrc = `"use client";
 import { useState } from "react";
-export function parseUi(raw: string | undefined) {
+export function parseTheme(raw: string | undefined) {
   const [mode, collapsed] = (raw ?? "").split("|");
   return { mode: mode || "light", collapsed: collapsed === "1" };
 }
@@ -28,18 +28,18 @@ func TestServerCallOfClientExportIsABuildError(t *testing.T) {
 	t.Parallel()
 	b, root := scProject(t, map[string]string{
 		"src/components/shell.tsx": clientShellSrc,
-		"src/pages/admin/_layout.tsx": `import { parseUi, Shell } from "../../components/shell";
+		"src/pages/admin/_layout.tsx": `import { parseTheme, Shell } from "../../components/shell";
 export default async function Layout({ children }: { children: any }) {
   await Promise.resolve();
-  const ui = parseUi("dark|1");
+  const ui = parseTheme("dark|1");
   return <div><Shell mode={ui.mode} />{children}</div>;
 }`,
 		"src/pages/admin/index.tsx": `export default async function Admin() { await Promise.resolve(); return <main>admin</main>; }`,
 	})
 	withPreact(t, root)
 	err := b.BuildAll()
-	wantCode(t, err, diag.CodeClientExportCalled, "`parseUi` is exported from a client module (shell.tsx)")
-	for _, want := range []string{"_layout.tsx:4:", `move parseUi into a module without "use client"`} {
+	wantCode(t, err, diag.CodeClientExportCalled, "`parseTheme` is exported from a client module (shell.tsx)")
+	for _, want := range []string{"_layout.tsx:4:", `move parseTheme into a module without "use client"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("diagnostic lacks %q:\n%v", want, err)
 		}
@@ -55,12 +55,12 @@ func TestClientExportsStayUsableOnTheServer(t *testing.T) {
 	ensureRuntimeDist(t)
 	b, root := scProject(t, map[string]string{
 		"src/components/shell.tsx": clientShellSrc,
-		"src/pages/index.tsx": `import { Shell, LIMIT, parseUi } from "../components/shell";
+		"src/pages/index.tsx": `import { Shell, LIMIT, parseTheme } from "../components/shell";
 export default async function Home() {
   await Promise.resolve();
   const parse = (x: string) => x.toUpperCase();
-  const label = (() => { const parseUi = (x: string) => "local-" + x; return parseUi("a"); })();
-  return <main><p id="limit">limit {LIMIT + 1}</p><p id="label">{label}{parse("b")}</p><Shell mode="m" /><span data-f={typeof parseUi} /></main>;
+  const label = (() => { const parseTheme = (x: string) => "local-" + x; return parseTheme("a"); })();
+  return <main><p id="limit">limit {LIMIT + 1}</p><p id="label">{label}{parse("b")}</p><Shell mode="m" /><span data-f={typeof parseTheme} /></main>;
 }`,
 	})
 	withPreact(t, root)
@@ -92,7 +92,7 @@ func TestRuntimeCallOfClientExportFailsOneRequest(t *testing.T) {
 		"src/pages/admin/_layout.tsx": `import * as shell from "../../components/shell";
 export default async function Layout({ children }: { children: any }) {
   await Promise.resolve();
-  const ui = shell.parseUi("dark|1");
+  const ui = shell.parseTheme("dark|1");
   return <div>{ui.mode}{children}</div>;
 }`,
 		"src/pages/admin/index.tsx": `export default async function Admin() { await Promise.resolve(); return <main>admin</main>; }`,
