@@ -527,7 +527,7 @@ host code runs in the native process. Names and options may change between relea
 - KR8009 for a client component that pulls in Node built-ins is one error per island instead of one per
   file of the offending package (a database driver printed about 2,000 lines). It names the built-ins, how
   many imports there are, and the import chain from the component to the package that brought the Node-only
-  code in (`components/editor.tsx -> components/markdown.tsx -> @genesis/community (package root) ->
+  code in (`components/editor.tsx -> components/markdown.tsx -> @acme/shared (package root) ->
   mongodb`), points at the import in project code that starts the chain, and hints at a browser-safe subpath or
   moving the code to the server. `--verbose` lists every import after the summary.
 
