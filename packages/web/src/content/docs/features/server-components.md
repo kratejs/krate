@@ -254,6 +254,18 @@ export default async function Settings() {
   `[KR8013]`.
 - The global `<Link>` works in server components, async layouts and inside
   `"use client"` modules.
+- **A client module's exports are references, not functions you can call.**
+  As in Next.js, a server component can render an export of a `"use client"`
+  module (`<Shell />`) or pass it to a client component, but calling it
+  (`parseTheme(cookie)`) fails: with `[KR7118]` at build time when the call is
+  visible in the component, and otherwise when the page renders, with
+  `Attempted to call parseTheme() from the server but parseTheme is on the client`.
+  Only that request fails with a 500; the renderer keeps serving other pages.
+  Move a plain function into a module without `"use client"` and import it from
+  both the server and the client side. Exports that are not functions
+  (constants, plain objects) are not references in Krate: a server component
+  reads `LIMIT` from a client module as the value (Next.js hands it a client
+  reference it cannot read).
 
 The bundle cost is the Preact runtime (shared across pages) plus the chunks of
 the islands a page actually renders. A page with only icons and server
@@ -382,6 +394,7 @@ export default async function Post({ params }) {
 | Module-level `await` in a page rendered at build time | Build error `[KR7102]` |
 | `async` components in a `"use client"` module | Build error `[KR7113]` |
 | `export * from` in a `"use client"` module | Build error `[KR7114]` |
+| Calling a function exported by a `"use client"` module from a server component | Build error `[KR7118]`, or a 500 for that request when the call is not visible to the build |
 | Client-side (SPA) navigation into a page with islands | Not covered: the island loader runs on full page loads |
 
 See the [diagnostics reference](/docs/reference/diagnostics/) for every code.

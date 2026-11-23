@@ -629,6 +629,8 @@ function updateIsland(l: Isl, n: Isl, jobs: Promise<unknown>[]): void {
   const old = parse(l.json);
   const changed = retaken || JSON.stringify(props) !== JSON.stringify(old ? old.p || {} : null);
   raw.p = props;
+  // The island keeps the useId() prefix it mounted with.
+  if (old && old.i !== undefined) raw.i = old.i;
   l.start!.data = OPEN + escapeComment(JSON.stringify(raw));
   // Nested islands in its slots may have replaced their nodes: the sets
   // follow the document before the island renders again.

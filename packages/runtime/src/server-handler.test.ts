@@ -621,3 +621,61 @@ describe("page redirect statuses", () => {
     expect([p.status, p.headers.get("location")]).toEqual([308, "/new"]);
   });
 });
+
+describe("route precedence", () => {
+  const shell = "<html><head><title>t</title></head><body><!--suspense:page-->baked<!--/suspense:page--></body></html>";
+  const files = new Set(["/about/", "/shop/", "/team/staff/"]);
+  const staticLayer = {
+    exists: (p: string) => files.has(p),
+    isAsset: () => false,
+    serve: async (_req: Request, p: string) => new Response("static " + p, { headers: { "content-type": "text/html" } }),
+  };
+  const mods = {
+    pages: {
+      slug: { default: () => jsx("main", { children: "dynamic-slug" }) },
+      filter: { default: () => jsx("main", { children: "dynamic-filter" }) },
+      staff: { default: () => jsx("main", { children: "dynamic-staff" }) },
+    },
+    api: {},
+    actions: {},
+  };
+  const h = createKrateHandler({
+    target: "node",
+    data: data({
+      hasMiddleware: false,
+      apiRoutes: [],
+      actions: [],
+      pages: [
+        { route: "/[slug]", mode: "ssr", bundlePath: "slug" },
+        { route: "/shop/[[...filter]]", mode: "ssr", bundlePath: "filter" },
+        { route: "/team/staff", mode: "ssr", bundlePath: "staff" },
+      ],
+      allPages: [
+        { route: "/[slug]", mode: "ssr" },
+        { route: "/about", mode: "ssg" },
+        { route: "/shop", mode: "ssg" },
+        { route: "/shop/[[...filter]]", mode: "ssr" },
+        { route: "/team/[slug]", mode: "ssg" },
+        { route: "/team/staff", mode: "ssr" },
+      ],
+      shells: { "/[slug]": shell, "/shop/[[...filter]]": shell, "/team/staff": shell },
+    }),
+    modules: mods,
+    static: staticLayer,
+  });
+  const body = async (p: string) => (await h(new Request("http://localhost" + p))).text();
+
+  it("a prerendered static page beats a request-time [param] beside it", async () => {
+    expect(await body("/about/")).toBe("static /about/");
+    expect(await body("/other/")).toContain("dynamic-slug");
+  });
+
+  it("a prerendered index beats a request-time optional catch-all", async () => {
+    expect(await body("/shop/")).toBe("static /shop/");
+    expect(await body("/shop/a/b/")).toContain("dynamic-filter");
+  });
+
+  it("a request-time page at a static path beats a prerendered [param]", async () => {
+    expect(await body("/team/staff/")).toContain("dynamic-staff");
+  });
+});

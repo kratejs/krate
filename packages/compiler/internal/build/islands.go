@@ -547,6 +547,7 @@ func islandMountBlock(e irtree.ExternalComponent, prov *islandProviders) string 
 	}
 	src.WriteString(prov.wrapVNodeJS("__vnode"))
 	src.WriteString("      var __boundary=h(KrateIslandBoundary,{onError:function(err){console.error(\"krate external island:\",String((err&&(err.name?err.name+\": \":\"\"))+(err&&err.message||err)||err));el.setAttribute(\"data-krate-island-error\",\"\");}},__vnode);\n")
+	fmt.Fprintf(&src, "      el.__krateIds=%q;\n", e.ID)
 	src.WriteString("      var __start=typeof performance!==\"undefined\"?performance.now():0;\n")
 	src.WriteString("      if (el.childNodes && el.childNodes.length) hydrate(__boundary,el); else render(__boundary,el);\n")
 	src.WriteString("      var __end=typeof performance!==\"undefined\"?performance.now():0;\n")
@@ -568,9 +569,12 @@ func (b *Builder) islandSSRSource(e irtree.ExternalComponent, imports []irtree.E
 		props = "{}"
 	}
 	fmt.Fprintf(&src, "\nconst props = %s;\n", props)
-	src.WriteString("globalThis.__krate_island_html = \"\";\nglobalThis.__krate_island_ssr_error = \"\";\nglobalThis.__krate_island_hints = new Set();\ntry { globalThis.__krate_island_html = renderToString(")
+	src.WriteString("function __krateIdRoot(v, id) { if (v && typeof v == \"object\") v.__m = [id, 0]; return v; }\n")
+	src.WriteString("globalThis.__krate_island_html = \"\";\nglobalThis.__krate_island_ssr_error = \"\";\nglobalThis.__krate_island_hints = new Set();\n")
+	fmt.Fprintf(&src, "const __krateIds = %q;\n", e.ID)
+	src.WriteString("try { globalThis.__krate_island_html = renderToString(__krateIdRoot(")
 	src.WriteString(prov.wrapExprJS(e.Subtree))
-	src.WriteString("); } catch (e) { globalThis.__krate_island_ssr_error = String((e && (e.name ? e.name + \": \" : \"\") + (e.message || e)) || e) + \"\\n\" + String((e && e.stack) || \"\"); }\n")
+	src.WriteString(", __krateIds)); } catch (e) { globalThis.__krate_island_ssr_error = String((e && (e.name ? e.name + \": \" : \"\") + (e.message || e)) || e) + \"\\n\" + String((e && e.stack) || \"\"); }\n")
 	src.WriteString(islandHintsHeadJS)
 	return src.String()
 }
@@ -1346,12 +1350,28 @@ __o.__r = function (vnode) {
 // server HTML from a client render. Preact keeps that state in diff()
 // arguments only. Island and client-boundary loaders, and compat's hydrate
 // and hydrateRoot, all call this export.
+//
+// It also gives a root the useId() mask its island's server render used.
+// Preact numbers useId() from 0 in every root (P0-0, P0-1, ...), so two
+// islands on a page repeat each other's ids. A root whose container carries
+// __krateIds (the island's id prefix) holds the mask [prefix, counter] on its
+// root vnode instead, and every render into the same container, and every
+// portal under it, continues the same counter. options.__ is Preact's root
+// hook (_root) and __m the vnode's mask (_mask); preact/hooks uses both.
 const preactHydrateMarkJS = `
 import { hydrate as __krateHydrate, options as __krateOptions } from "preact";
 export function hydrate(vnode, parent) {
   __krateOptions.__krateHydrating = (__krateOptions.__krateHydrating || 0) + 1;
   try { return __krateHydrate(vnode, parent); } finally { __krateOptions.__krateHydrating--; }
-}`
+}
+var __krateRootHook = __krateOptions.__;
+__krateOptions.__ = function (vnode, parent) {
+  if (__krateRootHook) __krateRootHook(vnode, parent);
+  if (!vnode || typeof vnode != "object" || !parent || vnode.__m) return;
+  var m = parent.__krateMask;
+  if (!m && parent.__krateIds != null) m = parent.__krateMask = [parent.__krateIds, 0];
+  if (m) vnode.__m = m;
+};`
 
 // preactSyncExternalStoreJS is useSyncExternalStore with React's hydration
 // semantics. preact/compat's ignores getServerSnapshot, so a component that

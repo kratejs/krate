@@ -68,7 +68,11 @@ if (PARENT_PID > 0) {
     try {
       process.kill(PARENT_PID, 0);
     } catch (e) {
-      if (!e || e.code !== 'EPERM') process.exit(0);
+      // ESRCH: the host is gone. Any other error (Deno without --allow-run
+      // refuses the check) means the parent cannot be watched; stop watching
+      // instead of exiting every two seconds.
+      if (e && e.code === 'ESRCH') process.exit(0);
+      if (!e || e.code !== 'EPERM') clearInterval(parentWatch);
     }
   }, 2000);
   if (parentWatch.unref) parentWatch.unref();
@@ -162,7 +166,8 @@ function resolveDynamicFile(dir, segments, exts) {
   return null;
 }
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => krateInRequest(req.method, req.url, () => krateHandle(req, res)));
+async function krateHandle(req, res) {
   try {
     // The host's readiness probe: which start of the sidecar is listening.
     if (req.url === '` + sidecarReadyPath + `') {
@@ -427,7 +432,7 @@ const server = http.createServer(async (req, res) => {
     if (fallback) { res.setHeader('Cache-Control', 'no-store'); return res.end(JSON.stringify({ error: KRATE_FALLBACK_LABEL[fallback] })); }
     return res.end(JSON.stringify(krateErrorBody(err, req.method + ' ' + req.url)));
   }
-});
+}
 
 if (WORKERS > 1 && cluster.isPrimary) {
   // Node leaves scheduling to the OS on Windows (SCHED_NONE), where one
@@ -460,11 +465,7 @@ if (WORKERS > 1 && cluster.isPrimary) {
   // A clustered worker that loses its primary is shutting down; do not try to
   // send handles or log an EPIPE stack.
   process.on('disconnect', () => process.exit(0));
-  process.on('uncaughtException', (err) => {
-    if (err && err.code === 'EPIPE') process.exit(0);
-    console.error(err);
-    process.exit(1);
-  });
+  krateInstallProcessGuards();
   // The port was free when Go chose it, but a bind can still fail with
   // EADDRINUSE: any socket holding that local port blocks the wildcard bind,
   // including a short-lived outgoing connection. A clustered worker exits
@@ -514,7 +515,11 @@ if (PARENT_PID > 0) {
     try {
       process.kill(PARENT_PID, 0);
     } catch (e) {
-      if (!e || e.code !== 'EPERM') process.exit(0);
+      // ESRCH: the host is gone. Any other error (Deno without --allow-run
+      // refuses the check) means the parent cannot be watched; stop watching
+      // instead of exiting every two seconds.
+      if (e && e.code === 'ESRCH') process.exit(0);
+      if (!e || e.code !== 'EPERM') clearInterval(parentWatch);
     }
   }, 2000);
   if (parentWatch.unref) parentWatch.unref();
@@ -712,10 +717,10 @@ function resolveDynamicFile(dir, segments, exts) {
   return null;
 }
 
-Bun.serve({
-  port: PORT,
-  hostname: '127.0.0.1',
-  async fetch(req) {
+krateInstallProcessGuards();
+
+async function krateBunFetch(req) {
+  {
     if (new URL(req.url).pathname === '` + sidecarReadyPath + `') {
       return new Response(process.env.KRATE_SIDECAR_START || '', { headers: { 'content-type': 'text/plain; charset=utf-8' } });
     }
@@ -781,7 +786,13 @@ Bun.serve({
       if (fallback) { const r = json({ error: KRATE_FALLBACK_LABEL[fallback] }, fallback); r.headers.set('Cache-Control', 'no-store'); return r; }
       return json(krateErrorBody(e, req.method + ' ' + urlPath), 500);
     }
-  },
+  }
+}
+
+Bun.serve({
+  port: PORT,
+  hostname: '127.0.0.1',
+  fetch: (req) => krateInRequest(req.method, new URL(req.url).pathname, () => krateBunFetch(req)),
 });`
 
 const (
@@ -2002,6 +2013,9 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		printf("  %s*%s Dynamic routes: %d patterns\n", cCyan, cReset, len(dynRoutes))
 	}
 
+	// Prerendered page routes, to rank them against request-time pages.
+	ssgRoutes := &staticPageRoutes{}
+
 	// Opt-in User-Agent document selection (compat.mode hybrid + userAgent).
 	uaOn := uaOptIn(cfg.Compat)
 
@@ -2023,7 +2037,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 				return true
 			}
 			page, _ := ssr.FindPageForRoute(requestRoute(r.URL.Path))
-			return page != nil && page.Mode != RenderSSG.String()
+			return page != nil && page.Mode != RenderSSG.String() && !ssgRoutes.shadows(absOut, r.URL.Path, page)
 		}, fileServer)
 	}
 
@@ -2333,7 +2347,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		// no fresh region content). Only pages that are NOT request-time (SSG /
 		// plain static) give precedence to their concrete static file over a
 		// sibling dynamic [param] template.
-		if shouldServeStatic(absOut, r.URL.Path, page) {
+		if shouldServeStatic(absOut, r.URL.Path, page) || ssgRoutes.shadows(absOut, r.URL.Path, page) {
 			handlerWith404.ServeHTTP(w, r)
 			return
 		}
@@ -2356,12 +2370,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 			params = make(map[string]string)
 		}
 
-		headers := make(map[string]string)
-		for k, v := range r.Header {
-			if len(v) > 0 {
-				headers[k] = v[0]
-			}
-		}
+		headers := renderHeaders(r.Header)
 		// Go hoists Host out of r.Header; headers() in a page should see it.
 		if r.Host != "" {
 			headers["Host"] = r.Host
@@ -2586,12 +2595,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		if page == nil {
 			return false
 		}
-		headers := make(map[string]string)
-		for k, v := range r.Header {
-			if len(v) > 0 {
-				headers[k] = v[0]
-			}
-		}
+		headers := renderHeaders(r.Header)
 		// Go hoists Host out of r.Header; headers() in a page should see it.
 		if r.Host != "" {
 			headers["Host"] = r.Host
@@ -3148,6 +3152,64 @@ func shouldServeStatic(absOut, urlPath string, page *ManifestPage) bool {
 	return staticRouteExists(absOut, urlPath)
 }
 
+// staticPageRoutes lists the prerendered (SSG) page routes of the build in
+// dist/manifest.json. The file is re-read when it changes, so a dev rebuild
+// that adds or removes a page is seen by the next request.
+type staticPageRoutes struct {
+	mu       sync.Mutex
+	path     string
+	modTime  time.Time
+	size     int64
+	patterns []string
+}
+
+func (s *staticPageRoutes) load(absOut string) []string {
+	path := ResolveManifestPath(absOut, "manifest.json")
+	fi, err := os.Stat(path)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.path, s.patterns = "", nil
+		return nil
+	}
+	if path == s.path && fi.ModTime().Equal(s.modTime) && fi.Size() == s.size {
+		return s.patterns
+	}
+	s.path, s.modTime, s.size, s.patterns = path, fi.ModTime(), fi.Size(), nil
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var m Manifest
+	if json.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	for _, p := range m.Pages {
+		if p.Mode == RenderSSG {
+			s.patterns = append(s.patterns, p.Route)
+		}
+	}
+	return s.patterns
+}
+
+// shadows reports whether a prerendered page matches urlPath with a more
+// specific route than page, the request-time page that matched it. A static
+// route beats a [param], a [param] a [...catchAll], and a catch-all a
+// [[...optional]], whichever render mode each page has.
+func (s *staticPageRoutes) shadows(absOut, urlPath string, page *ManifestPage) bool {
+	if page == nil || page.Mode == RenderSSG.String() {
+		return false
+	}
+	for _, p := range s.load(absOut) {
+		if compareRouteSpecificity(p, page.Route) < 0 {
+			if _, ok := matchRoutePattern(urlPath, p); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // isBakedAsset reports whether urlPath names an existing non-HTML file in the
 // build output.
 func isBakedAsset(absOut, urlPath string) bool {
@@ -3598,4 +3660,22 @@ func hasRouteBundles(dir string) bool {
 		return nil
 	})
 	return found
+}
+
+// renderHeaders is the request headers a renderer is given, one value per
+// name. A header sent on several lines keeps the first, except Cookie, whose
+// lines are one cookie list (RFC 6265, 5.4): all of them, joined with "; ", as
+// Go's HTTP/2 server does, so a cookie on a later line is not lost.
+func renderHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for k, v := range h {
+		switch {
+		case len(v) == 0:
+		case len(v) > 1 && http.CanonicalHeaderKey(k) == "Cookie":
+			out[k] = strings.Join(v, "; ")
+		default:
+			out[k] = v[0]
+		}
+	}
+	return out
 }

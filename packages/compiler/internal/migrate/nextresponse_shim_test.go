@@ -160,3 +160,58 @@ export function middleware(): Response {
 		t.Fatalf("tsc: %v\n%s", err, out)
 	}
 }
+
+// TestMigratedMiddlewareCookieJarDecodes runs a migrated middleware that reads
+// request.cookies on Node. As in Next.js the value is the decoded one, so a
+// cookie that NextResponse.cookies.set wrote percent-encoded
+// ("mode%3Dlight%26nav%3Dopen") reads back as "mode=light&nav=open", and a
+// value that holds "=" is not cut short.
+func TestMigratedMiddlewareCookieJarDecodes(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	src := `import { NextRequest, NextResponse } from 'next/server';
+export function middleware(request: NextRequest) {
+  return NextResponse.json({
+    ui: request.cookies.get('ui')?.value,
+    all: request.cookies.getAll().map((c) => c.name + '=' + c.value),
+  });
+}
+`
+	out, _, manual := rewriteNextMiddleware(src)
+	if len(manual) > 0 {
+		t.Fatalf("manual steps: %v", manual)
+	}
+	out += `
+for (const cookie of ["ui=mode=light&nav=open", "ui=mode%3Dlight%26nav%3Dopen", 'x=1; ui="mode=light&nav=open"; y=%E0%A4%A', "ui=a%2"]) {
+  const res = await middleware(new Request("http://x.test/", { headers: { cookie } }));
+  console.log(JSON.stringify(await res.json()));
+}
+const set = NextResponse.json({});
+set.cookies.set("ui", "mode=light&nav=open");
+console.log(JSON.stringify(set.headers.getSetCookie()));
+`
+	res := api.Transform(out, api.TransformOptions{Loader: api.LoaderTS, Format: api.FormatESModule})
+	if len(res.Errors) > 0 {
+		t.Fatalf("migrated middleware does not compile: %s\n%s", res.Errors[0].Text, out)
+	}
+	file := filepath.Join(t.TempDir(), "mw.mjs")
+	if err := os.WriteFile(file, res.Code, 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.Command(node, file).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, got)
+	}
+	for _, want := range []string{
+		`{"ui":"mode=light&nav=open","all":["ui=mode=light&nav=open"]}` + "\n" + `{"ui":"mode=light&nav=open","all":["ui=mode=light&nav=open"]}`,
+		`{"ui":"mode=light&nav=open","all":["x=1","ui=mode=light&nav=open","y=%E0%A4%A"]}`,
+		`{"ui":"a%2","all":["ui=a%2"]}`,
+		`["ui=mode%3Dlight%26nav%3Dopen; Path=/"]`,
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+}

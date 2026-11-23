@@ -624,6 +624,60 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Routes rank the way Next.js ranks them in every host. A request-time dynamic page (an async `[slug].tsx`) no
+  longer answers a URL that a prerendered page owns: `about.tsx` beside `(site)/[slug].tsx` served
+  `catch-all about`, and `blog/new.tsx`, a static `shop/index.tsx` next to `shop/[[...filter]].tsx` and a
+  `generateStaticParams` page next to a request-time `[...rest]` were shadowed the same way. The order is an
+  exact static path, then `[param]`, then `[...catchAll]`, then `[[...optional]]`, and a static `shop` now
+  outranks `shop/[[...filter]]` (the longer pattern used to win). `krate start`, `krate serve`, `krate dev` and
+  the Node, Netlify and Cloudflare handler apply it; the Vercel function now carries the prerendered pages a
+  request-time route would otherwise capture, because Vercel sends that route's glob to the function before its
+  filesystem.
+
+- With `ssr.apiRuntime: "deno"` the API sidecar no longer restarts every two seconds. Its check that the
+  Krate host is still alive (`process.kill(pid, 0)`) needs `--allow-run`, which the sidecar does not have, and
+  the refused check was taken for a dead host, so the sidecar exited and requests in the restart gap answered
+  502. Only a missing process (`ESRCH`) ends the sidecar now; a check that cannot run stops the watch.
+
+- The Node, Bun and Deno API sidecar no longer exits when a route leaves an error behind outside its own promise
+  chain. A route that started a promise nobody awaited and that rejected, or threw from a timer or callback,
+  ended the sidecar process (or one cluster worker), and the API routes answered 503 until the host restarted
+  it. It now follows the SSR renderer's policy: the error is logged with the request's method and path and the
+  sidecar keeps serving; an uncaught exception outside any request still exits. Under Bun an unhandled rejection
+  is logged without the request.
+
+- Cookie values read the same everywhere. `request.cookies` in the Node, Bun and Deno API and middleware sidecars,
+  in a migrated Next middleware and the dynamic metadata routes returned the raw header value, so a cookie that
+  `cookies().set("ui", "mode=light&nav=open")` wrote percent-encoded read back as `mode%3Dlight%26nav%3Dopen` (and a
+  quoted one with its quotes) there, while server components, actions and the embedded runtime returned the decoded
+  `mode=light&nav=open`, as Next.js does. A cookie sent on more than one `Cookie` header line lost every line but
+  the first when the request went to the SSR renderer; the lines are now joined as one cookie list. A value
+  holding `=` or `&` was never cut short by Krate, in pages, routes, middleware or actions.
+
+- A server component that calls a function exported by a `"use client"` module (`parseTheme(cookie)` from a
+  module that also exports a component) now fails clearly instead of running the island renderer on the
+  arguments. The build reports `[KR7118]` at the call, naming the import and suggesting a module without
+  `"use client"` that both sides import; a call the build cannot see (a namespace import, a callback) throws
+  `Attempted to call parseTheme() from the server but parseTheme is on the client` when the page renders, at the call
+  and not as a rejected promise that nobody awaits, so it ends that one request with a 500. Exports that are not
+  functions (constants, plain objects) still read normally on the server, which is more permissive than Next.js.
+  See docs features/server-components.
+
+- The SSR renderer no longer exits when a render leaves an error behind outside its own promise chain. A server
+  component that started a promise nobody awaited and that rejected, or threw from a timer or callback, ended the
+  renderer process (Node's default for an unhandled rejection), and every page then answered 503 until the
+  supervisor restarted it ("SSR renderer exited unexpectedly"). An unhandled rejection is now logged with the
+  request it came from and the renderer keeps serving; an uncaught exception raised inside a request is logged the
+  same way, and one outside any request still exits. `krate dev` and `krate start` use the same renderer.
+
+- `useId()` is unique across the islands of a page. Each `"use client"` island and external island numbered
+  its ids from the start (`P0-0`, `P0-1`, ...), so two islands repeated each other's ids: Radix's
+  `radix-${useId()}` collided between a menu and a command palette, cmdk's `getElementById` focused the wrong
+  element, and `aria-labelledby`/`aria-controls` pointed at the wrong ones. An island's marker now carries an id
+  prefix (a hash of its module and export, and its place among that component's islands in the document); the
+  server render, hydration, content portaled or mounted after hydration, and a router refresh all number from
+  it, and a router swap keeps the prefix of the islands it keeps. Ids stay stable per render.
+
 - `krate dev`: an edited "use client" component renders its new code on the server. The renderer re-imported a
   page bundle with a new query after each rebuild, but the render modules of the client components it imports
   (`server-bundles/client/*.ssr.mjs` and their chunks) stayed cached under their old URLs, so SSR kept serving the

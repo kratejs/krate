@@ -181,7 +181,9 @@ func matchRoutePattern(urlPath, pattern string) (map[string]string, bool) {
 // specific than b. Segments are compared left to right by kind (static >
 // dynamic > catch-all > optional catch-all); at the first difference the
 // more specific kind wins, then longer patterns win, then the pattern text
-// breaks ties so the order is deterministic.
+// breaks ties so the order is deterministic. A pattern whose only extra
+// segment is a trailing optional catch-all is the less specific one: "shop"
+// answers /shop before "shop/[[...filter]]" does.
 func compareRouteSpecificity(a, b string) int {
 	sa, sb := cachedRoutePattern(a).segs, cachedRoutePattern(b).segs
 	for i := 0; i < len(sa) && i < len(sb); i++ {
@@ -193,6 +195,12 @@ func compareRouteSpecificity(a, b string) int {
 		}
 	}
 	if len(sa) != len(sb) {
+		if len(sa) > len(sb) && sa[len(sb)].kind == segOptionalCatchAll {
+			return 1
+		}
+		if len(sb) > len(sa) && sb[len(sa)].kind == segOptionalCatchAll {
+			return -1
+		}
 		return len(sb) - len(sa)
 	}
 	return strings.Compare(a, b)

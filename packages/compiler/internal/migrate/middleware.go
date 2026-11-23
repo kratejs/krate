@@ -119,7 +119,13 @@ func rewriteNextMiddleware(src string) (string, []string, []string) {
   const values = new Map<string, string>();
   for (const part of (request.headers.get("cookie") || "").split(";")) {
     const i = part.indexOf("=");
-    if (i > 0) values.set(part.slice(0, i).trim(), part.slice(i + 1).trim());
+    if (i <= 0) continue;
+    const name = part.slice(0, i).trim();
+    if (!name || values.has(name)) continue;
+    let value = part.slice(i + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+    try { value = decodeURIComponent(value); } catch { /* keep the raw value */ }
+    values.set(name, value);
   }
   return {
     get: (name: string) => values.has(name) ? { name, value: values.get(name) } : undefined,

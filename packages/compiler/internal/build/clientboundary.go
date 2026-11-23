@@ -133,7 +133,7 @@ function endOf(start){for(var d=0,n=start.nextSibling;n;n=n.nextSibling){if(isOp
 function range(start){
 var end=endOf(start),p;if(!end)return null;
 try{p=JSON.parse(start.data.slice(OPEN.length))}catch(e){return null}
-var r={start:start,end:end,module:p.m,export:p.e,src:p.s,props:p.p||{},status:"loading",
+var r={start:start,end:end,module:p.m,export:p.e,src:p.s,ids:p.i,props:p.p||{},status:"loading",
 nodes:function(){for(var o=[],c=start.nextSibling;c&&c!==end;c=c.nextSibling)o.push(c);return o},
 contains:function(x){for(var c=start.nextSibling;c&&c!==end;c=c.nextSibling)if(c===x||(c.nodeType===1&&c.contains(x)))return true;return false},
 connected:function(){return start.isConnected}};
@@ -825,6 +825,11 @@ func checkServerTree(ann *irtree.Annotations, roots []string, clientMods map[str
 		irtree.WalkAST(fn.Body, func(n any) bool {
 			switch x := n.(type) {
 			case *ast.CallExpr:
+				if id, ok := x.Callee.(*ast.Identifier); ok && isClient(id.Name) && !declaresName(fn, id.Name) {
+					at(name, x.Position, diag.CodeClientExportCalled,
+						"`"+id.Name+"` is exported from a client module ("+filepath.Base(ann.ComponentSources[id.Name])+") and cannot be called on the server; "+name+" runs there",
+						"move "+id.Name+" into a module without \"use client\" and import it from both sides; a server component can only render a client export (<"+id.Name+" />) or pass it to a client component")
+				}
 				if hook := calleeName(x.Callee); clientOnlyHooks[hook] {
 					// The bundler lowers React hooks to Krate primitives
 					// (useState -> createSignal); name what the author wrote.
@@ -869,6 +874,46 @@ func checkServerTree(ann *irtree.Annotations, roots []string, clientMods map[str
 		visit(r)
 	}
 	return errs
+}
+
+// declaresName reports whether fn binds name itself (a parameter or a local
+// declaration), which then shadows an import of the same name.
+func declaresName(fn *ast.FnDecl, name string) bool {
+	for _, p := range fn.Params {
+		if p != nil && (p.Name == name || strings.Contains(p.Pattern, name)) {
+			return true
+		}
+	}
+	found := false
+	bound := func(d *ast.VarDecl) {
+		if d == nil {
+			return
+		}
+		if d.Name == name || d.RestName == name || strings.Contains(d.Pattern, name) {
+			found = true
+		}
+		for _, nm := range d.Names {
+			if nm == name {
+				found = true
+			}
+		}
+	}
+	irtree.WalkAST(fn.Body, func(n any) bool {
+		switch d := n.(type) {
+		case *ast.VarStmt:
+			for _, v := range d.Decls {
+				bound(v)
+			}
+		case *ast.VarDecl:
+			bound(d)
+		case *ast.FnDecl:
+			if d.Name == name {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 // checkClientCallSite reports function-literal props passed from a server
@@ -1069,6 +1114,7 @@ export async function mount(island) {
   var slots = [];
   var pool = __krateServerSlots(island, slots);
   var root = __krateRangeRoot(island);
+  if (island.ids) root.__krateIds = island.ids;
   function show(raw, hydrating) {
     __krateSlotPool = pool;
     var props;
@@ -1657,11 +1703,16 @@ function __krateComp(m, e) {
 export const __krate_module = __m;
 // fwd holds the context values of the slot this component renders in; capture
 // receives the values in scope at each of its own slots, by slot token.
-export function __krate_render(C, props, _children, fwd, capture) {
+// ids is the island's useId() prefix (see islandIdPrefix in the runtime): Preact
+// numbers useId() from the nearest vnode that holds a mask, and the browser
+// gives the island's root the same one.
+export function __krate_render(C, props, _children, fwd, capture, ids) {
   __krateCapture = capture || null;
   __krateRaw = null;
   try {
-    return __krateRawHTML(renderToString(__krateProvide(h, h(C, __krateRevive(props, h, __krateServerAction, __krateComp)), fwd)));
+    var tree = __krateProvide(h, h(C, __krateRevive(props, h, __krateServerAction, __krateComp)), fwd);
+    if (ids && tree && typeof tree === "object") tree.__m = [ids, 0];
+    return __krateRawHTML(renderToString(tree));
   } finally {
     __krateCapture = null;
     __krateRaw = null;

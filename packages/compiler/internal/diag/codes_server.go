@@ -27,6 +27,8 @@ const (
 	CodeTierDecorator Code = "KR7115"
 	// CodeRendererTier: a renderer component is given a non-client tier or is async.
 	CodeRendererTier Code = "KR7117"
+	// CodeClientExportCalled: a server component calls an export of a "use client" module.
+	CodeClientExportCalled Code = "KR7118"
 	// CodeExportCollision: a page imports one name from two modules.
 	CodeExportCollision Code = "KR7116"
 	// CodeAPIRouteInPages: a .ts or .js file under src/pages/api is not served.
@@ -165,6 +167,18 @@ func init() {
 				"to JSON. Functions (other than server actions), class instances and symbols cannot be sent. " +
 				"Define the handler inside the client component, or pass a server action. The same check runs " +
 				"at request time for values computed while rendering.",
+		},
+		CodeInfo{
+			Code:  CodeClientExportCalled,
+			Title: "Export of a client module called on the server",
+			Explanation: "Every export of a `\"use client\"` module that is a function is a client reference on the " +
+				"server: a server component can render it (`<Shell />`) or pass it to a client component as a prop, " +
+				"but calling it (`parseTheme(cookie)`) is an error, as in Next.js (\"Attempted to call X() from the " +
+				"server but X is on the client\"). It used to run Krate's region renderer on the arguments and fail " +
+				"deep inside the renderer. Move the function into a module without `\"use client\"` and import it " +
+				"from both sides. Exports that are not functions (constants, plain objects) are not references and " +
+				"read normally on the server. A call the build cannot see, such as one through a namespace import " +
+				"or a callback, fails when the page renders, with the same message.",
 		},
 		CodeInfo{
 			Code:  CodeServerOnlyInClient,

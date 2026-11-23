@@ -7,7 +7,7 @@ import { highlight as highlightCode, trimSpace } from './highlight.js';
 import { sealBoundArgs } from './action-seal.js';
 import { accessDeniedStatus, isNotFoundSignal, redirectTarget } from './request-context.js';
 import { sha256Hex } from './sha256.js';
-import { markErrorCaught } from './cache-scope.js';
+import { currentRenderScope, markErrorCaught } from './cache-scope.js';
 import { encodeProp } from './flight-props.js';
 
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
@@ -569,7 +569,7 @@ async function expandComponent(node: JSXElement, vals?: ContextValues): Promise<
     return { out: consumerChild(callProps)(vals?.has(ctx) ? vals.get(ctx) : ctx._currentValue), vals };
   }
   // A client boundary also gets the context values in scope (slotValues).
-  let out: unknown = fn.__krateClient ? fn(callProps, vals) : fn(callProps);
+  let out: unknown = fn.__krateClient ? fn(callProps, vals, RENDER_CALL) : fn(callProps);
   if (isThenable(out)) out = await out;
   if (fn.__krateForeignProvider) {
     return { out, vals: new Map(vals).set(fn.__krateForeignProvider as ForeignContext, props.value) };
@@ -614,7 +614,7 @@ function renderElement(el: JSXElement): string {
         return renderNode(classFallback(type, instance, error) as JSXNode);
       }
     }
-    const result = type({ ...props, children });
+    const result = (type as any).__krateClient ? (type as any)({ ...props, children }, undefined, RENDER_CALL) : type({ ...props, children });
     if (isThenable(result)) throw asyncInSyncRender(`<${componentName(type)}>`);
     return withProviderValue(type, props, () => renderNode(result));
   }
@@ -715,6 +715,7 @@ type ClientRender = (
   childrenHTML: string | null,
   fwd?: SlotValues,
   capture?: Record<string, SlotValues>,
+  ids?: string,
 ) => string;
 
 type SlotValues = { k: string; v: unknown }[];
@@ -935,15 +936,51 @@ export const ISLAND_CLOSE = "<!--/krate-island-->";
 // islandOpen is the opening comment of a Preact island: its module, export,
 // chunk and props as JSON. "<", ">" and "--" are escaped (they occur only in
 // strings), so no value can end the comment or open another one.
-function islandOpen(moduleId: string, exportName: string, src: string, props: unknown): string {
-  const json = JSON.stringify({ m: moduleId, e: exportName, s: src, p: props })
+function islandOpen(moduleId: string, exportName: string, src: string, props: unknown, ids: string): string {
+  const json = JSON.stringify({ m: moduleId, e: exportName, s: src, i: ids, p: props })
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e")
     .replace(/--/g, "-\\u002d");
   return `<!--${ISLAND_OPEN}${json}-->`;
 }
 
+// islandIdPrefix names the next island of a component in the render that is
+// running: a hash of its module and export, and how many islands of that
+// component came before it in this document. useId() numbers from 0 inside
+// each island, so the prefix is what keeps ids unique across the page. The
+// router pairs the n-th island of a component in the live page with the n-th
+// one in the new markup, so a page that a navigation swaps in never reuses the
+// prefix of an island the swap keeps.
+const looseIslands = new Map<string, number>();
+
+function islandIdPrefix(moduleId: string, exportName: string): string {
+  const key = moduleId + "#" + exportName;
+  const scope = currentRenderScope();
+  const seen = scope ? (scope.islands ??= new Map<string, number>()) : looseIslands;
+  const n = seen.get(key) ?? 0;
+  seen.set(key, n + 1);
+  let h = 0x811C9DC5;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(36).padStart(7, "0") + "_" + n;
+}
+
 const warnedUncloneable = new Set<string>();
+
+// RENDER_CALL is the third argument the renderer passes when it renders a
+// client boundary as a component (a registered symbol: the renderer bundles its own
+// copy of this module). A call without it is user code calling an
+// export of a "use client" module as a function.
+const RENDER_CALL = Symbol.for("krate.render");
+
+function clientCallError(exportName: string, name: string): Error {
+  const what = exportName === "default" ? name : exportName;
+  return new Error(
+    `Attempted to call ${what}() from the server but ${what} is on the client. ` +
+      `It is exported by a "use client" module, so a server component can render it as <${what} /> ` +
+      `or pass it to a client component, but cannot call it. ` +
+      `Move the function into a module without "use client" and import it from both sides.`,
+  );
+}
 
 // warnUncloneable reports an asChild component whose child reached the
 // client as server-rendered HTML (raw HTML, a deferred slot), which its Slot
@@ -1014,7 +1051,16 @@ export function clientBoundary(
   }
   if (typeof impl !== "function") return impl;
   const name = (impl as any).displayName || (impl as any).name || exportName;
-  const Boundary = async (props: Record<string, any>, vals?: ContextValues) => {
+  // Called by user code, the boundary fails here and now. An async function
+  // would hand back a rejected promise the caller never awaits, and that
+  // unhandled rejection would take the renderer process down.
+  const Boundary = (props: Record<string, any>, vals?: ContextValues, from?: symbol): Promise<unknown> => {
+    if (from !== RENDER_CALL) throw clientCallError(exportName, name);
+    return renderBoundary(props, vals);
+  };
+  const renderBoundary = async (props: Record<string, any>, vals?: ContextValues) => {
+    // Taken before the first await, so islands number in render order.
+    const ids = islandIdPrefix(moduleId, exportName);
     const { children, ...rest } = props || {};
     const slots: DeferredSlot[] = [];
     const slotCtx: FlightCtx = { hydrate: false, component: name, slots, vals };
@@ -1033,7 +1079,7 @@ export function clientBoundary(
     }
     const fwd = vals?.get(slotValues) as SlotValues | undefined;
     const capture: Record<string, SlotValues> = {};
-    let html = render(impl, data, null, fwd, capture);
+    let html = render(impl, data, null, fwd, capture, ids);
     const rendered = await Promise.all(
       slots.map(async (s) => {
         const scope = mergeSlotValues(fwd, capture[s.token]);
@@ -1055,7 +1101,7 @@ export function clientBoundary(
     // A real-React island (flight) mounts with createRoot, which needs an
     // element of its own; a Preact island hydrates the nodes between its two
     // comments in place.
-    if (!flight) return raw(islandOpen(moduleId, exportName, src, data) + html + ISLAND_CLOSE);
+    if (!flight) return raw(islandOpen(moduleId, exportName, src, data, ids) + html + ISLAND_CLOSE);
     return raw(
       propsScript(data) +
         `<krate-island style="display:contents" data-module="${escapeHTML(moduleId)}" data-export="${escapeHTML(exportName)}" ` +

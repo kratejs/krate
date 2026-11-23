@@ -632,6 +632,18 @@ func buildServerBundle(root string, cfg *config.Config, target string, warn func
 		data.StaticPages = pages
 		plan.AssetExts = exts
 	}
+	if target == "vercel" && !data.HasMiddleware {
+		// A request-time page's glob ("/*" for /[slug]) reaches the function
+		// before Vercel's filesystem, so a prerendered page that outranks it
+		// ("/about") has to be answered by the function from the bundle.
+		pages, _, err := collectStaticForMiddleware(outDir, plan.Exclude)
+		if err != nil {
+			return nil, err
+		}
+		if shadowed := shadowedStaticPages(data.AllPages, pages); len(shadowed) > 0 {
+			data.StaticPages = shadowed
+		}
+	}
 	plan.HasActions = len(data.Actions) > 0
 	plan.HasAPI = len(data.APIRoutes) > 0
 	plan.UsesRevalidate = usesRevalidate(root, cfg)
@@ -764,6 +776,61 @@ func collectStaticForMiddleware(outDir string, exclude []string) (map[string]str
 	}
 	sort.Strings(exts)
 	return pages, exts, nil
+}
+
+// shadowedStaticPages picks, from the prerendered HTML pages of the output
+// (keyed by file path), the ones a request-time page of allPages would also
+// match while ranking below them: a static route beats [param], [param] beats
+// [...catchAll], which beats [[...optional]].
+func shadowedStaticPages(allPages []serverAllPage, pages map[string]string) map[string]string {
+	var live, static []string
+	for _, p := range allPages {
+		switch {
+		case p.Mode == RenderSSG.String():
+			static = append(static, p.Route)
+		default:
+			live = append(live, p.Route)
+		}
+	}
+	var shadowing []string
+	for _, s := range static {
+		sample := sampleURLForRoute(s)
+		for _, l := range live {
+			if compareRouteSpecificity(s, l) < 0 {
+				if _, ok := matchRoutePattern(sample, l); ok {
+					shadowing = append(shadowing, s)
+					break
+				}
+			}
+		}
+	}
+	out := map[string]string{}
+	for rel, html := range pages {
+		u := "/" + strings.TrimSuffix(strings.TrimSuffix(rel, "index.html"), "/")
+		for _, s := range shadowing {
+			if _, ok := matchRoutePattern(u, s); ok {
+				out[rel] = html
+				break
+			}
+		}
+	}
+	return out
+}
+
+// sampleURLForRoute is a URL the route matches: params become "x", an
+// optional catch-all matches nothing.
+func sampleURLForRoute(route string) string {
+	var parts []string
+	for _, seg := range parseRoutePattern(route) {
+		switch seg.kind {
+		case segStatic:
+			parts = append(parts, seg.text)
+		case segOptionalCatchAll:
+		default:
+			parts = append(parts, "x")
+		}
+	}
+	return "/" + strings.Join(parts, "/")
 }
 
 func relOr(base, p string) string {

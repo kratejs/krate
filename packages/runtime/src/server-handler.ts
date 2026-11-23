@@ -619,6 +619,14 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return null;
   }
 
+  const ssgRoutes = data.allPages.filter((p) => p.mode === "ssg").map((p) => p.route);
+
+  /** A prerendered page that matches urlPath with a more specific route than the request-time page that did. */
+  function ssgShadows(urlPath: string, page: HandlerPage | null): boolean {
+    if (!page) return false;
+    return ssgRoutes.some((r) => compareRouteSpecificity(r, page.route) < 0 && matchRoutePattern(urlPath, r) !== null);
+  }
+
   const templates = [...data.templates].sort((a, b) => compareRouteSpecificity(a.pattern, b.pattern));
   const corsOrigins = cfg.cors.origins.length ? cfg.cors.origins : ["*"];
 
@@ -1023,7 +1031,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     let route = requestRoute(rs.path);
     const found = findPageForRoute(route);
     const page = found ? found.page : null;
-    if (await shouldServeStatic(rs.path, page)) return staticHandler(rs);
+    if ((await shouldServeStatic(rs.path, page)) || ssgShadows(rs.path, page)) return staticHandler(rs);
     if (!found || !page) return staticHandler(rs);
     const slash = redirectToCanonicalSlash(rs);
     if (slash) return slash;

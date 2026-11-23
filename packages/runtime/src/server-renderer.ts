@@ -22,12 +22,14 @@ import { installRenderStore, patchFetch, type CacheScope } from "./cache-scope.j
 import { cacheSpecFromEnv } from "./cache-adapter.js";
 import { isrStoreFor } from "./shared-isr.js";
 import { registerLanguage, setFenceResolver, type HighlightTable } from "./highlight.js";
+import { installProcessGuards } from "./process-guard.js";
 
 // Render cache scopes (tags / revalidate windows read during a render) and the
 // Next-style fetch data cache. Installed once per process; page bundles share
 // the state through globalThis.
 installRenderStore(new AsyncLocalStorage<CacheScope>());
 patchFetch();
+installProcessGuards();
 
 // Shared secret for the mutating internal endpoints (/__krate/ssr/revalidate,
 // /refresh, /invalidate, /cache-invalidate). Krate passes it from the Go host;

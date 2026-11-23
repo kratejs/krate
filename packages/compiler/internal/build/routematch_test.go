@@ -96,3 +96,23 @@ func TestFindPageForRouteReloadAndParams(t *testing.T) {
 		t.Fatal("new manifest not matched")
 	}
 }
+
+func TestCompareRouteSpecificityOrder(t *testing.T) {
+	// Each list is most specific first.
+	for _, order := range [][]string{
+		{"about", "[slug]", "[...rest]", "[[...opt]]"},
+		{"blog/new", "blog/[id]", "blog/[...rest]"},
+		{"[a]/b", "[a]/[b]"},
+		{"shop", "shop/[[...filter]]"},
+		{"", "[[...filter]]"},
+		{"a/b", "a/b/[[...x]]"},
+	} {
+		for i := 0; i < len(order); i++ {
+			for j := i + 1; j < len(order); j++ {
+				if compareRouteSpecificity(order[i], order[j]) >= 0 || compareRouteSpecificity(order[j], order[i]) <= 0 {
+					t.Errorf("%q must rank before %q", order[i], order[j])
+				}
+			}
+		}
+	}
+}
