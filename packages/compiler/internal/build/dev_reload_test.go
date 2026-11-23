@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 // devRun is a project served the way `krate dev` serves it: the first build,
@@ -242,4 +243,84 @@ func TestDevWatcherSurvivesAFirstBuildWithNoGoodPage(t *testing.T) {
 	d.write(t, "src/pages/index.tsx", "export default function Home() { return <h1>home fixed</h1>; }\n")
 	d.waitBody(t, "/", "home fixed")
 	waitUntilTrue(t, 20*time.Second, "the build to be clean", func() bool { return d.hub.Snapshot().BuildOK })
+}
+
+// A client chunk that fails to build (KR8009: an island pulls in a Node-only
+// module) leaves the route broken only until the import is fixed: the next
+// rebuild serves the page again, with its island, without a restart. Both
+// shapes of the failure are covered: an edit of a helper that was already
+// part of the page, and a helper file created with the bad import.
+func TestDevRouteRecoversAfterAFailedClientChunk(t *testing.T) {
+	const editor = `"use client";
+import { useState } from "react";
+import { label } from "../lib/label";
+export default function Editor() {
+  const [n, setN] = useState(0);
+  return <button onClick={() => setN(n + 1)}>{label} {n}</button>;
+}
+`
+	page := func(title string) string {
+		return `import Editor from "../components/Editor";
+export default async function Site() { return <main><title>` + title + `</title><h1>site ` + title + `</h1><Editor /></main>; }
+`
+	}
+	const bad = `import net from "node:net";
+export const label = typeof net.createConnection;
+`
+	const good = "export const label = \"editor\";\n"
+
+	for _, tc := range []struct {
+		name         string
+		helperBefore bool
+	}{{"edited helper", true}, {"created helper", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{
+				"src/pages/index.tsx":       "export default function Home() { return <h1>home</h1>; }\n",
+				"src/pages/site.tsx":        page("one"),
+				"src/components/Editor.tsx": editor,
+			}
+			if tc.helperBefore {
+				files["src/lib/label.ts"] = good
+			} else {
+				files["src/components/Editor.tsx"] = strings.ReplaceAll(strings.ReplaceAll(editor, `import { label } from "../lib/label";`, ""), "{label}", "editor")
+			}
+			d := startDevRun(t, files)
+			d.waitBody(t, "/site/", "site one")
+
+			d.write(t, "src/lib/label.ts", bad)
+			if !tc.helperBefore {
+				d.write(t, "src/components/Editor.tsx", editor)
+			}
+			waitUntilTrue(t, 40*time.Second, "KR8009 to be reported", func() bool {
+				for _, e := range d.hub.Snapshot().Diagnostics {
+					if e.Code == diag.CodeIslandAsset {
+						return true
+					}
+				}
+				return false
+			})
+
+			// Any structural change while the chunk is broken rebuilds the whole
+			// site, and the broken route is left out of the build manifests.
+			d.write(t, "src/pages/other.tsx", "export default function Other() { return <h1>other</h1>; }\n")
+			d.waitBody(t, "/other/", "other")
+
+			d.write(t, "src/lib/label.ts", good)
+			body := d.waitBody(t, "/site/", "site one")
+			if strings.Contains(body, "Build failed") {
+				t.Fatalf("the failed state was not cleared:\n%s", body)
+			}
+			waitUntilTrue(t, 20*time.Second, "the build to be clean", func() bool { return d.hub.Snapshot().BuildOK })
+			// The route follows later edits too, and its island chunk exists.
+			d.write(t, "src/pages/site.tsx", page("two"))
+			body = d.waitBody(t, "/site/", "site two")
+			chunks := devIslandChunkURL.FindAllString(body, -1)
+			if len(chunks) == 0 {
+				t.Fatalf("no island chunk on the page:\n%s", body)
+			}
+			for _, c := range chunks {
+				d.waitStatus(t, c, 200)
+			}
+		})
+	}
 }

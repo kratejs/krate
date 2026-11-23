@@ -612,6 +612,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate dev`: a route whose client chunk failed to build (KR8009) is served again once the import is fixed.
+  A full rebuild during the failure left the page out of the server manifest, and the later single-page
+  rebuild only updated entries that already existed, so the route kept its static shell with an empty body
+  (`Refreshed 4 server bundle(s)` and nothing else) until a restart. A page missing from the manifest, or one
+  that changed between static and request-time rendering, now rebuilds the whole site.
+
 - `krate dev` no longer shuts down when the first build fails. The watcher repeated the full build when the
   dependency graph was empty (a build where no page compiled leaves it so) and returned that error, which ended
   the whole dev process; an `await` in a non-async function was enough. The error now shows on the page and in
