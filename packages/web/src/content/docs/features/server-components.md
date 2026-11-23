@@ -67,7 +67,7 @@ renders (and inside server actions):
 | API | Behavior |
 |-----|----------|
 | `params`, `searchParams` props | Plain objects that can also be awaited (`await params`), as in Next.js 15 |
-| `headers()` | Request `Headers`; also awaitable |
+| `headers()` | Request `Headers`, including `host`; also awaitable. `x-forwarded-host` is there only if the client or proxy sent it |
 | `cookies()` | Read-only view: `get(name)` returns `{ name, value }`, plus `getAll()` / `has()`; `set()` throws during a render |
 | `notFound()` | Stops rendering and answers 404 (the custom 404 page when present) |
 | `redirect(url)` | Stops rendering and redirects |

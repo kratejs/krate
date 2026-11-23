@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createKrateHandler, matchMetaRoute, type HandlerConfig, type KrateServerData } from "./server-handler.js";
 import { jsx, ServerErrorBoundary } from "./server.js";
+import { headers } from "./action-context.js";
 
 const config: HandlerConfig = {
   basePath: "",
@@ -566,5 +567,24 @@ describe("config route rules", () => {
     expect((await get("/m")).headers.get("x-mobile")).toBeNull();
     const redirect = await get("/store/x");
     expect(redirect.headers.get("x-all")).toBe("1");
+  });
+});
+
+describe("page headers()", () => {
+  const shell =
+    "<html><head><title>t</title></head><body><!--suspense:page-->baked<!--/suspense:page--></body></html>";
+  it("includes the request host, like route handlers", async () => {
+    const h = createKrateHandler({
+      target: "node",
+      data: data({
+        hasMiddleware: false,
+        pages: [{ route: "/who", mode: "ssr", bundlePath: "who" }],
+        allPages: [{ route: "/who", mode: "ssr" }],
+        shells: { "/who": shell },
+      }),
+      modules: { pages: { who: { default: () => jsx("p", { children: "host=" + headers().get("host") }) } } },
+    });
+    const body = await (await h(new Request("http://example.test:8080/who/", { headers: { accept: "text/html" } }))).text();
+    expect(body).toContain("host=example.test:8080");
   });
 });

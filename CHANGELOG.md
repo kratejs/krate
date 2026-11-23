@@ -604,6 +604,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `headers()` in a page now includes `host` (the request's Host, as route handlers already saw it), in
+  `krate serve` and in the Node/edge server handler. `x-forwarded-host` is still only what the client or
+  proxy sent. The middleware docs now describe the request-header override protocol: the override list is
+  the complete set the page sees, it applies to API routes too, and it replaces client-sent values.
+
 - `krate dev` / `krate serve`: a client leaving an open streamed response (an SSE route behind the API
   sidecar) no longer logs an ERROR "panic recovered" with a full stack and a superfluous WriteHeader.
   `http.ErrAbortHandler`, which `httputil.ReverseProxy` panics with on purpose, is passed on to net/http.

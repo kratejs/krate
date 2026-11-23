@@ -817,6 +817,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     rs.headers.forEach((v, k) => {
       if (k !== "host") out[canonicalHeader(k)] = v;
     });
+    // The Go server passes Host (Go hoists it out of the header map); so do we.
+    out["Host"] = rs.headers.get("host") || new URL(rs.request.url).host;
     return out;
   }
 

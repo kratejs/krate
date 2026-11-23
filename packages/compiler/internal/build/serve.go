@@ -2336,6 +2336,10 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 				headers[k] = v[0]
 			}
 		}
+		// Go hoists Host out of r.Header; headers() in a page should see it.
+		if r.Host != "" {
+			headers["Host"] = r.Host
+		}
 
 		query := make(map[string]string)
 		for k, v := range r.URL.Query() {
@@ -2557,6 +2561,10 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 			if len(v) > 0 {
 				headers[k] = v[0]
 			}
+		}
+		// Go hoists Host out of r.Header; headers() in a page should see it.
+		if r.Host != "" {
+			headers["Host"] = r.Host
 		}
 		query := make(map[string]string)
 		for k, v := range r.URL.Query() {
