@@ -449,6 +449,14 @@ rows the client creates later number theirs the same way, so a row has the same 
 whether the server or the browser rendered it. A hook of your own that calls `useId`
 works too, but its ids exist only after hydration (the HTML has no `id` yet).
 
+In a server page, a `"use client"` component is its own island, and Preact numbers its `useId()`
+from 0 in each one. Krate gives every island a prefix of its own (a hash of its module and export
+plus how many islands of that component came before it in the document), so ids such as
+`radix-${useId()}` stay unique across the page: the server render and hydration agree on them,
+content a component portals in or mounts later continues the island's numbering, and the router
+keeps an island's prefix when a navigation swaps the page around it. The ids are `P<prefix>-<n>`
+strings; treat them as opaque.
+
 ### useEffectEvent
 
 `const onTick = useEffectEvent(() => log(count))` returns a function that always

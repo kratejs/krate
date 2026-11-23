@@ -7,7 +7,7 @@ import { highlight as highlightCode, trimSpace } from './highlight.js';
 import { sealBoundArgs } from './action-seal.js';
 import { accessDeniedStatus, isNotFoundSignal, redirectTarget } from './request-context.js';
 import { sha256Hex } from './sha256.js';
-import { markErrorCaught } from './cache-scope.js';
+import { currentRenderScope, markErrorCaught } from './cache-scope.js';
 import { encodeProp } from './flight-props.js';
 
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
@@ -715,6 +715,7 @@ type ClientRender = (
   childrenHTML: string | null,
   fwd?: SlotValues,
   capture?: Record<string, SlotValues>,
+  ids?: string,
 ) => string;
 
 type SlotValues = { k: string; v: unknown }[];
@@ -935,12 +936,32 @@ export const ISLAND_CLOSE = "<!--/krate-island-->";
 // islandOpen is the opening comment of a Preact island: its module, export,
 // chunk and props as JSON. "<", ">" and "--" are escaped (they occur only in
 // strings), so no value can end the comment or open another one.
-function islandOpen(moduleId: string, exportName: string, src: string, props: unknown): string {
-  const json = JSON.stringify({ m: moduleId, e: exportName, s: src, p: props })
+function islandOpen(moduleId: string, exportName: string, src: string, props: unknown, ids: string): string {
+  const json = JSON.stringify({ m: moduleId, e: exportName, s: src, i: ids, p: props })
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e")
     .replace(/--/g, "-\\u002d");
   return `<!--${ISLAND_OPEN}${json}-->`;
+}
+
+// islandIdPrefix names the next island of a component in the render that is
+// running: a hash of its module and export, and how many islands of that
+// component came before it in this document. useId() numbers from 0 inside
+// each island, so the prefix is what keeps ids unique across the page. The
+// router pairs the n-th island of a component in the live page with the n-th
+// one in the new markup, so a page that a navigation swaps in never reuses the
+// prefix of an island the swap keeps.
+const looseIslands = new Map<string, number>();
+
+function islandIdPrefix(moduleId: string, exportName: string): string {
+  const key = moduleId + "#" + exportName;
+  const scope = currentRenderScope();
+  const seen = scope ? (scope.islands ??= new Map<string, number>()) : looseIslands;
+  const n = seen.get(key) ?? 0;
+  seen.set(key, n + 1);
+  let h = 0x811C9DC5;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(36).padStart(7, "0") + "_" + n;
 }
 
 const warnedUncloneable = new Set<string>();
@@ -1015,6 +1036,8 @@ export function clientBoundary(
   if (typeof impl !== "function") return impl;
   const name = (impl as any).displayName || (impl as any).name || exportName;
   const Boundary = async (props: Record<string, any>, vals?: ContextValues) => {
+    // Taken before the first await, so islands number in render order.
+    const ids = islandIdPrefix(moduleId, exportName);
     const { children, ...rest } = props || {};
     const slots: DeferredSlot[] = [];
     const slotCtx: FlightCtx = { hydrate: false, component: name, slots, vals };
@@ -1033,7 +1056,7 @@ export function clientBoundary(
     }
     const fwd = vals?.get(slotValues) as SlotValues | undefined;
     const capture: Record<string, SlotValues> = {};
-    let html = render(impl, data, null, fwd, capture);
+    let html = render(impl, data, null, fwd, capture, ids);
     const rendered = await Promise.all(
       slots.map(async (s) => {
         const scope = mergeSlotValues(fwd, capture[s.token]);
@@ -1055,7 +1078,7 @@ export function clientBoundary(
     // A real-React island (flight) mounts with createRoot, which needs an
     // element of its own; a Preact island hydrates the nodes between its two
     // comments in place.
-    if (!flight) return raw(islandOpen(moduleId, exportName, src, data) + html + ISLAND_CLOSE);
+    if (!flight) return raw(islandOpen(moduleId, exportName, src, data, ids) + html + ISLAND_CLOSE);
     return raw(
       propsScript(data) +
         `<krate-island style="display:contents" data-module="${escapeHTML(moduleId)}" data-export="${escapeHTML(exportName)}" ` +

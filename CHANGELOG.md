@@ -624,6 +624,14 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `useId()` is unique across the islands of a page. Each `"use client"` island and external island numbered
+  its ids from the start (`P0-0`, `P0-1`, ...), so two islands repeated each other's ids: Radix's
+  `radix-${useId()}` collided between a menu and a command palette, cmdk's `getElementById` focused the wrong
+  element, and `aria-labelledby`/`aria-controls` pointed at the wrong ones. An island's marker now carries an id
+  prefix (a hash of its module and export, and its place among that component's islands in the document); the
+  server render, hydration, content portaled or mounted after hydration, and a router refresh all number from
+  it, and a router swap keeps the prefix of the islands it keeps. Ids stay stable per render.
+
 - `krate dev`: an edited "use client" component renders its new code on the server. The renderer re-imported a
   page bundle with a new query after each rebuild, but the render modules of the client components it imports
   (`server-bundles/client/*.ssr.mjs` and their chunks) stayed cached under their old URLs, so SSR kept serving the

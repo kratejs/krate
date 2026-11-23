@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { installRenderStore, withCacheScope, type CacheScope } from './cache-scope';
 import { clientBoundary, jsx, lazy, renderToString, renderToStringAsync, Script, Style } from './server';
 
 describe('renderToString', () => {
@@ -78,10 +80,32 @@ describe('clientBoundary', () => {
   it('puts a stateful component between island comments with its props, with no element of its own', async () => {
     const Box = clientBoundary('m2', 'Box', '/c.js', function Box() { return null; }, render) as any;
     const html = await renderToStringAsync(jsx(Box, { id: 'x' }));
-    expect(islandOf(html)).toEqual({ m: 'm2', e: 'Box', s: '/c.js', p: { id: 'x' } });
+    expect(islandOf(html)).toEqual({ m: 'm2', e: 'Box', s: '/c.js', i: expect.stringMatching(/^[0-9a-z]{7}_\d+$/), p: { id: 'x' } });
     expect(html).toBe(`<!--krate-island:${JSON.stringify(islandOf(html))}--><i>{"id":"x"}</i><!--/krate-island-->`);
     expect(html).not.toContain('<krate-island');
     expect(html).not.toContain('data-krate-props');
+  });
+
+  it('gives every island of a render its own useId prefix, by component and occurrence', async () => {
+    installRenderStore(new AsyncLocalStorage<CacheScope>());
+    const seen: Array<string | undefined> = [];
+    const spy = (_c: unknown, props: Record<string, unknown>, _ch: unknown, _f: unknown, _cap: unknown, ids?: string) => {
+      seen.push(ids);
+      return `<i>${JSON.stringify(props)}</i>`;
+    };
+    const A = clientBoundary('ma', 'Menu', '/a.js', function Menu() { return null; }, spy) as any;
+    const B = clientBoundary('mb', 'Menu', '/b.js', function Menu() { return null; }, spy) as any;
+    const page = () => [jsx(A, { n: 1 }), jsx(A, { n: 2 }), jsx(B, { n: 3 })];
+    const first = await withCacheScope('/p', () => renderToStringAsync(page() as any));
+    const again = await withCacheScope('/p', () => renderToStringAsync(page() as any));
+    const ids = (html: string) => [...html.matchAll(/<!--krate-island:(.*?)-->/g)].map((m) => JSON.parse(m[1]).i);
+    expect(new Set(ids(first.result)).size).toBe(3);
+    // The prefix is the one the render got, and a new render numbers again from the start.
+    expect(seen.slice(0, 3)).toEqual(ids(first.result));
+    expect(ids(again.result)).toEqual(ids(first.result));
+    expect(ids(first.result)[0].endsWith('_0')).toBe(true);
+    expect(ids(first.result)[1].endsWith('_1')).toBe(true);
+    expect(ids(first.result)[2].endsWith('_0')).toBe(true);
   });
 
   it('keeps an element and a props script for a real-React island', async () => {

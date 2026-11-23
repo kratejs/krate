@@ -35,6 +35,8 @@ export interface CacheScope {
   errorCaught?: boolean;
   /** Head tags the render asked for (react-dom preload, preconnect, ...), deduplicated. */
   hints?: Set<string>;
+  /** Islands rendered so far, by module and export: the next one's occurrence number (see islandIdPrefix). */
+  islands?: Map<string, number>;
 }
 
 /** Minimal AsyncLocalStorage shape (the Node class satisfies it). */
