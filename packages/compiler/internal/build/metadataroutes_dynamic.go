@@ -177,6 +177,7 @@ function parseCookies(header: string | null): Map<string, string> {
     const name = part.slice(0, i).trim();
     if (!name || jar.has(name)) continue;
     let value = part.slice(i + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
     try { value = decodeURIComponent(value); } catch {}
     jar.set(name, value);
   }

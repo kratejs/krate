@@ -84,7 +84,12 @@ function krateCookies(headers) {
     const i = part.indexOf('=');
     if (i <= 0) continue;
     const name = part.slice(0, i).trim();
-    if (name && !jar.has(name)) jar.set(name, part.slice(i + 1).trim());
+    if (!name || jar.has(name)) continue;
+    // Unquote and percent-decode like Next's request.cookies, the page and action readers.
+    let value = part.slice(i + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+    try { value = decodeURIComponent(value); } catch {}
+    jar.set(name, value);
   }
   return {
     get: (n) => (jar.has(String(n)) ? { name: String(n), value: jar.get(String(n)) } : undefined),

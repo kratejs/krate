@@ -624,6 +624,14 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Cookie values read the same everywhere. `request.cookies` in the Node, Bun and Deno API and middleware sidecars,
+  in a migrated Next middleware and the dynamic metadata routes returned the raw header value, so a cookie that
+  `cookies().set("ui", "mode=light&nav=open")` wrote percent-encoded read back as `mode%3Dlight%26nav%3Dopen` (and a
+  quoted one with its quotes) there, while server components, actions and the embedded runtime returned the decoded
+  `mode=light&nav=open`, as Next.js does. A cookie sent on more than one `Cookie` header line lost every line but
+  the first when the request went to the SSR renderer; the lines are now joined as one cookie list. A value
+  holding `=` or `&` was never cut short by Krate, in pages, routes, middleware or actions.
+
 - A server component that calls a function exported by a `"use client"` module (`parseUi(cookie)` from a
   module that also exports a component) now fails clearly instead of running the island renderer on the
   arguments. The build reports `[KR7118]` at the call, naming the import and suggesting a module without

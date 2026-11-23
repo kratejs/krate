@@ -175,8 +175,10 @@ in the test suite):
   invalid URL throws), `AbortController`/`AbortSignal`, `ReadableStream`.
 - `request.json()`, `.text()`, `.formData()`, `.arrayBuffer()` and `.blob()`
   return promises, so `await req.json().catch(() => null)` works.
-  `request.cookies` (`get`, `getAll`, `has`, read-only) and `request.nextUrl`
-  (a `URL` with `basePath` and `clone()`) are available as in Next.js.
+  `request.cookies` (`get`, `getAll`, `has`, read-only, each cookie a `{ name, value }`) and
+  `request.nextUrl` (a `URL` with `basePath` and `clone()`) are available as in Next.js. A
+  cookie value is unquoted and percent-decoded, the same in pages, routes and middleware, so
+  `cookies().set("ui", "mode=light&nav=open")` reads back as `mode=light&nav=open`.
 - `TextEncoder`/`TextDecoder` (UTF-8), `atob`/`btoa`, `structuredClone`,
   `queueMicrotask`, `performance.now()`, real `setTimeout`/`setInterval`
   (handlers can `await new Promise((r) => setTimeout(r, 100))`), `fetch`, and

@@ -2356,12 +2356,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 			params = make(map[string]string)
 		}
 
-		headers := make(map[string]string)
-		for k, v := range r.Header {
-			if len(v) > 0 {
-				headers[k] = v[0]
-			}
-		}
+		headers := renderHeaders(r.Header)
 		// Go hoists Host out of r.Header; headers() in a page should see it.
 		if r.Host != "" {
 			headers["Host"] = r.Host
@@ -2586,12 +2581,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		if page == nil {
 			return false
 		}
-		headers := make(map[string]string)
-		for k, v := range r.Header {
-			if len(v) > 0 {
-				headers[k] = v[0]
-			}
-		}
+		headers := renderHeaders(r.Header)
 		// Go hoists Host out of r.Header; headers() in a page should see it.
 		if r.Host != "" {
 			headers["Host"] = r.Host
@@ -3598,4 +3588,22 @@ func hasRouteBundles(dir string) bool {
 		return nil
 	})
 	return found
+}
+
+// renderHeaders is the request headers a renderer is given, one value per
+// name. A header sent on several lines keeps the first, except Cookie, whose
+// lines are one cookie list (RFC 6265, 5.4): all of them, joined with "; ", as
+// Go's HTTP/2 server does, so a cookie on a later line is not lost.
+func renderHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for k, v := range h {
+		switch {
+		case len(v) == 0:
+		case len(v) > 1 && http.CanonicalHeaderKey(k) == "Cookie":
+			out[k] = strings.Join(v, "; ")
+		default:
+			out[k] = v[0]
+		}
+	}
+	return out
 }
