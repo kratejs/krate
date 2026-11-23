@@ -224,15 +224,21 @@ function __krateTagged(v, h, call, comp) {
   }
   return v;
 }
+function __krateActionFn(url, bound, call) {
+  var fn = function () { return call(url, bound.concat(Array.prototype.slice.call(arguments))); };
+  fn.actionUrl = url;
+  fn.$$krateAction = url.split("?")[0].split("/").pop();
+  fn.$$krateBound = bound;
+  fn.bind = function (_this) { return __krateActionFn(url, bound.concat(Array.prototype.slice.call(arguments, 1)), call); };
+  fn.toString = function () { return url; };
+  return fn;
+}
 function __krateRevive(v, h, call, comp) {
   if (Array.isArray(v)) return v.map(function (x) { return __krateRevive(x, h, call, comp); });
   if (v && typeof v === "object") {
     if (typeof v.__krateT === "string") return __krateTagged(v, h, call, comp);
     if (typeof v.__krateAction === "string") {
-      var url = v.__krateAction;
-      var fn = function () { return call(url, Array.prototype.slice.call(arguments)); };
-      fn.actionUrl = url;
-      return fn;
+      return __krateActionFn(v.__krateAction, Array.isArray(v.__krateBound) ? __krateRevive(v.__krateBound, h, call, comp) : [], call);
     }
     if (typeof v.__krateSlotHTML === "string") return __krateSlot(h, v.__krateSlotHTML);
     if (typeof v.__krateSlotRef === "string") return __krateSlot(h, "", v.__krateSlotRef);
@@ -273,13 +279,26 @@ function __krateRootRefs(raw) {
 `
 
 // clientActionCallJS posts a server action call from a client component,
-// using the same protocol as the Krate runtime (callServerAction), and
-// announces a revalidation the same way (the router refreshes the route).
+// using the same protocol as the Krate runtime (callServerAction): a FormData
+// last argument goes as multipart with the leading arguments in __krate_args,
+// anything else as a JSON {args} body. It announces a revalidation the same way (the router refreshes the route).
 const clientActionCallJS = `
 async function __krateCallAction(url, args) {
-  var headers = { accept: "application/json", "x-krate-action": "fetch", "content-type": "application/json" };
+  var headers = { accept: "application/json", "x-krate-action": "fetch" };
   if (typeof location !== "undefined") headers["x-krate-return"] = location.pathname + location.search;
-  var res = await fetch(url, { method: "POST", credentials: "same-origin", headers: headers, body: JSON.stringify({ args: args }) });
+  var body;
+  var last = args[args.length - 1];
+  if (typeof FormData !== "undefined" && last instanceof FormData) {
+    var fd = new FormData();
+    last.forEach(function (value, key) { if (key !== "__krate_args") fd.append(key, value); });
+    var leading = args.slice(0, -1);
+    if (leading.length > 0) fd.set("__krate_args", JSON.stringify(leading));
+    body = fd;
+  } else {
+    headers["content-type"] = "application/json";
+    body = JSON.stringify({ args: args });
+  }
+  var res = await fetch(url, { method: "POST", credentials: "same-origin", headers: headers, body: body });
   var payload = null;
   try { payload = await res.json(); } catch (e) { payload = null; }
   if (!res.ok || !payload || payload.ok === false) throw new Error((payload && payload.error && (payload.error.message || payload.error)) || ("server action failed: " + res.status));

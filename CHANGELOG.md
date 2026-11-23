@@ -604,6 +604,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A server action passed as a prop to a `"use client"` component (and one imported straight into a client
+  module) now posts a `FormData` argument as multipart, like the runtime's own proxy, so
+  `useActionState(actionFromProps)` with `<form action={run}>` receives the form instead of `{}`
+  (`e.get is not a function`). The revived prop also carries `$$krateAction`, `$$krateBound` and
+  `.bind()`, and arguments pre-filled with `.bind()` on the server survive the trip to the island.
+
 - `headers()` in a page now includes `host` (the request's Host, as route handlers already saw it), in
   `krate serve` and in the Node/edge server handler. `x-forwarded-host` is still only what the client or
   proxy sent. The middleware docs now describe the request-header override protocol: the override list is

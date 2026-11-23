@@ -12,7 +12,7 @@ export type FlightHooks = {
   fail(path: string, what: string, hint?: string): Error;
 };
 
-const RESERVED = ["__krateT", "__krateAction", "__krateSlotHTML", "__krateSlotTree", "__krateChildren", "__krateTree"];
+const RESERVED = ["__krateT", "__krateAction", "__krateBound", "__krateSlotHTML", "__krateSlotTree", "__krateChildren", "__krateTree"];
 
 const TYPED_ARRAYS: Record<string, true> = {
   Int8Array: true, Uint8Array: true, Uint8ClampedArray: true, Int16Array: true, Uint16Array: true,
@@ -62,7 +62,15 @@ export function encodeProp(v: unknown, path: string, hooks: FlightHooks): unknow
     return tag("Y", key);
   }
   const action = hooks.isAction(v);
-  if (action !== undefined) return { __krateAction: action };
+  if (action !== undefined) {
+    // Arguments pre-filled with .bind() travel along; an inline action's sealed
+    // closure token is already part of its URL.
+    const bound = (v as { $$krateBound?: unknown }).$$krateBound;
+    if (Array.isArray(bound) && bound.length > 0 && !action.includes("__krate_args=")) {
+      return { __krateAction: action, __krateBound: bound.map((x, i) => encodeProp(x, `${path}.bind[${i}]`, hooks)) };
+    }
+    return { __krateAction: action };
+  }
   if (Array.isArray(v)) return v.map((x, i) => encodeProp(x, `${path}[${i}]`, hooks));
   if (typeof v === "object") {
     if (hooks.isJSX(v)) {

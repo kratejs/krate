@@ -71,3 +71,60 @@ describe('flight props round trip', () => {
     expect(() => encodeProp(new URL('http://x.test'), 'p', hooks)).toThrow('an instance of URL');
   });
 });
+
+describe('server actions passed as props', () => {
+  const callSrc = goSrc.match(/const clientActionCallJS = `([\s\S]*?)`\n/)![1].replace(/\\\\/g, '\\');
+  const actionHooks: FlightHooks = {
+    ...hooks,
+    isAction: (v) => (typeof v === 'function' ? (v as any).actionUrl : undefined),
+  };
+  const makeAction = (bound: unknown[]) =>
+    Object.assign(() => 0, { actionUrl: '/__krate/action/abc', $$krateAction: 'abc', $$krateBound: bound });
+
+  function revived(bound: unknown[], call: (url: string, args: unknown[]) => unknown): any {
+    const wire = JSON.parse(JSON.stringify(encodeProp({ a: makeAction(bound) }, 'p', actionHooks)));
+    return revive(wire, null, call, null).a;
+  }
+
+  it('revives to a callable carrying the action id and its bound arguments', () => {
+    const calls: unknown[][] = [];
+    const fn = revived(['t', { n: 1 }], (url, args) => calls.push([url, args]));
+    expect(fn.$$krateAction).toBe('abc');
+    expect(fn.actionUrl).toBe('/__krate/action/abc');
+    expect(fn.$$krateBound).toEqual(['t', { n: 1 }]);
+    fn('prev', 'form');
+    fn.bind(null, 'more')('x');
+    expect(calls).toEqual([
+      ['/__krate/action/abc', ['t', { n: 1 }, 'prev', 'form']],
+      ['/__krate/action/abc', ['t', { n: 1 }, 'more', 'x']],
+    ]);
+  });
+
+  it('does not repeat the sealed token of an inline action that is already in its URL', () => {
+    const inline = Object.assign(() => 0, { actionUrl: '/__krate/action/abc?__krate_args=%5B%22k1.x%22%5D', $$krateAction: 'abc', $$krateBound: ['k1.x'] });
+    const wire = JSON.parse(JSON.stringify(encodeProp({ a: inline }, 'p', actionHooks)));
+    expect(wire.a).toEqual({ __krateAction: inline.actionUrl });
+  });
+
+  it('posts a FormData argument as multipart, leading arguments as JSON in __krate_args', async () => {
+    const sent: any[] = [];
+    const fetchMock = async (url: string, init: any) => {
+      sent.push({ url, init });
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: 'r' }) };
+    };
+    const callAction = new Function('fetch', `${callSrc}; return __krateCallAction;`)(fetchMock) as (u: string, a: unknown[]) => Promise<unknown>;
+
+    const fd = new FormData();
+    fd.set('name', 'ada');
+    expect(await callAction('/__krate/action/abc', ['tag', null, fd])).toBe('r');
+    const body = sent[0].init.body as FormData;
+    expect(body).toBeInstanceOf(FormData);
+    expect(body.get('name')).toBe('ada');
+    expect(JSON.parse(body.get('__krate_args') as string)).toEqual(['tag', null]);
+    expect(sent[0].init.headers['content-type']).toBeUndefined();
+
+    await callAction('/__krate/action/abc', [1, 2]);
+    expect(sent[1].init.headers['content-type']).toBe('application/json');
+    expect(JSON.parse(sent[1].init.body)).toEqual({ args: [1, 2] });
+  });
+});
