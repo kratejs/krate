@@ -195,7 +195,10 @@ func parenToBracket(cls string) string {
 				depth--
 			}
 		case '(':
-			if depth > 0 || i == 0 || (cls[i-1] != '-' && cls[i-1] != '/') {
+			if depth > 0 {
+				continue
+			}
+			if i == 0 || (cls[i-1] != '-' && cls[i-1] != '/') {
 				return cls
 			}
 			inner := cls[i+1 : len(cls)-1]

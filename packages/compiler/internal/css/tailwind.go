@@ -103,6 +103,9 @@ type TailwindGenerator struct {
 	Strict bool
 	// Unknown collects class names that yielded no rule (populated when Strict).
 	Unknown []string
+	// Dropped lists classes whose generated rule was rejected because it
+	// could break the stylesheet, as "class: reason".
+	Dropped []string
 
 	// usage tracks keyframes and --tw-* properties the last Generate used.
 	usage twUsage
@@ -147,6 +150,10 @@ func (g *TailwindGenerator) Generate(classes map[string]bool) string {
 				if g.Strict {
 					g.Unknown = append(g.Unknown, c)
 				}
+				continue
+			}
+			if why := unsafeRuleReason(text); why != "" {
+				g.Dropped = append(g.Dropped, c+": "+why)
 				continue
 			}
 			g.usage.record(text, g.Theme)

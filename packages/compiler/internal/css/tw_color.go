@@ -76,8 +76,11 @@ func colorValue(key, alpha string, theme TailwindTheme) (string, bool) {
 		}
 	}
 	// arbitrary: [#ff0000]/[rgb(...)]
-	if strings.HasPrefix(key, "[") && strings.HasSuffix(key, "]") {
-		return resolved(key[1 : len(key)-1])
+	if inner, hint, ok := arbitraryValue(key); ok {
+		if hint != "" && hint != "color" {
+			return "", false
+		}
+		return resolved(inner)
 	}
 	return "", false
 }

@@ -12,6 +12,7 @@ import {
   accessDeniedStatus,
   parseCookieHeader,
   redirectTarget,
+  redirectStatus,
   thenable,
   thenableRecord,
   type RequestContext,
@@ -578,7 +579,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     const denied = accessDeniedStatus(err);
     if (denied) return { html: "", status: denied, denied };
     const to = redirectTarget(err);
-    if (to) return { html: "", status: 307, redirect: to };
+    if (to) return { html: "", status: redirectStatus(err), redirect: to };
     return null;
   }
 

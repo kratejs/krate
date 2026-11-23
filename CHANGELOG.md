@@ -539,6 +539,11 @@ host code runs in the native process. Names and options may change between relea
   (3252, 3253, ...) no longer take each other's sidecar port and force a move. `krate serve` and `krate start`
   keep their derived ports.
 
+- `redirect()` in a page now answers `307` (it was `302`) and the new `permanentRedirect()` answers `308`,
+  as in Next.js, in `krate serve` and the Node server handler; API routes already answered `307` and
+  now answer `308` for `permanentRedirect()`. Browsers treat 302 and 307 alike for GET, but a POST is now
+  repeated against the new URL. Config `redirects` rules are unchanged (301/302 or `statusCode`).
+
 - Tailwind: a project stylesheet with `@import "tailwindcss"` (or a v3 `@tailwind` directive) now turns
   Tailwind on, as in Tailwind v4, when `krate.config.ts` has no `tailwind.enabled`. Before, the import
   alone generated nothing, so an app scaffolded without a `tailwind` key (the native scaffold has none)
@@ -645,6 +650,55 @@ host code runs in the native process. Names and options may change between relea
   renderer that was not running at startup (the first build failed, or no page was request-time yet) starts
   when a rebuild brings the first request-time page, and a page that changes between static and request-time
   rendering rebuilds the whole site instead of leaving the server manifest behind.
+
+- Types: apps that keep `@types/react` (migrated Next.js apps) failed to type-check because Krate's
+  `JSX.Element` is a DOM `Node`, which React's `ReactNode` rejects: `<Link>`/`<Head>` gave TS2786 under
+  `jsx: "react-jsx"`, and every element gave TS2322 against React-typed props under `jsx: "preserve"` with
+  `jsxImportSource: "@krate/runtime"` (468 errors in one app). New opt-in `@krate/runtime/react-types`
+  makes `JSX.Element` also a `React.ReactElement`, fixing both modes; plain Krate apps are unaffected.
+  `krate migrate nextjs` writes `src/krate-react.d.ts` importing it when `@types/react` is a dependency.
+  See the TypeScript Setup guide.
+- Built-in Tailwind: an arbitrary colour with an arbitrary opacity (`bg-[#d81f26]/[.16]`, `/[16%]`,
+  `/(--my-alpha)`) emitted `background-color: #d81f26]/[.16`, and the unbalanced `]` made browsers drop
+  every later rule in `@layer utilities`. The bracket check now requires the first `[` to close at the
+  end of the value, so the `/[...]` modifier is split off like `/15`. In the same families, `/(--alpha)`
+  after a bracketed colour containing parentheses (`border-[rgb(1_2_3)]/(--a)`) now resolves,
+  `[color:var(--x)]` no longer leaks its `color:` hint into `fill-`, `placeholder-` or a modified `bg-`,
+  and underscores in a modified arbitrary colour become spaces. As a last gate, a generated rule with
+  unbalanced brackets, a stray `;` or `}` or an unterminated string is dropped, with a build warning
+  that names the class, instead of reaching the stylesheet.
+
+- KR7122 "No matching export ... for import `useId`": the React compat module (`@krate/runtime/react`,
+  which build-time metadata evaluation bundles in place of React) now exports `useId`, so a layout whose
+  `metadata` depends on a module that imports `useId` evaluates and keeps its title and robots tags. A test
+  keeps every hook the React compatibility guide lists exported from it.
+
+- A server action called from a client island that answers with `redirect("/path?x=1")` is followed: the
+  island's redirect safety check used a mangled character class and rejected any path containing digits,
+  upper case letters, `?`, `=` and similar, so only plain lowercase paths worked.
+
+- The SPA router no longer turns an island's `<form action={fn}>` (no `method`) into a GET navigation when
+  its submit listener runs before the island's: forms that carry a client action (`__krateForm`,
+  `__krateFormAction`, `data-krate-action`) are left to it. The island's own listener already bailed on a
+  prevented event, so the action never ran and the answers ended up in the URL.
+
+- A server action passed as a prop to a `"use client"` component (and one imported straight into a client
+  module) now posts a `FormData` argument as multipart, like the runtime's own proxy, so
+  `useActionState(actionFromProps)` with `<form action={run}>` receives the form instead of `{}`
+  (`e.get is not a function`). The revived prop also supports
+  `.bind()`. Arguments pre-filled with `.bind()` on the server survive the trip to the island sealed
+  (AES-256-GCM, bound to the action id, like inline action captures) in the action URL: the browser never
+  sees or sends them, and the action endpoint rejects a forged token or one for another action. The
+  action manifest now carries the sealing key for any app with server actions.
+
+- `headers()` in a page now includes `host` (the request's Host, as route handlers already saw it), in
+  `krate serve` and in the Node/edge server handler. `x-forwarded-host` is still only what the client or
+  proxy sent. The middleware docs now describe the request-header override protocol: the override list is
+  the complete set the page sees, it applies to API routes too, and it replaces client-sent values.
+
+- `krate dev` / `krate serve`: a client leaving an open streamed response (an SSE route behind the API
+  sidecar) no longer logs an ERROR "panic recovered" with a full stack and a superfluous WriteHeader.
+  `http.ErrAbortHandler`, which `httputil.ReverseProxy` panics with on purpose, is passed on to net/http.
 
 - Tailwind: the preflight reset is emitted when Tailwind is on even if no utility class is found. A
   project whose scan dirs held no class names (and whose CSS defined no `@theme` variables) silently lost

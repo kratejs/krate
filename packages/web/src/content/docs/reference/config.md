@@ -243,8 +243,9 @@ security: {
 
 `krate deploy` writes explicit `headers` rules to `_headers` (Netlify /
 Cloudflare Pages) and to `vercel.json` (Vercel). Only explicit rules are emitted;
-`security` defaults stay serve-only so static-host behavior is not changed
-implicitly.
+`security` settings apply to the running server (`krate serve`, `krate dev` and
+the Node server handler) and are not written to those files, so static-host
+behavior is not changed implicitly.
 
 ## Auth
 

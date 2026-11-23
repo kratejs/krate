@@ -1,7 +1,9 @@
 package build
 
 import (
+	"bytes"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -104,5 +106,45 @@ func TestBodyLimitMiddleware(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("within-limit body code = %d, want 200", rec.Code)
+	}
+}
+
+func TestPanicRecoveryMiddlewareAbortHandlerIsQuiet(t *testing.T) {
+	t.Parallel()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	h := panicRecoveryMiddleware(logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: 1\n\n"))
+		panic(http.ErrAbortHandler)
+	}))
+	rec := httptest.NewRecorder()
+	var got any
+	func() {
+		defer func() { got = recover() }()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/stream", nil))
+	}()
+	if got != http.ErrAbortHandler {
+		t.Fatalf("recovered %v, want http.ErrAbortHandler re-panicked for net/http", got)
+	}
+	if logs.Len() != 0 {
+		t.Errorf("abort logged: %s", logs.String())
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want the original 200 (no 500 after headers)", rec.Code)
+	}
+}
+
+func TestPanicRecoveryMiddlewareStillRecoversOtherPanics(t *testing.T) {
+	t.Parallel()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	h := panicRecoveryMiddleware(logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("boom")
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/x", nil))
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(logs.String(), "panic recovered") {
+		t.Fatalf("code=%d logs=%q", rec.Code, logs.String())
 	}
 }

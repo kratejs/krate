@@ -46,6 +46,13 @@ export default function FeedbackPage() {
   `actionUrl` and `toString()` that returns it, so SSR renders the endpoint --
   including through a component prop -- without executing the action.
   `action.bind(null, id)` returns another proxy with `id` as its first argument.
+  When such an action is passed as a prop to a `"use client"` component, the bound
+  values travel sealed (AES-256-GCM, tied to the action id, with the same key as
+  inline action captures: `KRATE_ACTION_SECRET` or the build's key) in the action
+  URL. The browser never sees or sends them, and the endpoint rejects a forged
+  token or one made for another action. Only strings, numbers, booleans, null,
+  undefined, bigint, `Date` and plain objects and arrays of those can be bound
+  this way; the build error names the prop otherwise.
 The same form works inside an async server component: the action is rendered
 as a native POST target and the page still needs no client React runtime.
 

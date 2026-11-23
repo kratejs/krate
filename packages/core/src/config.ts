@@ -354,7 +354,7 @@ export interface HeadConfig {
 }
 
 /**
- * Security response-header overrides for `krate serve`. Empty keeps the default;
+ * Security response-header overrides for `krate serve` and `krate dev`. Empty keeps the default;
  * `"off"` (or "none"/"false") disables the header.
  */
 export interface SecurityConfig {

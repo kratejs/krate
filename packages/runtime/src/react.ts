@@ -21,6 +21,7 @@ import { h, krateTrackNode, type Component as FnComponent } from './dom.js';
 import type { KratePortalNode } from './portal.js';
 import { getOwner, handleError, type Owner } from './boundary.js';
 import { createSignal, createReducer, isSignalGetter } from './signal.js';
+import { __krate_useId } from './use-id.js';
 import { createEffectDeps, createEffectEvent, type EffectPhase } from './effects.js';
 import { krateSetRef, type KrateRef } from './refs.js';
 import { krateEventRoot } from './events.js';
@@ -461,6 +462,9 @@ export const unstable_SuspenseList = SuspenseList;
 
 /** React 19.2's useEffectEvent: a function that always runs the latest closure. */
 export const useEffectEvent: <T extends (...args: never[]) => unknown>(fn: T) => T = createEffectEvent;
+
+/** React's `useId()`; the compiler lowers it, this serves modules that reach it through the compat module. */
+export const useId: () => string = __krate_useId;
 
 export function useRef<T = unknown>(initial?: T): RefObject<T> {
   return { current: initial ?? null };

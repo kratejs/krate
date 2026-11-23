@@ -44,6 +44,22 @@ lists the request headers to keep (comma separated, all others are removed) and
 `x-middleware-request-<name>` carries the value of each. Layouts read them with
 `headers()`. These headers never reach the client.
 
+Things to know about the override:
+
+- The list is the **complete** set of request headers the page then sees. A
+  list that names only the header you add drops `cookie`, `user-agent` and the
+  rest, so every request looks signed out. To add a header and keep the others,
+  list every header of `request.headers` too (see the second example below).
+- A value for a name that is not in the list is ignored, and without
+  `x-middleware-override-headers` the `x-middleware-request-*` headers do nothing.
+- It applies to API routes (`/api/*`) and server actions as well as pages.
+- A listed header replaces the one the client sent, so a header you set from the
+  URL or a verified cookie cannot be spoofed by the client. `host` cannot be
+  overridden; use another name (`x-site-host`).
+- Krate has no `NextResponse` class of its own. When you migrate from Next.js,
+  `krate migrate` keeps your `NextResponse.next({ request: { headers } })` calls
+  working through a small shim that produces exactly these headers.
+
 ```typescript
 export function middleware(request: Request) {
   const url = new URL(request.url);
@@ -55,6 +71,21 @@ export function middleware(request: Request) {
       "x-middleware-request-x-site-url": url.pathname + url.search,
     },
   });
+}
+```
+
+To add a header and keep every header the client sent, list them all:
+
+```typescript
+export function middleware(request: Request) {
+  const names = [...request.headers.keys(), "x-site-host"];
+  const headers: Record<string, string> = {
+    "x-middleware-next": "1",
+    "x-middleware-override-headers": names.join(","),
+    "x-middleware-request-x-site-host": new URL(request.url).host,
+  };
+  for (const [k, v] of request.headers) headers["x-middleware-request-" + k] = v;
+  return new Response(null, { headers });
 }
 ```
 

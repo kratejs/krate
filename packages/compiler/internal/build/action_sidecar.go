@@ -271,6 +271,15 @@ let nodeCrypto = null;
 // openInlineToken verifies and decrypts the closure token of an inline action
 // (AES-256-GCM, authenticated against the action id, see inline_actions.go).
 async function openInlineToken(token, entry) {
+  const values = await openSealedToken(token, entry);
+  if (values.length !== entry.captures.length) throw new Error('closure token does not match the action');
+  return values;
+}
+
+// openSealedToken verifies and decrypts a "k1." token for the action: the
+// closed-over values of an inline action, or the arguments a module action was
+// bound to when it crossed into a client component.
+async function openSealedToken(token, entry) {
   if (typeof token !== 'string' || !token.startsWith('k1.')) throw new Error('missing closure token');
   if (!nodeCrypto) nodeCrypto = await import('node:crypto');
   if (!inlineTokenKey) {
@@ -285,7 +294,7 @@ async function openInlineToken(token, entry) {
   decipher.setAuthTag(buf.subarray(buf.length - 16));
   const text = Buffer.concat([decipher.update(buf.subarray(12, buf.length - 16)), decipher.final()]).toString('utf8');
   const values = JSON.parse(text);
-  if (!Array.isArray(values) || values.length !== entry.captures.length) throw new Error('closure token does not match the action');
+  if (!Array.isArray(values)) throw new Error('closure token does not match the action');
   return values.map(decodeInlineValue);
 }
 
@@ -408,6 +417,20 @@ async function krateRunAction(req, urlPath, search) {
       return actionFail(400, 'Invalid server action request');
     }
     args.unshift(...captured);
+  }
+
+  // Arguments a module action was bound to before it was passed to a client
+  // component arrive sealed in the URL, never in the body, so a client cannot
+  // choose them. A token for another action, or a forged one, fails.
+  const boundToken = query.get('__krate_bound');
+  if (boundToken !== null) {
+    try {
+      if (entry.inline) throw new Error('an inline action has no bound arguments');
+      args.unshift(...(await openSealedToken(boundToken, entry)));
+    } catch (e) {
+      console.error('[krate] rejected bound arguments for server action ' + (entry.source || id) + ': ' + ((e && e.message) || e));
+      return actionFail(400, 'Invalid server action request');
+    }
   }
 
   const ctx = makeActionContext(req, id, urlPath);

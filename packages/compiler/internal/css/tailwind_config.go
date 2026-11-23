@@ -283,6 +283,8 @@ type TailwindResult struct {
 	CSS string
 	// Unknown lists scanned candidates that produced no rule (strict only).
 	Unknown []string
+	// Dropped lists classes whose rule was dropped as unsafe ("class: reason").
+	Dropped []string
 	// Warnings lists unsupported config or directive constructs.
 	Warnings []string
 }
@@ -340,6 +342,8 @@ func GenerateTailwindDirectives(root string, cfg *TailwindConfig, opts TailwindO
 	utilities := generator.Generate(classes)
 	res.Unknown = append(res.Unknown, generator.Unknown...)
 	sort.Strings(res.Unknown)
+	res.Dropped = append(res.Dropped, generator.Dropped...)
+	sort.Strings(res.Dropped)
 
 	refs := map[string]bool{}
 	for k := range scanner.VarRefs {
