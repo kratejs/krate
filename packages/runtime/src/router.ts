@@ -2177,12 +2177,28 @@ function clickHandler(e: MouseEvent): void {
   });
 }
 
+/**
+ * True when the form (or its submit button) runs a client action: an island's
+ * `<form action={fn}>` (react-compat sets `__krateForm` / `__krateFormAction`)
+ * or a server-action form (`data-krate-action`). Those listeners bail once the
+ * event is defaultPrevented, so the router must not claim the submit first.
+ */
+function carriesClientAction(form: HTMLFormElement, submitter: HTMLElement | null): boolean {
+  const own = (el: Element | null): boolean => {
+    if (!el) return false;
+    const a = el as Element & { __krateForm?: unknown; __krateFormAction?: unknown };
+    return !!(a.__krateForm || a.__krateFormAction) || el.hasAttribute('data-krate-action');
+  };
+  return own(form) || own(submitter);
+}
+
 function submitHandler(e: SubmitEvent): void {
   if (e.defaultPrevented) return;
   const form = e.target as HTMLFormElement | null;
   if (!form || form.tagName !== 'FORM') return;
   if (form.hasAttribute('data-krate-reload')) return;
   const submitter = (e.submitter || null) as HTMLButtonElement | HTMLInputElement | null;
+  if (carriesClientAction(form, submitter)) return;
   const method = ((submitter && submitter.getAttribute('formmethod')) || form.getAttribute('method') || 'get').toLowerCase();
   if (method !== 'get') return;
   const target = (submitter && submitter.getAttribute('formtarget')) || form.getAttribute('target');

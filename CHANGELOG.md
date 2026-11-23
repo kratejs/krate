@@ -604,6 +604,15 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A server action called from a client island that answers with `redirect("/path?x=1")` is followed: the
+  island's redirect safety check used a mangled character class and rejected any path containing digits,
+  upper case letters, `?`, `=` and similar, so only plain lowercase paths worked.
+
+- The SPA router no longer turns an island's `<form action={fn}>` (no `method`) into a GET navigation when
+  its submit listener runs before the island's: forms that carry a client action (`__krateForm`,
+  `__krateFormAction`, `data-krate-action`) are left to it. The island's own listener already bailed on a
+  prevented event, so the action never ran and the answers ended up in the URL.
+
 - A server action passed as a prop to a `"use client"` component (and one imported straight into a client
   module) now posts a `FormData` argument as multipart, like the runtime's own proxy, so
   `useActionState(actionFromProps)` with `<form action={run}>` receives the form instead of `{}`
