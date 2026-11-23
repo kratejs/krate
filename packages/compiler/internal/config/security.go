@@ -6,7 +6,8 @@ import (
 	"strings"
 )
 
-// SecurityConfig overrides the security response headers `krate serve` sends.
+// SecurityConfig overrides the security response headers `krate serve` and
+// `krate dev` send (and the Node server handler of a deployed server build).
 // Empty fields keep the framework default; the value "off"/"none"/"false"
 // disables the header entirely.
 type SecurityConfig struct {
