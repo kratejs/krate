@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -392,4 +393,53 @@ import { useLabel } from "./provider";
 export default function Show() { return <b>c=edited-{useLabel()}</b>; }
 `)
 	d.waitBody(t, "/c/", "c=edited-v3")
+}
+
+// A client component rendered by another one in the layout (a shell inside the
+// provider) is found through the renderer's registry of client components.
+// Each page bundle is reloaded on its own after a rebuild, so the registry
+// held whichever page's copy was loaded last and a component of one page's
+// graph met a provider of another's: the shell's hook saw no provider and
+// every page failed until the server restarted.
+func TestDevNestedClientComponentsKeepTheirOwnGeneration(t *testing.T) {
+	const shell = `"use client";
+import { useLabel } from "./provider";
+export function Shell({ children }: any) { return <section>shell {useLabel()}{children}</section>; }
+`
+	files := map[string]string{
+		"src/pages/_layout.tsx": `import { Provider } from "../components/provider";
+import { Shell } from "../components/shell";
+export default async function Layout({ children }: any) { return <Provider><Shell>{children}</Shell></Provider>; }
+`,
+		"src/components/provider.tsx": strings.ReplaceAll(devProviderSrc, "LABEL", "v1"),
+		"src/components/shell.tsx":    shell,
+	}
+	pages := []string{"a", "b", "c"}
+	for _, p := range pages {
+		files["src/components/Show_"+p+".tsx"] = `"use client";
+import { useLabel } from "./provider";
+export default function Show() { return <b>` + p + `={useLabel()} one</b>; }
+`
+		files["src/pages/"+p+".tsx"] = `import Show from "../components/Show_` + p + `";
+export default async function P() { return <main><h1>page ` + p + `</h1><Show /></main>; }
+`
+	}
+	d := startDevRun(t, files)
+	d.waitBody(t, "/a/", "a=v1 one")
+
+	// Edits to an island rebuild its page only, so the three pages end up
+	// loaded at different times.
+	for i, p := range pages {
+		d.write(t, "src/components/Show_"+p+".tsx", `"use client";
+import { useLabel } from "./provider";
+export default function Show() { return <b>`+p+`={useLabel()} edit`+strconv.Itoa(i)+`</b>; }
+`)
+		d.waitBody(t, "/"+p+"/", p+"=v1 edit"+strconv.Itoa(i))
+	}
+	for _, p := range pages {
+		_, body := getText(t, d.base+"/"+p+"/")
+		if strings.Contains(body, "needs the provider") || !strings.Contains(body, "shell v1") {
+			t.Fatalf("/%s lost the layout's provider:\n%s", p, body)
+		}
+	}
 }

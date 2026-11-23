@@ -2049,6 +2049,9 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	}
 
 	handlerWith404 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hub != nil && serveRetiredChunk(w, r, root, absOut) {
+			return
+		}
 		// Server-only build artifacts live under dist/.krate. Never serve them
 		// from the static handler; they contain bundles, the renderer, and the
 		// persisted ISR cache.
@@ -2703,7 +2706,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	// request IDs, security headers, and panic recovery.
 	var devMux http.Handler = mux
 	if hub != nil {
-		devMux = devErrorShell(hub, root, absOut, mux)
+		devMux = devBuildGate(hub, devErrorShell(hub, root, absOut, mux))
 	}
 	var rootHandler http.Handler = requestIDMiddleware(withFlashSecret(flashSecretFor(revalHost.secret), forwardedHeadersMiddleware(cfg.Server.TrustProxy, cfg.Server.TrustedProxies, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, frontRedirects(slashMode, insideRedirects, devMux)))))))))
 

@@ -51,7 +51,14 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 	needsInitialBuild := len(b.depGraph) == 0 && !b.buildAttempted.Load()
 	b.depMu.Unlock()
 	if needsInitialBuild {
-		if err := b.BuildAll(); err != nil {
+		if hub != nil {
+			hub.BeginBuild()
+		}
+		err := b.BuildAll()
+		if hub != nil {
+			hub.EndBuild()
+		}
+		if err != nil {
 			fmt.Fprintf(b.stderr(), "  %sBuild error:%s %s\n", cRed, cReset, BuildErrorSummary(err))
 			if hub != nil {
 				hub.Publish(DevEvent{Type: "reload", Diagnostics: DiagnosticsFromError(err)})
@@ -200,11 +207,17 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 		}
 		changed := uniqueStrings(pending)
 		pending = nil
-		if b.DevHandleChanges != nil {
-			b.DevHandleChanges(changed, hub)
-		} else {
-			b.processChanges(changed, hub)
-		}
+		func() {
+			if hub != nil {
+				hub.BeginBuild()
+				defer hub.EndBuild()
+			}
+			if b.DevHandleChanges != nil {
+				b.DevHandleChanges(changed, hub)
+			} else {
+				b.processChanges(changed, hub)
+			}
+		}()
 		watchExternalDeps()
 		printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
 		return nil

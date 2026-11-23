@@ -705,6 +705,27 @@ host code runs in the native process. Names and options may change between relea
   when a rebuild brings the first request-time page, and a page that changes between static and request-time
   rendering rebuilds the whole site instead of leaving the server manifest behind.
 
+- `krate dev`: after an edit, a layout's client provider and the client components rendered inside it no longer
+  end up with different contexts. A rebuild built the render modules of the rebuilt pages' client components
+  one by one, each with its own copy of the provider module, while a full build shares it through chunks, and
+  the renderer's registry of client components held the copy of whichever page bundle loaded last. A shell
+  component inside a provider (`<Provider><Shell>{children}</Shell></Provider>`) then failed with the app's own
+  "needs the provider" guard (500) on every page, until a restart (kratejs/krate#81). A rebuild now builds the
+  render modules of every client component together, as a full build does, and a render module finds its
+  siblings among those of its own generation.
+
+- `krate dev`: after a rebuild of the whole site (a page added, removed or renamed, or a page changing between
+  static and request-time rendering) the island pages loaded with a missing Preact. The shared Preact chunks
+  (`/chunks/preact-*.js`, the targets of the import map) were remembered from the first build and not written
+  again into the emptied output directory, so every island failed to load until a restart.
+
+- `krate dev`: requests that arrive while a rebuild runs wait for it instead of failing. A rebuild of the whole
+  site emptied the output directory first, so pages, scripts and styles answered 404 until it finished, and a
+  rebuild of some pages rewrote the server bundles under a request. A page served just before a rebuild, or
+  still open in a browser, also named island chunks the rebuild had deleted, which failed with `Failed to fetch
+  dynamically imported module`. Requests for pages and assets now wait for the running rebuild (up to a minute),
+  and the chunks a rebuild replaced stay served from `.krate/dev-retired-chunks` for 30 minutes.
+
 - Types: apps that keep `@types/react` (migrated Next.js apps) failed to type-check because Krate's
   `JSX.Element` is a DOM `Node`, which React's `ReactNode` rejects: `<Link>`/`<Head>` gave TS2786 under
   `jsx: "react-jsx"`, and every element gave TS2322 against React-typed props under `jsx: "preserve"` with

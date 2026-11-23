@@ -86,9 +86,14 @@ func (b *Builder) takeIslandDirty() bool {
 }
 
 // resetIslandEntries forgets every registered entry (a full build starts over).
+// The shared Preact chunks are forgotten too: the output directory they were
+// written to is emptied, and a build that kept the memo left the import map
+// pointing at files that no longer exist (dev rebuilds the whole site on a new
+// page, a renamed file, a page turning request-time).
 func (b *Builder) resetIslandEntries() {
 	b.islandMu.Lock()
 	b.islandEntries = nil
+	b.preactChunks = nil
 	b.islandDirty = true
 	b.islandMu.Unlock()
 }
@@ -194,7 +199,7 @@ func (b *Builder) writeIslandBundles() error {
 		flavours = append(flavours, f)
 	}
 	if len(flavours) == 0 {
-		pruneIslandFiles(chunksDir, keep)
+		pruneIslandFiles(chunksDir, keep, b.retiredChunksDir())
 		b.setIslandGraph(nil)
 		return nil
 	}
@@ -215,7 +220,7 @@ func (b *Builder) writeIslandBundles() error {
 	if err := writeIslandChunkFiles(shared.OutputFiles, chunksDir, islandNeutralStem, keep); err != nil {
 		return err
 	}
-	pruneIslandFiles(chunksDir, keep)
+	pruneIslandFiles(chunksDir, keep, b.retiredChunksDir())
 	graph := islandModuleGraph{}
 	for _, m := range append([]string{shared.Metafile}, flavourMetafiles(flavours)...) {
 		if err := graph.addMetafile(m); err != nil {
@@ -370,9 +375,19 @@ func writeIslandChunkFiles(files []api.OutputFile, chunksDir, stem string, keep 
 	return nil
 }
 
+// retiredChunksDir is where dev moves the chunks a rebuild replaced, empty
+// outside dev (see retireChunk).
+func (b *Builder) retiredChunksDir() string {
+	if !b.DevMode {
+		return ""
+	}
+	return devRetiredChunksDir(b.Root)
+}
+
 // pruneIslandFiles removes island entries and shared chunks an earlier build
-// left in /chunks that the current set no longer contains.
-func pruneIslandFiles(chunksDir string, keep map[string]bool) {
+// left in /chunks that the current set no longer contains, or moves them to
+// retired when that is set.
+func pruneIslandFiles(chunksDir string, keep map[string]bool, retired string) {
 	files, err := os.ReadDir(chunksDir)
 	if err != nil {
 		return
@@ -383,7 +398,7 @@ func pruneIslandFiles(chunksDir string, keep map[string]bool) {
 			continue
 		}
 		if strings.HasPrefix(name, islandEntryPrefix) || strings.HasPrefix(name, islandSharedStem) || strings.HasPrefix(name, islandRealSharedStem) || strings.HasPrefix(name, islandNeutralStem) || strings.HasPrefix(name, islandNeutralEntryPrefix) {
-			_ = os.Remove(filepath.Join(chunksDir, name))
+			retireChunk(retired, filepath.Join(chunksDir, name))
 		}
 	}
 }
