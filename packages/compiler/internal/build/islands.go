@@ -753,7 +753,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		opts.Plugins = append(opts.Plugins, islandRequirePlugin())
 	}
 	result := esbuildBuild(opts)
-	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
+	result.Errors = append(result.Errors, guard.resultErrors(result)...)
 	if len(result.Errors) > 0 {
 		var msgs []string
 		var loc *bundleLocation

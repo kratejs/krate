@@ -1246,7 +1246,7 @@ func (b *Builder) buildClientChunk(r clientChunkReq) *clientChunkResult {
 		Loader:     api.LoaderJS,
 	}
 	result := esbuildBuild(opts)
-	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
+	result.Errors = append(result.Errors, guard.resultErrors(result)...)
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
 		return &clientChunkResult{err: clientBuildError(b.Root, r.key, result.Errors)}
 	}
@@ -1391,7 +1391,9 @@ func clientBuildError(root, path string, errs []api.Message) error {
 	}
 	joined := strings.Join(msgs, "\n")
 	hint := "check the client component and its imports, then rebuild"
-	if strings.Contains(joined, "preact") {
+	if strings.Contains(joined, "Node built-ins do not exist in the browser") {
+		hint = builtinFixHint + "; `krate dev --verbose` lists every import of a built-in"
+	} else if strings.Contains(joined, "preact") {
 		hint = "\"use client\" components inside server components hydrate with Preact; install it with `pnpm add preact`"
 	}
 	return diag.Diagnostic{File: file, Line: line, Col: col, Message: "client component chunk could not be built:\n" + joined, Hint: hint}.WithCode(diag.CodeIslandAsset)

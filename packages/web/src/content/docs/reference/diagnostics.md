@@ -1022,7 +1022,7 @@ The island has no build-time props, uses a browser-only API, or could not be ren
 
 **Island asset could not be built**
 
-Krate could not bundle the island's external package, local module, Preact dependency, or generated chunk. Check the reported resolver error and install the missing package (Preact 10.20 or newer) in the project.
+Krate could not bundle the island's external package, local module, Preact dependency, or generated chunk. Check the reported resolver error and install the missing package (Preact 10.20 or newer) in the project. When the message says Node built-ins do not exist in the browser, a client component imports code that needs Node (a database driver, `fs`, `net`): the error names the import chain from the component to the package that pulled the Node-only code in. Import a browser-safe subpath of that package instead of its root, or move the code to a server component, an API route or a `use server` function. `krate dev --verbose` and `krate build --verbose` list every import of a built-in.
 
 ### KR8010
 

@@ -287,7 +287,7 @@ func (b *Builder) buildRealIslandBundle(src, resolveDir string, sink *islandCSSS
 	}
 	opts.Stdin = &api.StdinOptions{Contents: src, ResolveDir: resolveDir, Sourcefile: "krate-island.tsx", Loader: api.LoaderTSX}
 	result := esbuildBuild(opts)
-	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
+	result.Errors = append(result.Errors, guard.resultErrors(result)...)
 	if len(result.Errors) == 0 {
 		return nil
 	}

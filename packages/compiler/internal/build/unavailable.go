@@ -32,12 +32,14 @@ type unavailableGuard struct {
 	// nodeRuntime is set for a bundle that runs on Node: built-ins resolve
 	// normally and only native addons, which esbuild cannot load, are stubbed.
 	nodeRuntime bool
-	mu          sync.Mutex
-	msgs        map[string]api.Message // stub key -> error
+	// verbose lists every import of a built-in instead of one summary.
+	verbose bool
+	mu      sync.Mutex
+	msgs    map[string]api.Message // stub key -> error
 }
 
 func (b *Builder) newUnavailableGuard() *unavailableGuard {
-	return &unavailableGuard{root: b.Root, msgs: map[string]api.Message{}}
+	return &unavailableGuard{root: b.Root, verbose: b.Verbose, msgs: map[string]api.Message{}}
 }
 
 func (g *unavailableGuard) note(key string, msg api.Message) {
@@ -65,12 +67,12 @@ func (g *unavailableGuard) importMessage(importer, spec string) api.Message {
 			if j := strings.Index(src[i:], "\n"); j >= 0 {
 				lineEnd = i + j
 			}
-			return api.Message{Text: text, Location: &api.Location{
+			return api.Message{Text: text, Detail: builtinHit{importer: importer, spec: spec}, Location: &api.Location{
 				File: importer, Line: line, Column: i - lineStart, LineText: strings.TrimRight(src[lineStart:lineEnd], "\r"),
 			}}
 		}
 	}
-	return api.Message{Text: g.rel(importer) + ": " + text}
+	return api.Message{Text: g.rel(importer) + ": " + text, Detail: builtinHit{importer: importer, spec: spec}}
 }
 
 func (g *unavailableGuard) rel(path string) string {
