@@ -162,7 +162,8 @@ function resolveDynamicFile(dir, segments, exts) {
   return null;
 }
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => krateInRequest(req.method, req.url, () => krateHandle(req, res)));
+async function krateHandle(req, res) {
   try {
     // The host's readiness probe: which start of the sidecar is listening.
     if (req.url === '` + sidecarReadyPath + `') {
@@ -427,7 +428,7 @@ const server = http.createServer(async (req, res) => {
     if (fallback) { res.setHeader('Cache-Control', 'no-store'); return res.end(JSON.stringify({ error: KRATE_FALLBACK_LABEL[fallback] })); }
     return res.end(JSON.stringify(krateErrorBody(err, req.method + ' ' + req.url)));
   }
-});
+}
 
 if (WORKERS > 1 && cluster.isPrimary) {
   // Node leaves scheduling to the OS on Windows (SCHED_NONE), where one
@@ -460,11 +461,7 @@ if (WORKERS > 1 && cluster.isPrimary) {
   // A clustered worker that loses its primary is shutting down; do not try to
   // send handles or log an EPIPE stack.
   process.on('disconnect', () => process.exit(0));
-  process.on('uncaughtException', (err) => {
-    if (err && err.code === 'EPIPE') process.exit(0);
-    console.error(err);
-    process.exit(1);
-  });
+  krateInstallProcessGuards();
   // The port was free when Go chose it, but a bind can still fail with
   // EADDRINUSE: any socket holding that local port blocks the wildcard bind,
   // including a short-lived outgoing connection. A clustered worker exits
@@ -712,10 +709,10 @@ function resolveDynamicFile(dir, segments, exts) {
   return null;
 }
 
-Bun.serve({
-  port: PORT,
-  hostname: '127.0.0.1',
-  async fetch(req) {
+krateInstallProcessGuards();
+
+async function krateBunFetch(req) {
+  {
     if (new URL(req.url).pathname === '` + sidecarReadyPath + `') {
       return new Response(process.env.KRATE_SIDECAR_START || '', { headers: { 'content-type': 'text/plain; charset=utf-8' } });
     }
@@ -781,7 +778,13 @@ Bun.serve({
       if (fallback) { const r = json({ error: KRATE_FALLBACK_LABEL[fallback] }, fallback); r.headers.set('Cache-Control', 'no-store'); return r; }
       return json(krateErrorBody(e, req.method + ' ' + urlPath), 500);
     }
-  },
+  }
+}
+
+Bun.serve({
+  port: PORT,
+  hostname: '127.0.0.1',
+  fetch: (req) => krateInRequest(req.method, new URL(req.url).pathname, () => krateBunFetch(req)),
 });`
 
 const (

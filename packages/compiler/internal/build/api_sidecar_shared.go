@@ -78,6 +78,31 @@ function krateErrorBody(err, where) {
   const msg = (err && err.message) || String(err);
   return KRATE_DEV ? { error: 'Internal Server Error', details: msg } : { error: 'Internal Server Error' };
 }
+// The process error policy of the API sidecar, the same as the SSR renderer's
+// (runtime/src/process-guard.ts): an error that belongs to a request (an
+// unhandled rejection, a throw from a timer or callback a route started) is
+// logged with the request's method and path and the sidecar keeps serving; an
+// uncaught exception outside any request exits, since the process state can no
+// longer be trusted. Every request runs inside KRATE_REQ_STORE.
+const KRATE_REQ_STORE = new AsyncLocalStorage();
+function krateInRequest(method, url, fn) { return KRATE_REQ_STORE.run({ method, url }, fn); }
+function krateInstallProcessGuards() {
+  const where = () => { const r = KRATE_REQ_STORE.getStore(); return r ? ' while handling ' + r.method + ' ' + r.url : ''; };
+  const describe = (e) => (e && e.stack) || String(e);
+  process.on('unhandledRejection', (e) => {
+    console.error('[krate] unhandled promise rejection' + where() + ' (the API sidecar keeps running): ' + describe(e));
+  });
+  process.on('uncaughtException', (e) => {
+    if (KRATE_REQ_STORE.getStore()) {
+      console.error('[krate] uncaught exception' + where() + ' (the API sidecar keeps running): ' + describe(e));
+      return;
+    }
+    // A worker that lost its primary has nothing left to serve.
+    if (e && e.code === 'EPIPE') process.exit(0);
+    console.error('[krate] uncaught exception outside any request, exiting: ' + describe(e));
+    process.exit(1);
+  });
+}
 function krateCookies(headers) {
   const jar = new Map();
   for (const part of String(headers.get('cookie') || '').split(';')) {

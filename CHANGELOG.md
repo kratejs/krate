@@ -624,6 +624,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The Node, Bun and Deno API sidecar no longer exits when a route leaves an error behind outside its own promise
+  chain. A route that started a promise nobody awaited and that rejected, or threw from a timer or callback,
+  ended the sidecar process (or one cluster worker), and the API routes answered 503 until the host restarted
+  it. It now follows the SSR renderer's policy: the error is logged with the request's method and path and the
+  sidecar keeps serving; an uncaught exception outside any request still exits. Under Bun an unhandled rejection
+  is logged without the request.
+
 - Cookie values read the same everywhere. `request.cookies` in the Node, Bun and Deno API and middleware sidecars,
   in a migrated Next middleware and the dynamic metadata routes returned the raw header value, so a cookie that
   `cookies().set("ui", "mode=light&nav=open")` wrote percent-encoded read back as `mode%3Dlight%26nav%3Dopen` (and a
