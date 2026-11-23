@@ -651,6 +651,15 @@ host code runs in the native process. Names and options may change between relea
   when a rebuild brings the first request-time page, and a page that changes between static and request-time
   rendering rebuilds the whole site instead of leaving the server manifest behind.
 
+- `krate dev`: after an edit, a layout's client provider and the client components rendered inside it no longer
+  end up with different contexts. A rebuild built the render modules of the rebuilt pages' client components
+  one by one, each with its own copy of the provider module, while a full build shares it through chunks, and
+  the renderer's registry of client components held the copy of whichever page bundle loaded last. A shell
+  component inside a provider (`<Provider><Shell>{children}</Shell></Provider>`) then failed with the app's own
+  "needs the provider" guard (500) on every page, until a restart (kratejs/krate#81). A rebuild now builds the
+  render modules of every client component together, as a full build does, and a render module finds its
+  siblings among those of its own generation.
+
 - Types: apps that keep `@types/react` (migrated Next.js apps) failed to type-check because Krate's
   `JSX.Element` is a DOM `Node`, which React's `ReactNode` rejects: `<Link>`/`<Head>` gave TS2786 under
   `jsx: "react-jsx"`, and every element gave TS2322 against React-typed props under `jsx: "preserve"` with

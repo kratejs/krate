@@ -1065,7 +1065,10 @@ export function clientBoundary(
   Object.defineProperty(Boundary, "name", { value: name });
   const ref: ClientRef = { moduleId, exportName, src, impl, hydrate };
   (Boundary as any).__krateClient = ref;
-  clientRegistry().set(`${moduleId}#${exportName}`, ref);
+  // A render module reads its siblings from its own generation: see
+  // __krateComp in the compiler's clientSSRSource.
+  const gen = typeof render === "function" && typeof (render as any).__krateGen === "string" ? (render as any).__krateGen : "";
+  clientRegistry().set(`${gen}|${moduleId}#${exportName}`, ref);
   return Boundary;
 }
 

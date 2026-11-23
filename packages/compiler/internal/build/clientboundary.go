@@ -1649,9 +1649,13 @@ func clientSSRSource(cb ClientBoundary) string {
 	return "import { h } from \"preact\";\nimport renderToString from \"preact-render-to-string\";\n" + cb.entrySource() +
 		clientReviveJS + ssrSlotJS + `
 function __krateServerAction() { throw new Error("a server action passed to a client component cannot be called while the server renders it"); }
+// The renderer reloads a page bundle's whole graph under a new query on each
+// dev rebuild, so a component is looked up among those of this module's own
+// generation: the newest copy of another page's graph has contexts of its own.
+var __krateGen = (function () { try { return new URL(import.meta.url).search; } catch (e) { return ""; } })();
 function __krateComp(m, e) {
   var reg = globalThis.__krateClientImpls;
-  var hit = reg && reg.get(m + "#" + e);
+  var hit = reg && reg.get(__krateGen + "|" + m + "#" + e);
   return hit && hit.impl;
 }
 export const __krate_module = __m;
@@ -1667,6 +1671,7 @@ export function __krate_render(C, props, _children, fwd, capture) {
     __krateRaw = null;
   }
 }
+__krate_render.__krateGen = __krateGen;
 `
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
@@ -40,7 +41,7 @@ func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS st
 	// Recompile server bundles only for the pages in this rebuild.
 	var serverBundles map[string]string
 	if len(ssrPages) > 0 {
-		serverBundles = CompileServerBundles(b.importResolver(), ssrPages, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+		serverBundles = b.rebuildClientSSRModules(ssrPages)
 		if err := b.writeHighlightTables(serverBundles); err != nil {
 			return err
 		}
@@ -73,6 +74,58 @@ func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS st
 		return fmt.Errorf("refreshing the build manifest under %s: %w", b.Cfg.OutDir, err)
 	}
 	return nil
+}
+
+// recordDevBoundaries remembers the client boundaries of the request-time
+// pages built, by module. A full build replaces the record, a partial one
+// adds to it.
+func (b *Builder) recordDevBoundaries(boundaries []ClientBoundary, replace bool) {
+	b.devBoundariesMu.Lock()
+	defer b.devBoundariesMu.Unlock()
+	if replace || b.devBoundaries == nil {
+		b.devBoundaries = map[string]ClientBoundary{}
+	}
+	for _, cb := range boundaries {
+		b.devBoundaries[cb.SourcePath] = cb
+	}
+}
+
+// rebuildClientSSRModules recompiles the server bundles of ssrPages and the
+// server render modules of every client component the site has.
+//
+// A render module built on its own inlines the modules it imports, so after a
+// partial rebuild a provider and the client components rendered inside it came
+// from different builds, each with a context of its own, while a full build
+// shares them through chunks. Every render module is therefore built again
+// with the others, in one code-split build, so all of them share the same
+// chunks and a page loaded later finds the same module graph as the layout it
+// renders in.
+func (b *Builder) rebuildClientSSRModules(ssrPages []*PageResult) map[string]string {
+	impls := newClientSSRImpls(b.importResolver(), ssrPages, b.Root, b.Cfg.OutDir, b.actionModules(), b.Cfg.BaseURLPath())
+	b.recordDevBoundaries(impls.boundaries, false)
+	b.devBoundariesMu.Lock()
+	all := make([]ClientBoundary, 0, len(b.devBoundaries))
+	for src, cb := range b.devBoundaries {
+		if cb.Spec == "" {
+			if _, err := os.Stat(src); err != nil {
+				delete(b.devBoundaries, src)
+				continue
+			}
+		}
+		all = append(all, cb)
+	}
+	b.devBoundariesMu.Unlock()
+	// The pages' own boundaries come first: the build of a module is the
+	// first boundary that claims it.
+	own := map[string]bool{}
+	for _, cb := range impls.boundaries {
+		own[cb.SourcePath] = true
+	}
+	sort.SliceStable(all, func(i, j int) bool { return own[all[i].SourcePath] && !own[all[j].SourcePath] })
+	impls.boundaries = all
+	impls.buildAll(impls.boundaries)
+	bundles, _ := compileServerBundlesWith(impls, ssrPages, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+	return bundles
 }
 
 // serverManifestOutOfStep reports whether a rebuilt page's render mode no

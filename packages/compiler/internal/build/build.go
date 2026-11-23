@@ -250,6 +250,11 @@ type Builder struct {
 	// or static); the watcher then rebuilds everything.
 	needFullRebuild atomic.Bool
 
+	// devBoundaries are the client boundaries of the request-time pages built
+	// so far, by module, kept for dev rebuilds (see rebuildClientSSRModules).
+	devBoundariesMu sync.Mutex
+	devBoundaries   map[string]ClientBoundary
+
 	// twMu guards twPages/twWarned: Tailwind CSS-first directives collected
 	// from the authored CSS that flows through processCSSDirectives (replaced
 	// per page on each rebuild, cleared on a full build), and the warnings
@@ -1430,6 +1435,9 @@ func (b *Builder) BuildAll() error {
 	actionMods, basePath := b.actionModules(), b.Cfg.BaseURLPath()
 	impls := newClientSSRImpls(b.importResolver(), results, b.Root, b.Cfg.OutDir, actionMods, basePath)
 	impls.separate, impls.shareless = b.noCombinedSSR, b.noSharedServerWork
+	if b.DevMode {
+		b.recordDevBoundaries(impls.boundaries, true)
+	}
 	implsDone := make(chan struct{})
 	go pprof.Do(context.Background(), pprof.Labels("phase", "server-bundles"), func(context.Context) {
 		defer close(implsDone)
