@@ -7,8 +7,9 @@ const [base, browserName = "chromium"] = process.argv.slice(2);
 const browser = await { chromium, firefox, webkit }[browserName].launch();
 const errors = [];
 const result = {};
+let pageRef;
 try {
-  const page = await browser.newPage();
+  const page = (pageRef = await browser.newPage());
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(base + "/");
   await page.waitForSelector("#plain");
@@ -20,10 +21,13 @@ try {
     result[id] = await page.textContent("#" + id + "-status");
   }
   result.url = new URL(page.url()).pathname + new URL(page.url()).search;
+  await page.click("#direct");
+  await page.waitForSelector("#done", { timeout: 8000 });
+  result.direct = new URL(page.url()).pathname + new URL(page.url()).search;
   result.errors = errors;
   console.log(JSON.stringify(result));
 } catch (e) {
-  console.log(JSON.stringify({ failed: String(e.message).split("\n")[0], result, errors }));
+  console.log(JSON.stringify({ failed: String(e.message).split("\n")[0], result, errors, url: pageRef && pageRef.url() }));
   process.exitCode = 1;
 } finally {
   await browser.close();

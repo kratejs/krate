@@ -73,7 +73,7 @@ describe('flight props round trip', () => {
 });
 
 describe('server actions passed as props', () => {
-  const callSrc = goSrc.match(/const clientActionCallJS = `([\s\S]*?)`\n/)![1].replace(/\\\\/g, '\\');
+  const callSrc = goSrc.match(/const clientActionCallJS = `([\s\S]*?)`\n/)![1];
   const actionHooks: FlightHooks = {
     ...hooks,
     isAction: (v) => (typeof v === 'function' ? (v as any).actionUrl : undefined),
@@ -86,10 +86,10 @@ describe('server actions passed as props', () => {
     return revive(wire, null, call, null).a;
   }
 
-  it('revives to a callable carrying the action id and its bound arguments', () => {
+  it('revives to a callable carrying its URL and bound arguments', () => {
     const calls: unknown[][] = [];
     const fn = revived(['t', { n: 1 }], (url, args) => calls.push([url, args]));
-    expect(fn.$$krateAction).toBe('abc');
+    expect(fn.$$krateAction).toBeUndefined();
     expect(fn.actionUrl).toBe('/__krate/action/abc');
     expect(fn.$$krateBound).toEqual(['t', { n: 1 }]);
     fn('prev', 'form');

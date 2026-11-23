@@ -227,7 +227,8 @@ function __krateTagged(v, h, call, comp) {
 function __krateActionFn(url, bound, call) {
   var fn = function () { return call(url, bound.concat(Array.prototype.slice.call(arguments))); };
   fn.actionUrl = url;
-  fn.$$krateAction = url.split("?")[0].split("/").pop();
+  // No $$krateAction: the island's form handling treats a function carrying it as a
+  // server-rendered action with its own markup, and would leave a form with action={fn} alone.
   fn.$$krateBound = bound;
   fn.bind = function (_this) { return __krateActionFn(url, bound.concat(Array.prototype.slice.call(arguments, 1)), call); };
   fn.toString = function () { return url; };
@@ -308,7 +309,7 @@ async function __krateCallAction(url, args) {
   }
   if (typeof payload.redirect === "string" && payload.redirect) {
     var to = payload.redirect;
-    if (to.charAt(0) === "/" && to.charAt(1) !== "/" && to.indexOf("\\\\") === -1 && !/[\\x00-\\x1f\\x7f]/.test(to)) location.assign(to);
+    if (to.charAt(0) === "/" && to.charAt(1) !== "/" && to.indexOf("\\") === -1 && !/[\x00-\x1f\x7f]/.test(to)) location.assign(to);
   }
   return payload.result;
 }

@@ -14,3 +14,12 @@ export function SaveForm({ id, action }: { id: string; action: Action }) {
     </form>
   );
 }
+
+export function DirectForm({ id, action }: { id: string; action: (form: FormData) => Promise<unknown> }) {
+  return (
+    <form action={action as unknown as (f: FormData) => void}>
+      <input name="name" defaultValue="x" />
+      <button id={id} type="submit">Send</button>
+    </form>
+  );
+}
