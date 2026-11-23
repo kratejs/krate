@@ -619,6 +619,15 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate dev`: an edited "use client" component renders its new code on the server. The renderer re-imported a
+  page bundle with a new query after each rebuild, but the render modules of the client components it imports
+  (`server-bundles/client/*.ssr.mjs` and their chunks) stayed cached under their old URLs, so SSR kept serving the
+  first version of a client component until a restart, and a module first loaded after a rebuild came from a
+  newer build than the layout's provider module. The two copies of a context-owning module could then meet in one
+  render (a hook failing with its own "needs the layout" guard after several reloads). Imports inside
+  `server-bundles` now take the query of the module that imports them, so each reload loads one consistent
+  graph (Node only).
+
 - `krate dev`: a route whose client chunk failed to build (KR8009) is served again once the import is fixed.
   A full rebuild during the failure left the page out of the server manifest, and the later single-page
   rebuild only updated entries that already existed, so the route kept its static shell with an empty body

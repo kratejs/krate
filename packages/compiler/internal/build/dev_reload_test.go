@@ -324,3 +324,72 @@ export const label = typeof net.createConnection;
 		})
 	}
 }
+
+const devProviderSrc = `"use client";
+import { createContext, useContext } from "react";
+const Ctx = createContext<{ label: string } | null>(null);
+export function Provider({ children }: any) {
+  return <Ctx.Provider value={{ label: "LABEL" }}>{children}</Ctx.Provider>;
+}
+export function useLabel() {
+  const v = useContext(Ctx);
+  if (!v) throw new Error("useLabel needs the provider");
+  return v.label;
+}
+`
+
+// A layout renders a "use client" provider that owns a context, and each page
+// has an island that reads it through a hook. Edits to the provider, to the
+// layout and to an island must reach the server render of every page, and the
+// islands must keep finding the layout's provider: the render modules of
+// client components were cached by the renderer for good, so after a few
+// reloads a module first loaded after an edit came from a newer build than the
+// layout's provider and its hook saw no provider (the page failed with the
+// app's own "needs the layout" guard).
+func TestDevClientModulesStayOneGenerationAfterReloads(t *testing.T) {
+	files := map[string]string{
+		"src/pages/_layout.tsx": `import { Provider } from "../components/provider";
+export default async function Layout({ children }: any) { return <Provider>{children}</Provider>; }
+`,
+		"src/components/provider.tsx": strings.ReplaceAll(devProviderSrc, "LABEL", "v1"),
+	}
+	pages := []string{"a", "b", "c"}
+	for _, p := range pages {
+		files["src/components/Show_"+p+".tsx"] = `"use client";
+import { useLabel } from "./provider";
+export default function Show() { return <b>` + p + `={useLabel()}</b>; }
+`
+		files["src/pages/"+p+".tsx"] = `import Show from "../components/Show_` + p + `";
+export default async function P() { return <main><h1>page ` + p + `</h1><Show /></main>; }
+`
+	}
+	d := startDevRun(t, files)
+	d.waitBody(t, "/a/", "a=v1")
+
+	check := func(label string) {
+		t.Helper()
+		for _, p := range pages {
+			d.waitBody(t, "/"+p+"/", p+"="+label)
+			if _, body := getText(t, d.base+"/"+p+"/"); strings.Contains(body, "needs the provider") {
+				t.Fatalf("/%s lost the layout's provider:\n%s", p, body)
+			}
+		}
+	}
+	// Pages b and c are first served after the provider changed.
+	d.write(t, "src/components/provider.tsx", strings.ReplaceAll(devProviderSrc, "LABEL", "v2"))
+	check("v2")
+	d.write(t, "src/pages/_layout.tsx", `import { Provider } from "../components/provider";
+export default async function Layout({ children }: any) { return <div class="shell"><Provider>{children}</Provider></div>; }
+`)
+	d.waitBody(t, "/b/", `class="shell"`)
+	check("v2")
+	d.write(t, "src/components/provider.tsx", strings.ReplaceAll(devProviderSrc, "LABEL", "v3"))
+	check("v3")
+
+	// An island edited alone.
+	d.write(t, "src/components/Show_c.tsx", `"use client";
+import { useLabel } from "./provider";
+export default function Show() { return <b>c=edited-{useLabel()}</b>; }
+`)
+	d.waitBody(t, "/c/", "c=edited-v3")
+}

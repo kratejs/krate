@@ -214,6 +214,35 @@ describe.skipIf(!built)("server-renderer sidecar", () => {
     });
   });
 
+  describe("page module graph in dev", () => {
+    it("loads the modules a page bundle imports afresh after each dev invalidation", async () => {
+      const page = { route: "/graph", url: "/graph", regions: [{ id: "page", kind: "page" }] };
+      const dep = (v: string) => `export const label = ${JSON.stringify(v)};\nexport const identity = globalThis.__graphId = (globalThis.__graphId || 0) + 1;\n`;
+      write(".krate/server-bundles/client/dep.mjs", dep("one"));
+      write(
+        ".krate/server-bundles/graph.server.mjs",
+        jsxImport + `import { label } from "./client/dep.mjs";\nexport default () => jsx("p", { children: "graph " + label });\n`,
+      );
+      const file = path.join(out, ".krate", "server-manifest.json");
+      const manifest = JSON.parse(fs.readFileSync(file, "utf-8"));
+      manifest.pages.push({ route: "/graph", source: "/graph.tsx", mode: "ssr", bundlePath: ".krate/server-bundles/graph.server.mjs" });
+      fs.writeFileSync(file, JSON.stringify(manifest));
+      const invalidate = () =>
+        fetch(url("/__krate/ssr/invalidate"), {
+          method: "POST",
+          headers: secret,
+          body: JSON.stringify({ route: "/graph", source: "/graph.tsx", bundlePath: ".krate/server-bundles/graph.server.mjs" }),
+        });
+      expect((await invalidate()).status).toBe(200);
+      expect(JSON.stringify((await regions(page)).frames)).toContain("graph one");
+
+      // The page bundle does not change; a module it imports does.
+      write(".krate/server-bundles/client/dep.mjs", dep("two"));
+      expect((await invalidate()).status).toBe(200);
+      expect(JSON.stringify((await regions(page)).frames)).toContain("graph two");
+    });
+  });
+
   describe("region frame formats", () => {
     const page = { id: "page", kind: "page" };
     const cases: Array<[string, object]> = [

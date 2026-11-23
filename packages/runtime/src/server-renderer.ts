@@ -6,6 +6,7 @@ import cluster from "node:cluster";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import nodeModule from "node:module";
 import { pathToFileURL } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -236,6 +237,40 @@ async function loadPageModule(page: ManifestPage): Promise<any> {
   }
 }
 
+// A page bundle is re-imported with a new query on every dev rebuild, but the
+// modules it imports (the client component render modules under
+// server-bundles/client/ and their chunks) were cached by URL for good: an
+// edited client component kept rendering its old code, and a module first
+// loaded after a rebuild came from a newer build than the layout's, so two
+// copies of a module that creates a context could meet in one render. Once
+// the first dev rebuild arrives, imports inside server-bundles take over the
+// query of the module that imports them, so each reload of a page bundle
+// loads its whole graph afresh and the graph is consistent. Node only; other
+// runtimes keep the cached behaviour.
+let bundleGraphVersioned = false;
+
+function versionBundleGraph() {
+  if (bundleGraphVersioned) return;
+  bundleGraphVersioned = true;
+  const register = (nodeModule as { register?: (specifier: string, options: object) => void }).register;
+  if (typeof register !== "function") return;
+  const hooks =
+    "let prefix = '';\n" +
+    "export function initialize(data) { prefix = data.prefix; }\n" +
+    "export async function resolve(specifier, context, nextResolve) {\n" +
+    "  const out = await nextResolve(specifier, context);\n" +
+    "  const parent = context.parentURL ? new URL(context.parentURL) : null;\n" +
+    "  if (parent && parent.search && out.url.startsWith(prefix) && !out.url.includes('?')) return { ...out, url: out.url + parent.search };\n" +
+    "  return out;\n" +
+    "}\n";
+  try {
+    const prefix = pathToFileURL(path.join(OUT_DIR, ".krate", "server-bundles")).href + "/";
+    register("data:text/javascript," + encodeURIComponent(hooks), { parentURL: import.meta.url, data: { prefix } });
+  } catch (err: any) {
+    console.error("[krate-ssr] Could not version the page module graph; client components may render stale code in dev:", err.message);
+  }
+}
+
 const runtimeBundleCache = new Map<string, (props: string | Record<string, any>) => string>();
 
 // loadRuntimeRenderer loads a compiled runtime component bundle and returns its
@@ -373,6 +408,7 @@ async function applyInternalOp(op: InternalOp, payload: any): Promise<Record<str
   if (op !== "dev-invalidate") return core.applyInternalOp(op, payload);
   const { route: targetRoute, source, bundlePath } = payload;
   reloadManifest();
+  versionBundleGraph();
   if (!targetRoute) return { ok: true };
   // Invalidate the page and region caches for this route, then the module
   // cache for the source file or bundle.
