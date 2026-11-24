@@ -524,6 +524,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `krate dev` rebuilds faster on a large app: the island chunks, the client boundary checks and the
+  combined server render modules are kept between rebuilds and reused while none of the files they read
+  (nor their entries) changed, instead of being built again for every edit. On an app with 52 request-time
+  pages and a workspace package, editing one page went from 9.7 s to 3.7 s and editing a workspace file
+  that 21 pages import from 12.3 s to 5.7 s. Production builds are unchanged. `KRATE_DEV_PROFILE=1` prints
+  per-phase timings after each dev rebuild (and `KRATE_DEV_CPUPROFILE=<dir>` writes a CPU profile of it).
 - KR8009 for a client component that pulls in Node built-ins is one error per island instead of one per
   file of the offending package (a database driver printed about 2,000 lines). It names the built-ins, how
   many imports there are, and the import chain from the component to the package that brought the Node-only
