@@ -43,6 +43,7 @@ func startDevRun(t *testing.T, files map[string]string, opts ...func(*config.Con
 	captureProgress(t)
 	logs := builderStderr(b)
 	b.DevMode = true
+	UseDevOutDir(root, b.Cfg)
 	b.Cfg.DevServer.Port = freePort(t)
 	for _, o := range opts {
 		o(b.Cfg)

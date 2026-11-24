@@ -624,6 +624,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate build` run while `krate dev` is running in the same app no longer breaks the dev server. Dev wrote
+  and served `dist/`, so the build replaced the vendor and island chunks the dev pages' import map named and
+  every island failed with "Failed to fetch dynamically imported module", with nothing in the overlay or the
+  log saying why. Dev now writes and serves `.krate/dev-out` (as `next dev` uses `.next/dev`); `build`,
+  `start`, `serve` and the deploy adapters keep using `outDir`, and a dev rebuild never touches it.
 - Routes rank the way Next.js ranks them in every host. A request-time dynamic page (an async `[slug].tsx`) no
   longer answers a URL that a prerendered page owns: `about.tsx` beside `(site)/[slug].tsx` served
   `catch-all about`, and `blog/new.tsx`, a static `shop/index.tsx` next to `shop/[[...filter]].tsx` and a
