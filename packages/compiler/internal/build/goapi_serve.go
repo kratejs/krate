@@ -293,6 +293,7 @@ type goAPISupervisor struct {
 
 	mu      sync.Mutex
 	cmd     *exec.Cmd
+	exited  chan struct{} // closed when cmd has exited
 	routes  []goAPIRouteEntry
 	lastMod time.Time
 	// regionCache memoizes Go region renders that declare a revalidate window.
@@ -597,11 +598,14 @@ func (g *goAPISupervisor) spawn() error {
 	if err != nil {
 		return fmt.Errorf("starting Go API sidecar: %w", err)
 	}
+	exited := make(chan struct{})
 	g.mu.Lock()
 	g.cmd = cmd
+	g.exited = exited
 	g.mu.Unlock()
 	go func(c *exec.Cmd) {
 		err := c.Wait()
+		close(exited)
 		g.mu.Lock()
 		current := g.cmd == c
 		if current {
@@ -671,11 +675,23 @@ func (g *goAPISupervisor) waitReady(timeout time.Duration) bool {
 
 func (g *goAPISupervisor) stop() {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.cmd != nil && g.cmd.Process != nil {
-		execx.KillTree(g.cmd)
-		g.cmd = nil
+	cmd, exited := g.cmd, g.exited
+	g.cmd, g.exited = nil, nil
+	g.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		execx.KillTree(cmd)
+		// Wait for the exit: until then the old process still holds the
+		// port or socket, and a new one started right away fails to bind
+		// while the readiness check reaches the old one.
+		if exited != nil {
+			select {
+			case <-exited:
+			case <-time.After(5 * time.Second):
+			}
+		}
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	// The killed child cannot unlink its own socket; remove it here so the next
 	// spawn can bind cleanly.
 	if g.socket != "" {

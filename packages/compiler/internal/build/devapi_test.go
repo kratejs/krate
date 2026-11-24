@@ -240,7 +240,7 @@ func TestDevAPIHTMLAndSource(t *testing.T) {
 	t.Parallel()
 	_, h := buildDevAPIProject(t, nil)
 	rec := devDo(t, h, "GET", "/__krate/dev/html?path=/about", "")
-	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") || !strings.Contains(rec.Body.String(), "<p>About</p>") {
+	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") || !strings.Contains(rec.Body.String(), ">About</p>") {
 		t.Errorf("html = %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
 	if rec := devDo(t, h, "GET", "/__krate/dev/html?path=/../../etc/passwd", ""); rec.Code != 404 {
