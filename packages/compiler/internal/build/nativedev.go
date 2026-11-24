@@ -95,6 +95,10 @@ func isScriptFile(p string) bool {
 func NativeHMRMessage(ev DevEvent) []byte {
 	var msg map[string]any
 	switch {
+	case ev.Type == "build-start":
+		msg = map[string]any{"type": "build-start", "files": append([]string{}, ev.Files...)}
+	case ev.Type == "build-end" && ev.Build != nil:
+		msg = map[string]any{"type": "build-end", "build": ev.Build}
 	case ev.Type == "client-error" && ev.ClientError != nil:
 		msg = map[string]any{"type": "client-error", "clientError": ev.ClientError}
 	case len(ev.Diagnostics) > 0:

@@ -10,7 +10,8 @@ import (
 
 // DevEvent is a single dev-server notification broadcast to every connected
 // browser tab over SSE. Type selects the SSE event name: "reload",
-// "build-error", or "client-error".
+// "build-error", "client-error", or the build activity events "build-start"
+// and "build-end".
 type DevEvent struct {
 	Type        string            `json:"type"`
 	Routes      []string          `json:"routes,omitempty"`
@@ -21,6 +22,16 @@ type DevEvent struct {
 	// CSSOnly marks a rebuild caused solely by stylesheet edits, so the
 	// browser can swap stylesheets in place instead of reloading.
 	CSSOnly bool `json:"cssOnly,omitempty"`
+	// Files are the changed files of a build-start event.
+	Files []string `json:"files,omitempty"`
+	// Build is the finished build of a build-end event.
+	Build *BuildRecord `json:"build,omitempty"`
+}
+
+// isActivityEvent reports whether ev only reports build progress: it does not
+// change the build state a late tab is caught up with.
+func (ev DevEvent) isActivityEvent() bool {
+	return ev.Type == "build-start" || ev.Type == "build-end"
 }
 
 // ClientError is a runtime error reported by a browser client via
@@ -33,6 +44,16 @@ type ClientError struct {
 	Line    int    `json:"line,omitempty"`
 	Col     int    `json:"col,omitempty"`
 	Kind    string `json:"kind,omitempty"`
+
+	// Structured fields of a server-side failure (Kind "server"): the part
+	// that failed, what happened, its exit code when it exited, the last
+	// console lines, and the sidecar id POST /__krate/dev/action restarts
+	// ("ssr", "api", "go"; empty when it cannot be restarted).
+	Source   string   `json:"source,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
+	ExitCode *int     `json:"exitCode,omitempty"`
+	Log      []string `json:"log,omitempty"`
+	Restart  string   `json:"restart,omitempty"`
 }
 
 // DevHub fans dev events out to all connected SSE clients. The previous
@@ -70,11 +91,23 @@ type DevHub struct {
 	// not recovered yet, by source, so a tab opened later still shows them.
 	serverErrs    map[string]ClientError
 	lastServerErr map[string]time.Time
+
+	// Build activity (see devactivity.go), guarded by mu.
+	activity   *BuildActivity
+	history    []BuildRecord
+	buildSeq   int
+	lastGoodAt time.Time
+
+	// actions carries the overlay's rebuild and cache actions to the watch
+	// loop, which owns the Builder (see RequestAction). watchers counts the
+	// loops receiving them.
+	actions  chan DevAction
+	watchers int
 }
 
 // NewDevHub creates an empty hub.
 func NewDevHub() *DevHub {
-	return &DevHub{subs: make(map[chan DevEvent]struct{}), restart: make(chan struct{})}
+	return &DevHub{subs: make(map[chan DevEvent]struct{}), restart: make(chan struct{}), actions: make(chan DevAction, 4)}
 }
 
 // BeginBuild marks a rebuild as running: the dev server holds requests for
@@ -159,6 +192,10 @@ func (h *DevHub) Publish(ev DevEvent) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if ev.isActivityEvent() {
+		h.fanOutLocked(ev)
+		return
+	}
 	if ev.Type == "client-error" && ev.ClientError != nil {
 		h.clientErrs = append(h.clientErrs, ClientErrorEntry{ClientError: *ev.ClientError, Time: time.Now()})
 		if len(h.clientErrs) > maxClientErrors {
@@ -173,9 +210,20 @@ func (h *DevHub) Publish(ev DevEvent) {
 		return
 	}
 	ev.BuildOK = len(ev.Diagnostics) == 0
+	// The result of the build in progress: it ends here, and build-end
+	// reaches the tabs before the reload does.
+	if ev.Type == "reload" && h.activity != nil {
+		h.finishActivityLocked(h.activity, ev.Routes, len(ev.Diagnostics), true)
+	}
 	h.last = &ev
 	h.lastEventAt = time.Now()
 	h.rebuilds++
+	h.fanOutLocked(ev)
+}
+
+// fanOutLocked delivers ev to every subscriber (dropped for a slow one).
+// h.mu must be held.
+func (h *DevHub) fanOutLocked(ev DevEvent) {
 	for ch := range h.subs {
 		select {
 		case ch <- ev:

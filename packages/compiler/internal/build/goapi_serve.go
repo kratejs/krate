@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -590,9 +591,10 @@ func (g *goAPISupervisor) spawn() error {
 		cmd.Env = append(cmd.Env, "KRATE_GOAPI_SOCKET="+g.socket)
 	}
 	cmd.Env = append(cmd.Env, fmt.Sprintf("KRATE_GOAPI_PORT=%d", g.port))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
+	after := attachSidecarOutput(cmd, LogSrcGo)
+	err := cmd.Start()
+	after()
+	if err != nil {
 		return fmt.Errorf("starting Go API sidecar: %w", err)
 	}
 	g.mu.Lock()
@@ -614,7 +616,7 @@ func (g *goAPISupervisor) spawn() error {
 		g.mu.Unlock()
 		if current && err != nil {
 			fmt.Fprintf(os.Stderr, "  %sGo API sidecar exited unexpectedly:%s %v\n", cRed, cReset, err)
-			reportServerCrash("Go API sidecar", fmt.Sprintf("exited unexpectedly: %v", err), "")
+			reportServerCrashExit("Go API sidecar", fmt.Sprintf("exited unexpectedly: %v", err), "", exitCodeOf(err))
 		}
 	}(cmd)
 	// Wait for the host to accept connections so the first proxied request does
@@ -724,4 +726,26 @@ func (g *goAPISupervisor) watch() {
 			}()
 		}
 	}
+}
+
+// Restart stops the Go API sidecar and starts it again from the current
+// route manifest (also after it crashed and stopped routing). It fails when
+// the manifest lists no routes.
+func (g *goAPISupervisor) Restart() error {
+	routes, modTime, err := loadGoAPIManifest(g.manifestPath)
+	if err != nil {
+		return err
+	}
+	if len(routes) == 0 {
+		return errors.New("no Go API routes")
+	}
+	g.mu.Lock()
+	g.routes = routes
+	g.lastMod = modTime
+	g.mu.Unlock()
+	if err := g.spawn(); err != nil {
+		return err
+	}
+	printf("  %s*%s Go API sidecar restarted (%d routes)\n", cCyan, cReset, len(routes))
+	return nil
 }

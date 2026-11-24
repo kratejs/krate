@@ -15,6 +15,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
+	"github.com/kratejs/krate/packages/compiler/internal/version"
 )
 
 // writeBuildError serialises a build-error event (structured diagnostics) as an
@@ -122,7 +123,16 @@ func openInEditor(editor, file, line string) error {
 // build shows the diagnostics (and recovers on the next good build) instead of
 // a directory listing or a bare 404.
 func devErrorShell(hub *DevHub, root, outDir string, next http.Handler) http.Handler {
-	bootstrap := `{"sse":"/__krate/hotreload","errors":"/__krate/client-error","open":"/__krate/open","overlay":true,"toolbar":true}`
+	shell, _ := json.Marshal(map[string]any{
+		"sse":     "/__krate/hotreload",
+		"errors":  "/__krate/client-error",
+		"open":    "/__krate/open",
+		"api":     devAPIBase,
+		"version": version.Value,
+		"overlay": true,
+		"toolbar": true,
+	})
+	bootstrap := string(shell)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/__krate/dev.js" {
 			js := loadDevBundleFromDisk(root)

@@ -788,6 +788,9 @@ func runBuild(flags cliFlags, args []string) {
 			events, cancel := hub.Subscribe()
 			defer cancel()
 			for ev := range events {
+				if ev.Type != "reload" {
+					continue
+				}
 				if len(ev.Diagnostics) > 0 {
 					msgs := make([]string, 0, len(ev.Diagnostics))
 					for _, d := range ev.Diagnostics {
@@ -874,6 +877,9 @@ func runDev(flags cliFlags, args []string) {
 	}
 }
 
+// lastDevHub is the hub of the dev server the next restart replaces.
+var lastDevHub *build.DevHub
+
 // runDevOnce builds and serves the project until the process fails or a config
 // or env change asks for a restart (it then returns true).
 func runDevOnce(flags cliFlags, args []string, first bool) bool {
@@ -898,6 +904,9 @@ func runDevOnce(flags cliFlags, args []string, first bool) bool {
 	builder.Env = env
 
 	hub := build.NewDevHub()
+	// The overlay's build history survives a restart.
+	hub.CarryOver(lastDevHub)
+	lastDevHub = hub
 	builder.DevReload = func(reason string) bool {
 		fmt.Printf("  %s%s changed; reloading configuration...%s\n", cYellow, reason, cReset)
 		if _, _, err := loadConfig(flags, args); err != nil {
@@ -907,12 +916,11 @@ func runDevOnce(flags cliFlags, args []string, first bool) bool {
 		}
 		return true
 	}
-	if err := builder.BuildAll(); err != nil {
+	if err := build.RunInitialDevBuild(builder, hub); err != nil {
 		// A failed initial build must not kill the dev server: keep serving and
 		// publish the diagnostics so the browser overlay shows them (and the
 		// watcher can recover on the next save).
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
-		hub.Publish(build.DevEvent{Type: "reload", Diagnostics: build.DiagnosticsFromError(err)})
 	}
 
 	errc := make(chan error, 2)

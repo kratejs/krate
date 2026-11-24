@@ -76,12 +76,20 @@ func setDevCrashHub(hub *DevHub, root string) func() {
 // last console lines, and records it for `krate dev` state readers. It stays
 // on screen for tabs that connect later until clearServerCrash(source).
 func reportServerCrash(source, detail, stack string) {
+	reportServerCrashExit(source, detail, stack, nil)
+}
+
+// reportServerCrashExit is reportServerCrash for a process that exited with
+// code (nil when unknown).
+func reportServerCrashExit(source, detail, stack string, code *int) {
 	hub := devCrashHub.Load()
 	if hub == nil {
 		return
 	}
 	publish := func() {
-		hub.PublishServerError(source, buildCrashError(source, detail, stack, RecentLogLines(crashLogLines)))
+		ce := buildCrashError(source, detail, stack, RecentLogLines(crashLogLines))
+		ce.ExitCode = code
+		hub.PublishServerError(source, ce)
 	}
 	if crashTailDelay <= 0 {
 		publish()
@@ -144,5 +152,41 @@ func buildCrashError(source, detail, stack string, tail []string) ClientError {
 	if loc, _ := devLogLocation.Load().(string); loc != "" {
 		fmt.Fprintf(&b, "\nFull output: %s", loc)
 	}
-	return ClientError{Message: msg, Stack: strings.TrimRight(b.String(), "\n"), Kind: "server"}
+	return ClientError{
+		Message: msg,
+		Stack:   strings.TrimRight(b.String(), "\n"),
+		Kind:    "server",
+		Source:  source,
+		Detail:  detail,
+		Log:     append([]string{}, tail...),
+		Restart: crashRestartTarget(source),
+	}
+}
+
+// crashRestartTarget is the sidecar id the overlay can restart for a failed
+// source, "" when restarting it would not help.
+func crashRestartTarget(source string) string {
+	switch source {
+	case "Node API sidecar":
+		return "api"
+	case "SSR renderer":
+		return "ssr"
+	case "Go API sidecar":
+		return "go"
+	}
+	return ""
+}
+
+// exitCodeOf returns the exit code of a finished process, nil when it did
+// not exit normally (killed by a signal) or err is not an exit.
+func exitCodeOf(err error) *int {
+	code := exitStatus(err)
+	if code < 0 {
+		if err == nil {
+			code = 0
+			return &code
+		}
+		return nil
+	}
+	return &code
 }

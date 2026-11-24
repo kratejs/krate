@@ -379,4 +379,12 @@ func TestDevServerBindsLoopbackAndGuardsEndpoints(t *testing.T) {
 	check("cross origin", "/__krate/open?file=src/pages/index.tsx", map[string]string{"Origin": "https://evil.example"}, "", 403)
 	check("rebinding", "/__krate/status", nil, "evil.example:80", 403)
 	check("cross site fetch", "/__krate/status", map[string]string{"Sec-Fetch-Site": "cross-site"}, "", 403)
+	// The editor the overlay picks must be an allowlisted one: the value
+	// names a program to run.
+	check("editor not allowlisted", "/__krate/open?file=src/pages/index.tsx&editor=sh", map[string]string{"Origin": base}, "", 400)
+	check("editor with arguments", "/__krate/open?file=src/pages/index.tsx&editor=code%20--evil", map[string]string{"Origin": base}, "", 400)
+	// The overlay API is behind the same guard.
+	check("dev api", "/__krate/dev/info", map[string]string{"Origin": base}, "", 200)
+	check("dev api cross origin", "/__krate/dev/info", map[string]string{"Origin": "https://evil.example"}, "", 403)
+	check("dev api rebinding", "/__krate/dev/activity", nil, "evil.example:80", 403)
 }

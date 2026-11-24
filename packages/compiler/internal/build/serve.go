@@ -1434,6 +1434,10 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	port := cfg.ServerPort()
 	if hub != nil {
 		port = cfg.DevPort()
+		// Sidecar output is attributed to its source for the overlay's Logs
+		// panel from the first sidecar start on.
+		devLogsOn.Add(1)
+		defer devLogsOn.Add(-1)
 	}
 
 	// Bind the listener before any sidecar starts: a taken port must fail (or,
@@ -1549,6 +1553,8 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	var nodeAPICmd *exec.Cmd
 	var nodeAPIStopOnce sync.Once
 	nodeAPIStop := make(chan struct{})
+	// nodeAPIRestart marks an exit the overlay asked for (restart-sidecar).
+	var nodeAPIRestart, nodeAPIRunning atomic.Bool
 	if needNodeSidecar {
 		// An explicit node-family apiRuntime selects the sidecar command;
 		// otherwise fall back to the project's top-level runtime.
@@ -1612,8 +1618,6 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 				if instrumentationArg != "" {
 					cmd.Env = append(cmd.Env, "KRATE_INSTRUMENTATION_REPORT="+instrumentationReportPath(root))
 				}
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
 				return cmd
 			}
 
@@ -1641,7 +1645,9 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 					return
 				default:
 				}
+				afterStart := attachSidecarOutput(cmd, LogSrcAPI)
 				err := cmd.Start()
+				afterStart()
 				if err == nil {
 					nodeAPICmd = cmd
 				}
@@ -1654,7 +1660,9 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 					gen := nodeReady.begin()
 					exited := make(chan struct{})
 					go nodeReady.watch(gen, apiPort, startToken, exited)
+					nodeAPIRunning.Store(true)
 					err = cmd.Wait()
+					nodeAPIRunning.Store(false)
 					close(exited)
 					nodeReady.down()
 				}
@@ -1689,8 +1697,13 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 				if time.Since(started) > 10*time.Second {
 					delay = 100 * time.Millisecond
 				}
-				fmt.Fprintf(os.Stderr, "  %s! Node API sidecar exited (%v); restarting in %s%s\n", cYellow, err, delay, cReset)
-				reportServerCrash("Node API sidecar", fmt.Sprintf("exited (%v)", err), "")
+				if nodeAPIRestart.Swap(false) {
+					delay = 100 * time.Millisecond
+					printf("  %s*%s Node API sidecar restarting\n", cCyan, cReset)
+				} else {
+					fmt.Fprintf(os.Stderr, "  %s! Node API sidecar exited (%v); restarting in %s%s\n", cYellow, err, delay, cReset)
+					reportServerCrashExit("Node API sidecar", fmt.Sprintf("exited (%v)", err), "", exitCodeOf(err))
+				}
 				select {
 				case <-nodeAPIStop:
 					return
@@ -2225,6 +2238,16 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 					routes := ev.Routes
 
 					switch {
+					case ev.Type == "build-start":
+						data, _ := json.Marshal(struct {
+							Files []string `json:"files"`
+						}{append([]string{}, ev.Files...)})
+						fmt.Fprintf(w, "event: build-start\ndata: %s\n\n", data)
+					case ev.Type == "build-end" && ev.Build != nil:
+						data, _ := json.Marshal(struct {
+							Build *BuildRecord `json:"build"`
+						}{ev.Build})
+						fmt.Fprintf(w, "event: build-end\ndata: %s\n\n", data)
 					case ev.Type == "client-error" && ev.ClientError != nil:
 						data, _ := json.Marshal(ev)
 						fmt.Fprintf(w, "event: client-error\ndata: %s\n\n", data)
@@ -2307,12 +2330,55 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 				http.Error(w, "invalid path", http.StatusBadRequest)
 				return
 			}
-			if err := openInEditor(cfg.DevServer.Editor, rel, line); err != nil {
+			// The overlay may pick another editor, but only an allowlisted
+			// one that is installed: the value names a program to run.
+			editor := cfg.DevServer.Editor
+			if pick := r.URL.Query().Get("editor"); pick != "" {
+				if !allowedEditor(pick) {
+					http.Error(w, "unknown or unavailable editor", http.StatusBadRequest)
+					return
+				}
+				editor = pick
+			}
+			if err := openInEditor(editor, rel, line); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
 		})
+
+		// The dev overlay's API (/__krate/dev/*).
+		dapi := &devAPI{root: root, cfg: cfg, outDir: absOut, hub: hub, startedAt: startTime}
+		dapi.restartSidecar = func(target string) error {
+			switch target {
+			case sidecarSSR:
+				if !ssrOn.Load() || !ssr.Restart() {
+					return errSidecarNotRunning
+				}
+			case sidecarAPI:
+				nodeAPICmdMu.Lock()
+				nc := nodeAPICmd
+				nodeAPICmdMu.Unlock()
+				if nc == nil || nc.Process == nil || !nodeAPIRunning.Load() {
+					return errSidecarNotRunning
+				}
+				nodeAPIRestart.Store(true)
+				execx.KillTree(nc)
+			case sidecarGo:
+				if goAPI == nil {
+					return errSidecarNotRunning
+				}
+				go func() {
+					if err := goAPI.Restart(); err != nil {
+						fmt.Fprintf(os.Stderr, "  %s! Go API sidecar restart failed:%s %v\n", cYellow, cReset, err)
+					}
+				}()
+			default:
+				return errSidecarUnknown
+			}
+			return nil
+		}
+		dapi.register(guard)
 	}
 
 	// SSR/ISR/Streaming page handler - proxies dynamic pages to the Node.js renderer

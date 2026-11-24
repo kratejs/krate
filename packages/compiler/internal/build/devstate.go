@@ -139,7 +139,13 @@ func TeeDevLog(root string) func() {
 		return func() {}
 	}
 	written := 0
-	stop := teeStdio(recordRecentLine, func(line []byte) {
+	stop := teeStdioLines(func(l teeLine) {
+		recordRecentLine(l.text)
+		// Sidecar lines are recorded where they are printed, with their source.
+		if l.src == "" {
+			recordDevLog("", l.stderr, string(l.text))
+		}
+		line := l.text
 		if written > devLogMax {
 			_ = f.Truncate(0)
 			_, _ = f.Seek(0, io.SeekStart)

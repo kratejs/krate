@@ -53,18 +53,8 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 	needsInitialBuild := len(b.depGraph) == 0 && !b.buildAttempted.Load()
 	b.depMu.Unlock()
 	if needsInitialBuild {
-		if hub != nil {
-			hub.BeginBuild()
-		}
-		err := b.BuildAll()
-		if hub != nil {
-			hub.EndBuild()
-		}
-		if err != nil {
+		if err := RunInitialDevBuild(b, hub); err != nil {
 			fmt.Fprintf(b.stderr(), "  %sBuild error:%s %s\n", cRed, cReset, BuildErrorSummary(err))
-			if hub != nil {
-				hub.Publish(DevEvent{Type: "reload", Diagnostics: DiagnosticsFromError(err)})
-			}
 		}
 	}
 
@@ -189,26 +179,46 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 			restartReasons = nil
 			if b.DevReload == nil {
 				printf("  %s%s changed; restart the process to apply it.%s\n", cYellow, strings.Join(reasons, ", "), cReset)
-			} else if b.DevReload(strings.Join(reasons, ", ")) {
-				if hub != nil {
-					hub.RequestRestart()
+			} else {
+				act, restore := b.beginDevActivity(hub, reasons)
+				act.SetKind(BuildKindConfigRestart)
+				accepted := b.DevReload(strings.Join(reasons, ", "))
+				if accepted && hub != nil {
+					hub.finishActivity(act, nil, 0, true)
 				}
-				return ErrDevRestart
+				act.End()
+				restore()
+				if accepted {
+					if hub != nil {
+						hub.RequestRestart()
+					}
+					return ErrDevRestart
+				}
 			}
-		}
-		publicChanged := false
-		if len(publicOps) > 0 {
-			publicChanged = b.syncPublic(publicDir, uniqueStrings(publicOps))
-			publicOps = nil
-		}
-		if len(pending) == 0 {
-			if publicChanged && hub != nil {
-				hub.Publish(DevEvent{Type: "reload"})
-			}
-			return nil
 		}
 		changed := uniqueStrings(pending)
 		pending = nil
+		ops := uniqueStrings(publicOps)
+		publicOps = nil
+		if len(changed) == 0 && len(ops) == 0 {
+			return nil
+		}
+		act, restore := b.beginDevActivity(hub, append(append([]string(nil), changed...), ops...))
+		defer restore()
+		publicChanged := false
+		if len(ops) > 0 {
+			stop := b.devTimer.time("public")
+			publicChanged = b.syncPublic(publicDir, ops)
+			stop()
+		}
+		if len(changed) == 0 {
+			if publicChanged && hub != nil {
+				act.SetKind(BuildKindPublicOnly)
+				hub.Publish(DevEvent{Type: "reload"})
+			}
+			act.End()
+			return nil
+		}
 		func() {
 			if hub != nil {
 				hub.BeginBuild()
@@ -220,6 +230,7 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 				b.processChanges(changed, hub)
 			}
 		}()
+		act.End()
 		watchExternalDeps()
 		printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
 		return nil
@@ -229,10 +240,34 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 	if b.ctx != nil {
 		stop = b.ctx.Done()
 	}
+	// A restart asked for elsewhere (the terminal's r key, the overlay) ends
+	// the loop like a config change does, so the caller that waits for both
+	// the server and the watcher sees both return.
+	var restartCh <-chan struct{}
+	var actions <-chan DevAction
+	if hub != nil {
+		restartCh = hub.RestartRequested()
+		var unwatch func()
+		actions, unwatch = hub.watchActions()
+		defer unwatch()
+	}
 	for {
 		select {
 		case <-stop:
 			return nil
+		case <-restartCh:
+			return ErrDevRestart
+		case a := <-actions:
+			switch a.Kind {
+			case "rebuild-page":
+				pending = append(pending, a.File)
+				if err := flush(); err != nil {
+					return err
+				}
+			case "rebuild-all", "clear-cache":
+				b.rebuildAllForDev(hub, a.Kind == "clear-cache")
+				printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
+			}
 		case ev, ok := <-watcher.Events:
 			if !ok {
 				return nil
@@ -563,14 +598,18 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 
 	if structural {
 		printf("  %sFiles or directories were added, removed or renamed; rebuilding all...%s\n", cYellow, cReset)
+		b.devAct.SetKind(BuildKindFull)
 		if err := b.BuildAll(); err != nil {
 			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
 			addDiags("", err)
 		}
+		stopAPI := b.devTimer.time("api")
 		if err := b.BuildAllAPI(); err != nil {
 			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
 			addDiags("", err)
 		}
+		stopAPI()
+		b.devAct.SetPages(b.builtPageCount())
 		if hub != nil {
 			hub.Publish(DevEvent{Type: "reload", Diagnostics: diags})
 		}
@@ -595,6 +634,12 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 			}
 		}
 		printf("  %sAffected pages:%s %v\n", cBlue, cReset, routes)
+		if cssOnly {
+			b.devAct.SetKind(BuildKindCSSOnly)
+		} else {
+			b.devAct.SetKind(BuildKindPartial)
+		}
+		b.devAct.SetPages(len(pagesToBuild))
 		if _, err := b.BuildPages(pagesToBuild); err != nil {
 			fmt.Fprintf(b.stderr(), "  %sUI Compilation Error: %v%s\n", cRed, err, cReset)
 			addDiags("UI: ", err)
@@ -603,14 +648,18 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 
 	if b.needFullRebuild.Swap(false) {
 		printf("  %sA page changed between static and request-time rendering; rebuilding all...%s\n", cYellow, cReset)
+		b.devAct.SetKind(BuildKindFull)
 		if err := b.BuildAll(); err != nil {
 			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
 			addDiags("", err)
 		}
+		stopAPI := b.devTimer.time("api")
 		if err := b.BuildAllAPI(); err != nil {
 			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
 			addDiags("", err)
 		}
+		stopAPI()
+		b.devAct.SetPages(b.builtPageCount())
 		if hub != nil {
 			hub.Publish(DevEvent{Type: "reload", Diagnostics: diags})
 		}
@@ -619,30 +668,40 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 
 	if len(apiToBuild) > 0 {
 		printf("  %sCompiling changed API endpoints...%s\n", cCyan, cReset)
+		b.devAct.SetKindIfUnset(BuildKindPartial)
+		stopAPI := b.devTimer.time("api")
 		if err := b.CompileAPIRoutes(apiToBuild); err != nil {
 			fmt.Fprintf(b.stderr(), "  %sAPI Compilation Error: %v%s\n", cRed, err, cReset)
 			addDiags("API: ", err)
 		}
+		stopAPI()
 	}
 
 	if goAPIChanged {
 		printf("  %sCompiling changed Go API routes...%s\n", cCyan, cReset)
+		b.devAct.SetKindIfUnset(BuildKindPartial)
+		stopGo := b.devTimer.time("go-api")
 		if err := b.BuildAllGoAPI(); err != nil {
 			fmt.Fprintf(b.stderr(), "  %sGo API Compilation Error: %v%s\n", cRed, err, cReset)
 			addDiags("Go API: ", err)
 		}
+		stopGo()
 	}
 
 	if len(pagesToBuild) == 0 && len(apiToBuild) == 0 && !goAPIChanged {
 		printf("  %sNo dependency tracking matches; rebuilding all...%s\n", cYellow, cReset)
+		b.devAct.SetKind(BuildKindFull)
 		if err := b.BuildAll(); err != nil {
 			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
 			addDiags("", err)
 		}
+		stopAPI := b.devTimer.time("api")
 		if err := b.BuildAllAPI(); err != nil {
 			fmt.Fprintf(b.stderr(), "  %sError: %v%s\n", cRed, err, cReset)
 			addDiags("", err)
 		}
+		stopAPI()
+		b.devAct.SetPages(b.builtPageCount())
 	}
 
 	if hub != nil {

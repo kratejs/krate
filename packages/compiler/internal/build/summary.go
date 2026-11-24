@@ -188,6 +188,64 @@ func gzipLen(data []byte) int64 {
 // summaryFile caches the raw and gzipped size of a file within one run.
 type summaryFile struct{ raw, gz int64 }
 
+// resolveOutURL turns a URL path from a built page into the file under
+// outDir it names ("" for an external or relative URL). base is the site base
+// path without slashes.
+func resolveOutURL(outDir, base, ref string) string {
+	if i := strings.IndexAny(ref, "?#"); i >= 0 {
+		ref = ref[:i]
+	}
+	if !strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "//") {
+		return ""
+	}
+	ref = strings.TrimPrefix(ref, "/")
+	if base != "" {
+		ref = strings.TrimPrefix(strings.TrimPrefix(ref, base), "/")
+	}
+	clean := path.Clean("/" + ref)
+	return filepath.Join(outDir, filepath.FromSlash(strings.TrimPrefix(clean, "/")))
+}
+
+// pageLoad is what a built page loads: the scripts its HTML names, every
+// script it loads (those and the chunks they import), and its stylesheets,
+// as URLs from the page.
+type pageLoad struct {
+	OwnScripts []string
+	Scripts    []string
+	Styles     []string
+	ThirdParty bool
+}
+
+// pageLoadOf lists what the built page html loads from outDir.
+func pageLoadOf(outDir, base, html string) pageLoad {
+	scripts, styles := pageAssets(html)
+	all := transitiveScripts(scripts, pageImportMap(html), func(url string) (string, bool) {
+		abs := resolveOutURL(outDir, base, url)
+		if abs == "" {
+			return "", false
+		}
+		data, err := os.ReadFile(abs)
+		return string(data), err == nil
+	})
+	return pageLoad{OwnScripts: scripts, Scripts: all, Styles: styles, ThirdParty: strings.Contains(html, cspCDNOrigin+"/")}
+}
+
+// fileMeasurer measures files once each: raw and gzipped size.
+type fileMeasurer map[string]summaryFile
+
+func (m fileMeasurer) measure(abs string) (summaryFile, bool) {
+	if f, ok := m[abs]; ok {
+		return f, true
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return summaryFile{}, false
+	}
+	f := summaryFile{raw: int64(len(data)), gz: gzipLen(data)}
+	m[abs] = f
+	return f, true
+}
+
 // Summarize measures the built pages. Call it after BuildAll. SSR and ISR
 // pages that have no emitted document are listed with zero size.
 func (b *Builder) Summarize() (*BuildSummary, error) {
@@ -197,34 +255,7 @@ func (b *Builder) Summarize() (*BuildSummary, error) {
 	}
 	outDir := b.Cfg.OutDir
 	base := strings.Trim(b.Cfg.BaseURLPath(), "/")
-	cache := map[string]summaryFile{}
-	measure := func(abs string) (summaryFile, bool) {
-		if f, ok := cache[abs]; ok {
-			return f, true
-		}
-		data, err := os.ReadFile(abs)
-		if err != nil {
-			return summaryFile{}, false
-		}
-		f := summaryFile{raw: int64(len(data)), gz: gzipLen(data)}
-		cache[abs] = f
-		return f, true
-	}
-	// resolve turns a URL path from the HTML into a file under the output.
-	resolve := func(ref string) string {
-		if i := strings.IndexAny(ref, "?#"); i >= 0 {
-			ref = ref[:i]
-		}
-		if !strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "//") {
-			return ""
-		}
-		ref = strings.TrimPrefix(ref, "/")
-		if base != "" {
-			ref = strings.TrimPrefix(strings.TrimPrefix(ref, base), "/")
-		}
-		clean := path.Clean("/" + ref)
-		return filepath.Join(outDir, filepath.FromSlash(strings.TrimPrefix(clean, "/")))
-	}
+	cache := fileMeasurer{}
 
 	s := &BuildSummary{Time: time.Now().UTC()}
 	unique := map[string]bool{}
@@ -232,14 +263,7 @@ func (b *Builder) Summarize() (*BuildSummary, error) {
 		if !r.Built {
 			continue
 		}
-		name := strings.Trim(r.Route, "/")
-		var doc string
-		for _, cand := range []string{filepath.Join(outDir, filepath.FromSlash(name), "index.html"), filepath.Join(outDir, filepath.FromSlash(name)+".html")} {
-			if _, err := os.Stat(cand); err == nil {
-				doc = cand
-				break
-			}
-		}
+		doc := builtDocPath(outDir, r.Route)
 		rs := RouteSize{Route: r.Route, Mode: r.Mode}
 		if doc != "" {
 			htmlBytes, err := os.ReadFile(doc)
@@ -248,33 +272,24 @@ func (b *Builder) Summarize() (*BuildSummary, error) {
 			}
 			rs.HTML, rs.GzipHTML = int64(len(htmlBytes)), gzipLen(htmlBytes)
 			unique[doc] = true
-			page := string(htmlBytes)
-			scripts, styles := pageAssets(page)
-			rs.ThirdParty = strings.Contains(page, cspCDNOrigin+"/")
+			load := pageLoadOf(outDir, base, string(htmlBytes))
+			rs.ThirdParty = load.ThirdParty
 			add := func(refs []string, raw, gz *int64) {
 				for _, ref := range refs {
-					abs := resolve(ref)
+					abs := resolveOutURL(outDir, base, ref)
 					if abs == "" {
 						continue
 					}
-					if f, ok := measure(abs); ok {
+					if f, ok := cache.measure(abs); ok {
 						*raw += f.raw
 						*gz += f.gz
 						unique[abs] = true
 					}
 				}
 			}
-			add(scripts, &rs.OwnJS, &rs.GzipOwnJS)
-			all := transitiveScripts(scripts, pageImportMap(page), func(url string) (string, bool) {
-				abs := resolve(url)
-				if abs == "" {
-					return "", false
-				}
-				data, err := os.ReadFile(abs)
-				return string(data), err == nil
-			})
-			add(all, &rs.JS, &rs.GzipJS)
-			add(styles, &rs.CSS, &rs.GzipCSS)
+			add(load.OwnScripts, &rs.OwnJS, &rs.GzipOwnJS)
+			add(load.Scripts, &rs.JS, &rs.GzipJS)
+			add(load.Styles, &rs.CSS, &rs.GzipCSS)
 		}
 		s.Routes = append(s.Routes, rs)
 	}
@@ -287,6 +302,18 @@ func (b *Builder) Summarize() (*BuildSummary, error) {
 	}
 	sort.SliceStable(s.Routes, func(i, j int) bool { return s.Routes[i].Route < s.Routes[j].Route })
 	return s, nil
+}
+
+// builtDocPath is the built HTML document of a route ("/blog/hello"), ""
+// when there is none.
+func builtDocPath(outDir, route string) string {
+	name := strings.Trim(route, "/")
+	for _, cand := range []string{filepath.Join(outDir, filepath.FromSlash(name), "index.html"), filepath.Join(outDir, filepath.FromSlash(name)+".html")} {
+		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+			return cand
+		}
+	}
+	return ""
 }
 
 // SummaryPath is where the last build's summary is kept for the next diff.

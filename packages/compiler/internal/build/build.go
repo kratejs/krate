@@ -47,6 +47,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
+	"github.com/kratejs/krate/packages/compiler/internal/version"
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
@@ -355,6 +356,11 @@ type Builder struct {
 	// Safe for concurrent use from parallel page goroutines.
 	Prof *Profiler
 
+	// devAct and devTimer record the dev build in progress for the overlay's
+	// activity panel (see devactivity.go). Owned by the watch loop.
+	devAct   *BuildActivity
+	devTimer *devBuildTimer
+
 	// moduleCache shares parsed modules across every Bundler in the build so
 	// shared theme/component/runtime modules are parsed once, not once per page.
 	moduleCache *bundler.ModuleCache
@@ -513,16 +519,29 @@ func (b *Builder) runtimeCommonHead() string {
 }
 
 // devBootstrapJSON is the config the dev overlay bundle reads from
-// window.__KRATE_DEV__ (endpoints + feature toggles).
-func (b *Builder) devBootstrapJSON() string {
+// window.__KRATE_DEV__ (endpoints + feature toggles). r, when given, is the
+// page the document belongs to: its route pattern, source file and render
+// mode.
+func (b *Builder) devBootstrapJSON(r *PageResult) string {
 	cfg := map[string]interface{}{
 		"sse":     "/__krate/hotreload",
 		"errors":  "/__krate/client-error",
 		"open":    "/__krate/open",
+		"api":     devAPIBase,
+		"version": version.Value,
 		"overlay": b.Cfg.DevServer.OverlayEnabled(),
 		"toolbar": b.Cfg.DevServer.ToolbarEnabled(),
 	}
+	if r != nil {
+		cfg["page"] = map[string]string{
+			"route":  b.devPageRoute(r),
+			"source": filepath.ToSlash(r.SourcePath),
+			"mode":   r.Mode.String(),
+		}
+	}
 	if b.NativeTarget {
+		// The native host does not serve the dev API.
+		delete(cfg, "api")
 		// The native shell serves HMR as a frame stream on the app origin.
 		cfg["frames"] = "/__krate/hmr"
 		cfg["events"] = "/__krate/dev/events"
@@ -2264,7 +2283,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			}
 			devBootstrap := ""
 			if b.DevMode {
-				devBootstrap = b.devBootstrapJSON()
+				devBootstrap = b.devBootstrapJSON(r)
 			}
 			runtimeHead := b.runtimeCommonHead()
 			if im := b.islandImportMapHTML(); im != "" {
