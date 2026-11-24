@@ -325,8 +325,8 @@ devServer: {
   port: 3000,
   host: "127.0.0.1", // bind address (default loopback; "0.0.0.0" exposes the dev server on the network)
   open: true,
-  overlay: true,   // show the dev error overlay (default true)
-  toolbar: true,   // show the dev toolbar (default true)
+  overlay: true,   // open the error overlay on build, runtime and server errors (default true)
+  toolbar: true,   // show the dev dock and its panel (default true)
   editor: "code",  // editor command for "open in editor" (default "code" = VS Code)
   proxy: { "/api": "http://localhost:8080" }, // forward matching paths during dev
 }
@@ -349,7 +349,15 @@ command line is not negotiable.
 line-number syntax for each (`-g file:line` for VS Code family editors,
 `--line N file` for JetBrains IDEs, `file:line` for Sublime and Zed, `+N file`
 for vim); an unknown editor is opened with the plain file path. It is used by the
-overlay's location links and by `GET /__krate/open`. `proxy` forwards matching
+overlay's **Open in editor** buttons, the component inspector and
+`GET /__krate/open`. The overlay's Settings tab can pick another GUI editor found
+on your `PATH` for that browser (VS Code, Cursor, Windsurf, VSCodium, Zed,
+Sublime Text, the JetBrains IDEs, ...); `editor` stays the default.
+
+With `overlay: false` errors do not open the overlay; the dock still counts them
+and opens it on click. `toolbar: false` removes the dock, its panel, the command
+menu and the component inspector; the overlay still opens on errors unless
+`overlay` is off too. See [the dev overlay](/docs/guides/error-handling/#the-dev-overlay). `proxy` forwards matching
 path prefixes to a backend only in dev (longest prefix wins), so you can run a
 separate backend without CORS. In development, the JavaScript generated for each
 page is unminified (with component comments) so devtools are readable; the shared

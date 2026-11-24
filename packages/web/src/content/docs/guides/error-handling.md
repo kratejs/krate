@@ -52,26 +52,103 @@ Request-time pages are rendered by the Node SSR sidecar. If a page throws:
 `notFound()` thrown while rendering answers `404` with the nearest not-found
 page the same way.
 
-## The dev overlay and toolbar
+## The dev overlay
 
 `krate dev` injects a dev-only overlay bundle (`chunks/krate-dev.js`). It is
-never included in production HTML. It shows:
+never included in production HTML, and it lives in its own shadow root so page
+styles do not reach it.
 
-- **Build/compile errors** as structured diagnostics - `file:line:col`, the
-  source line with a caret, and the hint - streamed over Server-Sent Events.
-- **Runtime errors** (uncaught exceptions, unhandled rejections, hydration
-  failures), forwarded to the dev server and logged to the terminal as
-  `[browser] ...` so multi-tab sessions stay in sync.
+### The dock
 
-Each diagnostic has an **Open in editor** button (and a clickable location
-link); configure the command with `devServer.editor`. Press `Esc` to dismiss;
-the overlay clears on the next successful build. A small toolbar (bottom of the
-page) shows build status, the current route (updated on client-side navigation),
-and a reload button. Toggle either with `devServer.overlay` /
-`devServer.toolbar`.
+A small dock sits in a corner of the page (bottom left by default). It shows
+the route pattern of the page (`/blog/[slug]`), how it renders (`SSG`, `SSR`,
+`ISR`, `STREAMING`) and how long the last rebuild took. While the watcher
+builds, it says what it is rebuilding; with errors it shows their count, and
+when the dev server goes away it says it is reconnecting. A stylesheet-only
+edit swaps the CSS in place and a short toast confirms it. Drag the dock to
+another corner, or click the Krate mark to collapse it (a red dot then means
+there are issues).
+
+Click the route to open the panel:
+
+- **Route**: the page's source file, params, render mode, layouts, what it
+  ships (HTML, gzipped JS against `checks.budget.js`, CSS, hydration time), its
+  islands with their signals and hydration time, a head check (title,
+  description, `og:image`, canonical, `<html lang>`), and actions: open the
+  page source, view the built HTML, rebuild the page, copy the URL.
+- **Inspect**: the component inspector (below).
+- **Activity**: every rebuild with the changed files, what it rebuilt, its
+  duration and a breakdown of where the time went.
+- **Logs**: the dev server's output (renderer, API and Go sidecars) merged with
+  this tab's `console.error`/`console.warn` and runtime errors, with source
+  filters, a text filter and an errors-only switch. It is fetched only while
+  the tab is open.
+- **Settings**: dock corner, theme (System, Dark, Light), the editor used by
+  **Open in editor** (from the editors found on your `PATH`), whether runtime
+  errors open the overlay, whether `console.error` counts as an issue, and
+  whether the dock starts collapsed. Settings are stored in the browser.
+
+In Krate Native, the panel also has the **Host** and **Memory** tabs (see
+[Native dev](/docs/native/dev/#host-inspector)).
+
+### Errors
+
+The error overlay pages through the current issues (a rail on the left, the
+arrow keys or the pager):
+
+- **Build errors** show the diagnostic code with a link to its
+  [reference entry](/docs/reference/diagnostics/), the message, a code frame with
+  line numbers and the column underlined, and the hint. When `krate fix` knows
+  the rewrite, a **Safe fix** box previews the change; **Apply fix** (`F`)
+  applies it to that file and **Fix all** applies every safe fix, exactly as
+  [`krate fix --apply`](/docs/guides/safe-fixes/) does. The overlay closes when
+  the next build passes.
+- **Runtime errors** (uncaught exceptions, unhandled rejections, failed
+  resources, and `console.error` unless turned off) show the source frame, the
+  stack split into your frames and folded framework frames, and the component
+  that was rendering when it is known. They are forwarded to the dev server and
+  logged to the terminal as `[browser] ...`. **Ignore this error for the
+  session** hides one that you expect.
+- **Server crashes** (the SSR renderer, the Node or Go API sidecar, the
+  middleware) show what failed, its exit code, the last console lines with
+  their source, and a **Restart sidecar** button.
+
+Every issue has **Open in editor** (`O`) and **Copy for AI**, which copies a
+Markdown summary (message, code, location, code frame, hint and stack) to paste
+into an assistant or a bug report. `Esc` dismisses the overlay; the dock count
+reopens it.
 
 If the **initial** build fails, the dev server still starts and the overlay
 shows the error - fix the file and save to recover.
+
+### Component inspector
+
+Press `Alt+I` (Option+I on macOS) to outline every component on the page,
+colored by [tier](/docs/core-concepts/component-tiers/): static, server, client,
+runtime, and Preact or React islands. Hover one for its source file, live signal
+values, shipped size and hydration time; click to open it in the editor,
+Shift-click to copy its path, `Esc` to stop.
+
+### Command menu and shortcuts
+
+`Alt+K` opens the command menu: jump to any route (dynamic routes list their
+prebuilt paths), or run a dev action (toggle the inspector, rebuild the page,
+rebuild everything, restart the dev server, clear the `.krate` cache and
+rebuild). `Enter` runs the selected item; `Ctrl+Enter` (Cmd+Enter on macOS)
+opens its source file.
+
+| Shortcut | Action |
+|----------|--------|
+| `Alt+K` | Command menu |
+| `Alt+I` | Component inspector |
+| `Alt+E` | Show issues |
+| `Alt+.` | Hide everything (again to show) |
+
+The shortcuts match the physical key, so they work on every keyboard layout,
+and they do nothing while you type in the page's inputs.
+
+`devServer.overlay: false` keeps errors from opening the overlay (the dock still
+counts them) and `devServer.toolbar: false` removes the dock and its panel.
 
 ## Client-side errors
 

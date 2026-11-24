@@ -186,15 +186,20 @@ krate dev --port 4000           # fails with an error if 4000 is busy
 - Uses SSE hot reload to push updates to open tabs after a short (75 ms)
   debounce; stylesheet-only edits swap the CSS without reloading the page.
 - When the SSR renderer, a Node or Go API sidecar or the middleware fails, the
-  overlay shows what failed with its stack (for middleware) and the last 40
-  console lines, and names the file with the full output: `.krate/dev.log`, or
+  overlay shows what failed with its stack (for middleware), its exit code and
+  the last 40 console lines, with a button that restarts the sidecar, and names the file with the full output: `.krate/dev.log`, or
   the run log when [`logs`](/docs/reference/config/#logs) is enabled. A sidecar
   that is still down is shown again after a page reload, and the entry goes away
   once it restarts. The same entries are listed as `kind: "server"` errors in
   `/__krate/state`.
 - Shows compilation errors inline via the dev error overlay. If the first build
   fails, the browser shows an error page with the overlay and recovers on the
-  next successful build.
+  next successful build. Safe fixes can be applied from the overlay.
+- Adds a dev dock to every page with the route, its render mode and the last
+  rebuild, a panel (route details, component inspector, build activity, logs,
+  settings) and a command menu (`Alt+K`) for routes and dev actions such as
+  rebuilding a page, restarting the dev server or clearing the cache. See
+  [the dev overlay](/docs/guides/error-handling/#the-dev-overlay).
 - Writes `.krate/dev-server.json` (URL and pid, removed on exit) and mirrors the
   console output, one timestamped line per line, to `.krate/dev.log`. The
   [MCP server](/docs/features/mcp/) uses them, and the loopback-only
