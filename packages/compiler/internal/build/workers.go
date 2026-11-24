@@ -53,3 +53,16 @@ func reportMemory(w io.Writer) {
 	fmt.Fprintf(w, "    memory budget %s (%s); memory pressure held jobs back %d times\n",
 		membudget.Format(b.Bytes), b.Source, membudget.Throttled())
 }
+
+// devPageWorkers is how many pages a dev rebuild builds at once. A page
+// spends much of its time waiting (for another page's parse of a module they
+// share, for the layout it renders in), so the usual one worker per core left
+// cores idle and made the pages of a large rebuild run in waves. The limit is
+// twice the cores at most, and never more than there are pages.
+func devPageWorkers(pages int) int {
+	n := buildWorkerLimit()
+	if pages > n {
+		n = min(pages, 2*n)
+	}
+	return n
+}

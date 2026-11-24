@@ -425,6 +425,9 @@ type Builder struct {
 	// combined server render build of a dev session (see devmemo.go).
 	islandMemo *buildMemo
 	ssrMemo    *buildMemo
+	// early holds the server bundles a dev rebuild compiles while its pages
+	// are still building (see devearly.go).
+	early *earlyServerBundles
 
 	// actions holds the discovered `"use server"` modules and their compiled
 	// bundles for this build. It is refreshed by prepareActions before pages.
@@ -894,9 +897,11 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	dl.Lap("1-prepare")
 	resultsCh := make(chan pageBuildResult, len(pages)+len(concrete))
 	var wg sync.WaitGroup
-	pool := newWorkerPool(buildWorkerLimit())
+	pool := newWorkerPool(devPageWorkers(len(pages) + len(concrete)))
 	rounds := newBuildRounds(len(pages)+len(concrete), pool)
 	b.rounds = rounds
+	b.prefetchLayoutCuts(pages, pool)
+	b.beginEarlyBundles()
 
 	for _, page := range pages {
 		wg.Add(1)
@@ -907,6 +912,9 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			defer pool.release()
 			printf("  %s>%s %s\n", cCyan, cReset, p)
 			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
+			if err == nil {
+				b.compileEarly(result)
+			}
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
 		}(page)
 	}
@@ -1471,7 +1479,7 @@ func (b *Builder) BuildAll() error {
 			impls.buildAll(impls.boundaries)
 		}()
 		defer b.phase("parallel:server-bundles")()
-		serverBundles, serverBundleErrs = compileServerBundlesWith(impls, results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, actionMods, basePath)
+		serverBundles, serverBundleErrs = compileServerBundlesWith(impls, results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, actionMods, basePath, nil)
 	})
 	wl := b.Prof.Laps("write:")
 	// Write shared runtime chunk only if at least one page needs client JS.
