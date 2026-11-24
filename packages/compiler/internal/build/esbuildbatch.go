@@ -57,6 +57,10 @@ type batchOutput struct {
 	// entry's own outputs, and OwnMetafile holds their "outputs".
 	Own         int
 	OwnMetafile string
+	// Inputs lists every file the entry loaded (its own import graph, not the
+	// batch's), including the ones tree shaking left out of its output, as
+	// absolute paths. The entry's Metafile has no "inputs" to read them from.
+	Inputs []string
 }
 
 // batchEntryPlugin serves the batch's entry modules from memory.
@@ -211,6 +215,11 @@ func runEsbuildBatch(opts api.BuildOptions, entries []batchEntry, split bool) ([
 	}, res, wantMeta, split)
 	for i := range wrappedByOthers(res.Metafile, keys, split) {
 		outs[i].Unsafe = true
+	}
+	if wantMeta {
+		for i, in := range batchEntryInputs(cwd, res.Metafile, keys) {
+			outs[i].Inputs = in
+		}
 	}
 	// A separate build lists its Stdin module as an input at the Stdin path.
 	for i := range outs {
@@ -409,6 +418,51 @@ func splitBatchOutputs(cwd string, n int, entryOf func(string) (int, bool), res 
 		}
 	}
 	return outs
+}
+
+// batchEntryInputs lists, for each entry, the files in its import graph: what
+// its own build would have loaded. A batch's metafile holds one graph for all
+// its entries, so a stamp taken from it would follow every entry's files, and a
+// per-entry metafile has no inputs at all. Entries are keyed as in
+// runEsbuildBatch; paths come back absolute and sorted, without the entries'
+// stand-in modules (which are not files).
+func batchEntryInputs(cwd, metafile string, entries map[string]int) map[int][]string {
+	var meta struct {
+		Inputs map[string]struct {
+			Imports []struct {
+				Path     string `json:"path"`
+				External bool   `json:"external"`
+			} `json:"imports"`
+		} `json:"inputs"`
+	}
+	if json.Unmarshal([]byte(metafile), &meta) != nil {
+		return nil
+	}
+	out := make(map[int][]string, len(entries))
+	for ep, i := range entries {
+		seen := map[string]bool{ep: true}
+		queue := []string{ep}
+		var files []string
+		for len(queue) > 0 {
+			in := queue[0]
+			queue = queue[1:]
+			if in != ep {
+				if p, ok := metafileInputPath(cwd, in); ok {
+					files = append(files, p)
+				}
+			}
+			for _, imp := range meta.Inputs[in].Imports {
+				if imp.External || seen[imp.Path] {
+					continue
+				}
+				seen[imp.Path] = true
+				queue = append(queue, imp.Path)
+			}
+		}
+		sort.Strings(files)
+		out[i] = files
+	}
+	return out
 }
 
 // wrappedByOthers returns the entries a batch may print differently from

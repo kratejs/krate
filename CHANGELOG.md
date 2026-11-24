@@ -634,6 +634,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate dev`: after the first edit, a change to a client component reached the server HTML but not its
+  island chunk, which kept the old code under the same name, so the page hydrated old code over new markup
+  with nothing in the console or the overlay (0.5.0-rc.14). The client boundary check builds are run in
+  batches, and a batched build's metafile has no inputs, so each kept check recorded no file stamps and
+  was reused for good; nothing then registered the island again and its chunk was not written. Each check
+  now records the files in its own import graph, and a kept check with no recorded file is never reused. The
+  stylesheets islands import through Krate's own plugin are stamped too.
 - `krate build` run while `krate dev` is running in the same app no longer breaks the dev server. Dev wrote
   and served `dist/`, so the build replaced the vendor and island chunks the dev pages' import map named and
   every island failed with "Failed to fetch dynamically imported module", with nothing in the overlay or the

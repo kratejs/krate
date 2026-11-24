@@ -1051,7 +1051,9 @@ func clientChunkSig(r clientChunkReq) string {
 // clientChunkReusable reports whether a chunk kept from an earlier dev
 // rebuild is still what building r now would give.
 func (b *Builder) clientChunkReusable(info clientChunkInfo, r clientChunkReq) bool {
-	if !b.DevMode || info.stamps == nil || info.sig != clientChunkSig(r) {
+	// A chunk always reads its own module, so a stamp set without files means
+	// the inputs were not recorded: nothing shows the chunk is still current.
+	if !b.DevMode || len(info.stamps) == 0 || info.sig != clientChunkSig(r) {
 		return false
 	}
 	return info.stamps.fresh() && info.config.fresh()
@@ -1289,7 +1291,7 @@ func (b *Builder) runClientChunkBatchWith(jobs []*roundJob, split bool) {
 					j.output = b.recordSplitClientChunk(r, entries[i].Source, outs[i])
 					continue
 				}
-				j.output = b.recordClientChunk(r, entries[i].Source, batchJS(files), outs[i].Metafile)
+				j.output = b.recordClientChunk(r, entries[i].Source, batchJS(files), outs[i].Metafile, outs[i].Inputs)
 			}
 			if len(unsplit) > 0 {
 				b.Prof.Add("batch:client-chunks-unsplit", 0)
@@ -1343,7 +1345,7 @@ func (b *Builder) buildClientChunk(r clientChunkReq) *clientChunkResult {
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
 		return &clientChunkResult{err: clientBuildError(b.Root, r.key, result.Errors)}
 	}
-	return b.recordClientChunk(r, src, result.OutputFiles[0].Contents, result.Metafile)
+	return b.recordClientChunk(r, src, result.OutputFiles[0].Contents, result.Metafile, nil)
 }
 
 // recordSplitClientChunk registers a chunk checked in a code-split batch,
@@ -1353,7 +1355,7 @@ func (b *Builder) recordSplitClientChunk(r clientChunkReq, src string, o batchOu
 	out := batchJS(o.Files)
 	f := &splitChunkFacts{req: r, ownInputs: metafileInputs(b.Root, o.OwnMetafile), ownText: string(own)}
 	f.statefulSure = !statefulHookRe.Match(out) || statefulHookRe.Match(own)
-	return b.recordClientChunkFacts(r, src, out, o.Metafile, f)
+	return b.recordClientChunkFacts(r, src, out, o.Metafile, o.Inputs, f)
 }
 
 // exactChunk returns info and the chunk text as a separate build gives them.
@@ -1395,7 +1397,7 @@ func (b *Builder) checkClientChunkAlone(r clientChunkReq) *clientChunkResult {
 	if len(res.Errors) > 0 || len(outs[0].Files) == 0 || len(guard.errors(outs[0].Files)) > 0 {
 		return b.buildClientChunk(r)
 	}
-	return b.recordClientChunk(r, src, batchJS(outs[0].Files), outs[0].Metafile)
+	return b.recordClientChunk(r, src, batchJS(outs[0].Files), outs[0].Metafile, outs[0].Inputs)
 }
 
 // chunkStateful is info.stateful as a separate build gives it.
@@ -1408,11 +1410,13 @@ func (b *Builder) chunkStateful(info clientChunkInfo) (bool, error) {
 }
 
 // recordClientChunk registers a checked client chunk with the build.
-func (b *Builder) recordClientChunk(r clientChunkReq, src string, out []byte, metafile string) *clientChunkResult {
-	return b.recordClientChunkFacts(r, src, out, metafile, nil)
+// inputs lists the files the check build loaded when its metafile cannot (a
+// batched build's has outputs only); nil reads them from the metafile.
+func (b *Builder) recordClientChunk(r clientChunkReq, src string, out []byte, metafile string, inputs []string) *clientChunkResult {
+	return b.recordClientChunkFacts(r, src, out, metafile, inputs, nil)
 }
 
-func (b *Builder) recordClientChunkFacts(r clientChunkReq, src string, out []byte, metafile string, split *splitChunkFacts) *clientChunkResult {
+func (b *Builder) recordClientChunkFacts(r clientChunkReq, src string, out []byte, metafile string, inputs []string, split *splitChunkFacts) *clientChunkResult {
 	// This build checks the module and tells whether it holds state. The
 	// chunk the page loads is built with the island entries (writeIslandBundles),
 	// so a library used by a boundary, an island and a layout is one module in
@@ -1422,7 +1426,10 @@ func (b *Builder) recordClientChunkFacts(r clientChunkReq, src string, out []byt
 	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out), inputs: metafileInputs(b.Root, metafile), split: split}
 	if b.DevMode {
 		info.sig = clientChunkSig(r)
-		info.stamps = b.stampInputs(metafileAllInputs(b.Root, metafile))
+		if inputs == nil {
+			inputs = metafileAllInputs(b.Root, metafile)
+		}
+		info.stamps = b.stampInputs(inputs)
 		info.config = b.projectConfigStamp()
 	}
 	b.clientChunkMu.Lock()
