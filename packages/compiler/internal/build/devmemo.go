@@ -91,6 +91,10 @@ func metafileAllInputs(root, metafile string) []string {
 // and is left out when the namespace names something generated.
 func metafileInputPath(root, in string) (string, bool) {
 	if ns, rest, ok := strings.Cut(in, ":"); ok {
+		// A one-letter prefix is a Windows drive, not a namespace.
+		if len(ns) == 1 && filepath.IsAbs(filepath.FromSlash(in)) {
+			return filepath.Clean(filepath.FromSlash(in)), true
+		}
 		if len(ns) > 1 && filepath.IsAbs(filepath.FromSlash(rest)) {
 			return filepath.Clean(filepath.FromSlash(rest)), true
 		}

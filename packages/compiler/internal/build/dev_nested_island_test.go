@@ -3,6 +3,7 @@ package build
 import (
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -214,16 +215,17 @@ export function TooltipProvider({ children }: any) { return <div>{children}</div
 // A batched build's metafile lists outputs only, so the files an entry loaded
 // come from the batch's import graph, entry by entry.
 func TestBatchEntryInputsFollowEachEntrysImports(t *testing.T) {
-	cwd := filepath.Join(string(filepath.Separator), "proj")
-	meta := `{"inputs":{
+	cwd := t.TempDir()
+	css := "krate-island-css:" + filepath.ToSlash(filepath.Join(cwd, "src", "x.css"))
+	meta := strings.ReplaceAll(`{"inputs":{
 	  ".krate-batch-0/a.js":{"bytes":1,"imports":[{"path":"src/a.tsx","kind":"import-statement"},{"path":"react","kind":"import-statement","external":true}]},
 	  ".krate-batch-1/b.js":{"bytes":1,"imports":[{"path":"src/b.tsx","kind":"import-statement"}]},
 	  "src/a.tsx":{"bytes":1,"imports":[{"path":"src/shared.ts","kind":"import-statement"},{"path":"src/dyn.ts","kind":"dynamic-import"}]},
 	  "src/b.tsx":{"bytes":1,"imports":[{"path":"src/shared.ts","kind":"import-statement"}]},
-	  "src/shared.ts":{"bytes":1,"imports":[{"path":"krate-island-css:/proj/src/x.css","kind":"import-statement"}]},
+	  "src/shared.ts":{"bytes":1,"imports":[{"path":"CSS","kind":"import-statement"}]},
 	  "src/dyn.ts":{"bytes":1,"imports":[]},
-	  "krate-island-css:/proj/src/x.css":{"bytes":1,"imports":[]}
-	}}`
+	  "CSS":{"bytes":1,"imports":[]}
+	}}`, `"CSS"`, `"`+css+`"`)
 	got := batchEntryInputs(cwd, meta, map[string]int{".krate-batch-0/a.js": 0, ".krate-batch-1/b.js": 1})
 	p := func(rel string) string { return filepath.Join(cwd, filepath.FromSlash(rel)) }
 	want := map[int][]string{
@@ -244,5 +246,16 @@ func TestClientChunkWithoutStampsIsNotReusable(t *testing.T) {
 	info := clientChunkInfo{sig: clientChunkSig(r), stamps: stampSet{}}
 	if b.clientChunkReusable(info, r) {
 		t.Fatal("a chunk with no stamped file was reused")
+	}
+}
+
+// A Windows input outside the project is a drive path, not a namespace.
+func TestMetafileInputPathTakesADriveForAPath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("drive letters are a Windows path form")
+	}
+	got, ok := metafileInputPath(`C:\proj`, "D:/shared/x.css")
+	if !ok || got != `D:\shared\x.css` {
+		t.Fatalf("got %q %v, want D:\\shared\\x.css", got, ok)
 	}
 }
