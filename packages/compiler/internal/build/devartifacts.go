@@ -132,7 +132,8 @@ func (b *Builder) rebuildClientSSRModules(ssrPages []*PageResult) map[string]str
 	}
 	sort.SliceStable(all, func(i, j int) bool { return own[all[i].SourcePath] && !own[all[j].SourcePath] })
 	impls.boundaries = all
-	sig := b.ssrBuildSig(impls.boundaries)
+	global, parts := b.ssrGlobalSig(), ssrBoundarySigs(impls.boundaries)
+	sig := b.ssrBuildSig(global, parts)
 	if b.ssrMemo.valid(sig) {
 		// Nothing the render modules read changed: the files of the last
 		// build are the ones this build would write.
@@ -144,30 +145,52 @@ func (b *Builder) rebuildClientSSRModules(ssrPages []*PageResult) map[string]str
 		b.ssrMemo = nil
 		impls.buildAll(impls.boundaries)
 		if impls.combinedInputs != nil {
-			b.ssrMemo = &buildMemo{sig: sig, stamps: b.stampInputs(impls.combinedInputs), config: b.projectConfigStamp()}
+			b.ssrMemo = &buildMemo{sig: sig, stamps: b.stampInputs(impls.combinedInputs), config: b.projectConfigStamp(), global: global, parts: parts}
 		}
 	}
 	stopCombined()
 	defer b.phase("ssr:page-bundles")()
-	bundles, _ := compileServerBundlesWith(impls, ssrPages, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+	bundles, _ := compileServerBundlesWith(impls, ssrPages, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath(), b.earlyBundles())
 	return bundles
+}
+
+// ssrGlobalSig is what every server render module depends on besides files:
+// the action modules they import and the base path.
+func (b *Builder) ssrGlobalSig() string {
+	return fmt.Sprintf("%v|%s", b.actionModules(), b.Cfg.BaseURLPath())
+}
+
+// ssrBoundarySig is what one boundary's server render module depends on
+// besides files.
+func ssrBoundarySig(cb ClientBoundary) string {
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%v", cb.ModuleID, cb.SourcePath, cb.Spec, cb.entrySource(), cb.resolveDir(), cb.Real)
+}
+
+// ssrBoundarySigs signs the boundaries by module. The order they are in only
+// says which page's boundaries come first.
+func ssrBoundarySigs(boundaries []ClientBoundary) map[string]string {
+	parts := make(map[string]string, len(boundaries))
+	for _, cb := range boundaries {
+		key := cb.SourcePath + "\x00" + cb.Spec
+		if _, ok := parts[key]; !ok {
+			parts[key] = ssrBoundarySig(cb)
+		}
+	}
+	return parts
 }
 
 // ssrBuildSig is what the combined server render build depends on besides
 // files: the boundaries it builds and the action modules it imports.
-func (b *Builder) ssrBuildSig(boundaries []ClientBoundary) string {
+func (b *Builder) ssrBuildSig(global string, parts map[string]string) string {
+	keys := make([]string, 0, len(parts))
+	for k := range parts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	h := sha256.New()
-	fmt.Fprintf(h, "%v|%s", b.actionModules(), b.Cfg.BaseURLPath())
-	// The order only says which page's boundaries come first.
-	boundaries = append([]ClientBoundary(nil), boundaries...)
-	sort.SliceStable(boundaries, func(i, j int) bool {
-		if boundaries[i].SourcePath != boundaries[j].SourcePath {
-			return boundaries[i].SourcePath < boundaries[j].SourcePath
-		}
-		return boundaries[i].Spec+boundaries[i].Entry < boundaries[j].Spec+boundaries[j].Entry
-	})
-	for _, cb := range boundaries {
-		fmt.Fprintf(h, "\x00%s\x00%s\x00%s\x00%s\x00%s\x00%v", cb.ModuleID, cb.SourcePath, cb.Spec, cb.entrySource(), cb.resolveDir(), cb.Real)
+	h.Write([]byte(global))
+	for _, k := range keys {
+		fmt.Fprintf(h, "\x00%s\x00%s", k, parts[k])
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

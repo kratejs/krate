@@ -105,6 +105,10 @@ type buildMemo struct {
 	sig    string
 	stamps stampSet
 	config stampSet
+	// global and parts are what sig is made of, for builds that are kept by
+	// part: the signature of what every part shares, and of each part by name.
+	global string
+	parts  map[string]string
 }
 
 func (m *buildMemo) valid(sig string) bool {

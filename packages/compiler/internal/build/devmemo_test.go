@@ -115,6 +115,11 @@ export default async function Page() { return <main><h1>other one</h1><Other /><
 		defer b.Prof.mu.Unlock()
 		return b.Prof.counts["dev:island-bundles-reused"], b.Prof.counts["dev:ssr-modules-reused"]
 	}
+	early := func() int {
+		b.Prof.mu.Lock()
+		defer b.Prof.mu.Unlock()
+		return b.Prof.counts["dev:early-server-bundles"]
+	}
 	page := filepath.Join(root, "src", "pages", "toggle.tsx")
 	edits := 0
 	write := func(rel, src string) {
@@ -140,8 +145,12 @@ export default async function Page() { return <main><h1>other one</h1><Other /><
 	rebuild()
 	write("src/pages/toggle.tsx", strings.Replace(readProjectFile(t, root, "src/pages/toggle.tsx"), "toggle two", "toggle three", 1))
 	i0, s0 := reused()
+	e0 := early()
 	rebuild()
 	i1, s1 := reused()
+	if early() <= e0 {
+		t.Fatal("the page's server bundle was not compiled while the page built, though its render modules were kept")
+	}
 	_ = i0
 	if s1 <= s0 {
 		t.Fatalf("a page edit rebuilt the server render modules (reused %d -> %d)", s0, s1)
@@ -153,7 +162,11 @@ export default async function Page() { return <main><h1>other one</h1><Other /><
 
 	// Editing the client component changes what both builds read.
 	write("src/components/Toggle.tsx", strings.Replace(devMemoToggle, "LABEL", "second", 1))
+	e1 := early()
 	rebuild()
+	if early() != e1 {
+		t.Fatal("a server bundle was compiled early against render modules an edit was about to change")
+	}
 	i2, s2 := reused()
 	if s2 != s1 || i2 != i1 {
 		t.Fatalf("an edited client component was taken as unchanged (render modules reused %d -> %d, island chunks %d -> %d)", s1, s2, i1, i2)
@@ -238,4 +251,17 @@ func devMemoTreeHas(t *testing.T, dir, text string) bool {
 		return nil
 	})
 	return found
+}
+
+func TestDevPageWorkersFillTheCoresButNotMore(t *testing.T) {
+	cores := buildWorkerLimit()
+	if got := devPageWorkers(1); got != cores {
+		t.Fatalf("one page gets %d workers, want %d", got, cores)
+	}
+	if got := devPageWorkers(cores + 1); got != cores+1 {
+		t.Fatalf("%d pages get %d workers, want one each", cores+1, got)
+	}
+	if got := devPageWorkers(1000); got != 2*cores {
+		t.Fatalf("1000 pages get %d workers, want %d", got, 2*cores)
+	}
 }
