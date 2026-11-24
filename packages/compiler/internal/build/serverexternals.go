@@ -181,7 +181,10 @@ func visibleFrom(dir, pkgRoot string) bool {
 // could not find from outFile (a dependency of a workspace package, which pnpm
 // installs only under that package) is imported by the file URL of the file
 // esbuild resolved, so the bundle loads it from where it is installed. A bare
-// import that does not resolve is left to esbuild, which reports it.
+// import that does not resolve is left to esbuild, which reports it. A bare
+// import that resolves to a stylesheet in node_modules (a font package such as
+// `@fontsource/inter`, whose entry is index.css) becomes an empty module: Node
+// cannot load .css, and the page links its CSS separately.
 func externalNodeModulesPlugin(outFile string) api.Plugin {
 	return externalNodeModulesPluginMemo(outFile, nil)
 }
@@ -287,6 +290,10 @@ func externalNodeModulesPluginMemo(outFile string, memo *resolveMemo) api.Plugin
 	return externalNodeModulesPluginDirs(dirs, memo, nil)
 }
 
+// packageCSSNamespace holds the empty modules that stand in for package
+// stylesheets.
+const packageCSSNamespace = "krate-package-css"
+
 // externalNodeModulesPluginDirs is externalNodeModulesPluginMemo for a build
 // with an output file in each of outDirs (none for no output file). A package
 // that some of them see in node_modules and others do not sets mixed: the
@@ -300,6 +307,10 @@ func externalNodeModulesPluginDirs(outDirs []string, memo *resolveMemo, mixed *a
 		Name: "krate-external-node-modules",
 		Setup: func(b api.PluginBuild) {
 			jseval.RegisterCloudflareImports(b)
+			b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: packageCSSNamespace}, func(api.OnLoadArgs) (api.OnLoadResult, error) {
+				contents := "export default {};\n"
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS}, nil
+			})
 			interop := cjsInteropApplies(b)
 			var det *cjsDetector
 			if interop {
@@ -353,6 +364,9 @@ func externalNodeModulesPluginDirs(outDirs []string, memo *resolveMemo, mixed *a
 					return api.OnResolveResult{}, nil
 				}
 				if strings.Contains(filepath.ToSlash(r.path), "/node_modules/") {
+					if strings.EqualFold(filepath.Ext(r.path), ".css") {
+						return api.OnResolveResult{Path: r.path, Namespace: packageCSSNamespace}, nil
+					}
 					if root := packageRootOf(r.path); root != "" && len(outDirs) > 0 {
 						v, ok := visible.Load(root)
 						if !ok {
