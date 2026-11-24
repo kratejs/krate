@@ -156,6 +156,11 @@ krate dev --repl                # terminal shortcuts: r restart, o open, c clear
 krate dev --port 4000           # fails with an error if 4000 is busy
 ```
 
+- Writes and serves its output from `.krate/dev-out`, not `outDir`, so `krate build`
+  (or a `pnpm verify` that builds) can run while the dev server is up without
+  replacing the chunks the dev pages import. `krate build`, `start`, `serve` and
+  the deploy adapters keep using `outDir`; a dev edit never touches it. `--out-dir`
+  on `krate dev` still picks the directory explicitly.
 - Prints the network URL when the server listens beyond loopback; with `--qr`, in
   a terminal, also a QR code for it so a phone on the same network can scan it.
   With the default loopback bind it prints a hint instead. `--open` (or

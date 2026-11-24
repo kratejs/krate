@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
 )
 
@@ -196,6 +197,22 @@ func devBuildGate(hub *DevHub, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// DevOutDir is where `krate dev` writes and serves its output: a private
+// directory under .krate, which the watcher already ignores. Keeping it apart
+// from the production outDir lets `krate build` run while dev is up, without
+// replacing the vendor and island chunks the dev pages import.
+func DevOutDir(root string) string {
+	return filepath.Join(root, ".krate", "dev-out")
+}
+
+// UseDevOutDir points cfg at the dev output directory. Call it once, before
+// building the dev Builder and starting ServeDev, so everything downstream
+// (builder, static serving, sidecars, manifests, the watcher's pruning)
+// follows cfg.OutDir.
+func UseDevOutDir(root string, cfg *config.Config) {
+	cfg.OutDir = DevOutDir(root)
 }
 
 // devRetiredChunksDir holds the chunks a dev rebuild replaced, outside the

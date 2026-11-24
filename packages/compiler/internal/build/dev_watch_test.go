@@ -37,7 +37,7 @@ func startDevWatch(t *testing.T, files map[string]string, mutate func(*config.Co
 	}
 	cfg := config.Default()
 	cfg.PagesDir = filepath.Join(root, "src", "pages")
-	cfg.OutDir = filepath.Join(root, "dist")
+	UseDevOutDir(root, cfg)
 	cfg.PublicDir = filepath.Join(root, "public")
 	if mutate != nil {
 		mutate(cfg)
@@ -91,14 +91,14 @@ func TestWatchPicksUpNewNestedDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(deep, "index.tsx"), []byte(devPage("deep")), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "new nested page output", func() bool { return exists(filepath.Join(root, "dist", "blog", "deep", "index.html")) })
+	waitFor(t, "new nested page output", func() bool { return exists(filepath.Join(DevOutDir(root), "blog", "deep", "index.html")) })
 
 	// Files written into the new directory afterwards are watched too.
 	if err := os.WriteFile(filepath.Join(deep, "second.tsx"), []byte(devPage("second")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "page added to a new directory after creation", func() bool {
-		return exists(filepath.Join(root, "dist", "blog", "deep", "second", "index.html")) || exists(filepath.Join(root, "dist", "blog", "deep", "second.html"))
+		return exists(filepath.Join(DevOutDir(root), "blog", "deep", "second", "index.html")) || exists(filepath.Join(DevOutDir(root), "blog", "deep", "second.html"))
 	})
 }
 

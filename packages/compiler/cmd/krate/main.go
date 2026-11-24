@@ -878,6 +878,10 @@ func runDev(flags cliFlags, args []string) {
 // or env change asks for a restart (it then returns true).
 func runDevOnce(flags cliFlags, args []string, first bool) bool {
 	root, cfg := resolveConfig(flags, args)
+	if flags.OutDir == "" {
+		// Dev gets its own output directory so `krate build` can run alongside.
+		build.UseDevOutDir(root, cfg)
+	}
 	env := loadProjectEnv(root, "development", flags.Verbose)
 
 	if first {

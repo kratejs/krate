@@ -53,7 +53,7 @@ renderer).
 
 ## Dev server 404s / no hot reload
 
-- The watcher ignores `dist`, `.krate`, `node_modules`, and `_`-prefixed files.
+- The watcher ignores `dist`, `.krate` (which holds the dev server's own output, `.krate/dev-out`), `node_modules`, and `_`-prefixed files.
 - If you renamed a page, wait for the rebuild banner; a compile error blocks the
   reload (the browser shows a build-error overlay).
 - Check the terminal for `Watching ... for changes`.

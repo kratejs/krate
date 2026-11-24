@@ -12,7 +12,7 @@ The complete `krate.config.ts` surface, type-checked with `defineConfig`.
 
 ```typescript
 entry: "src/index.tsx",       // Entry point (default: src/index.tsx)
-outDir: "dist",               // Output directory (default: dist)
+outDir: "dist",               // Build output directory (default: dist); `krate dev` uses .krate/dev-out
 pagesDir: "src/pages",        // Pages directory (default: src/pages)
 publicDir: "public",          // Static assets directory (default: public)
 spa: true,                    // Client-side router (default: true; false omits it)
