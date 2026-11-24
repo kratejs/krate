@@ -958,6 +958,11 @@ type clientChunkInfo struct {
 	// inputs are the source files that ended up in the chunk (absolute,
 	// cleaned); tree shaking leaves out the rest of the import graph.
 	inputs map[string]bool
+	// sig and stamps let a dev rebuild keep the chunk: the request it was
+	// built for, and the state of every file the build read.
+	sig    string
+	stamps stampSet
+	config stampSet
 	// split is set for a chunk checked in a code-split batch: stateful,
 	// inputs and the chunk text are then upper bounds of a separate build's.
 	split *splitChunkFacts
@@ -1038,6 +1043,28 @@ func boundaryShims(dotKrate string) (string, error) {
 	return path, nil
 }
 
+// clientChunkSig is what a chunk's check build depends on besides files.
+func clientChunkSig(r clientChunkReq) string {
+	return r.key + "\x00" + r.resolveDir + "\x00" + r.entry
+}
+
+// clientChunkReusable reports whether a chunk kept from an earlier dev
+// rebuild is still what building r now would give.
+func (b *Builder) clientChunkReusable(info clientChunkInfo, r clientChunkReq) bool {
+	if !b.DevMode || info.stamps == nil || info.sig != clientChunkSig(r) {
+		return false
+	}
+	return info.stamps.fresh() && info.config.fresh()
+}
+
+// dropClientChunks forgets every kept client chunk.
+func (b *Builder) dropClientChunks() {
+	b.clientChunkMu.Lock()
+	b.clientChunks = nil
+	b.clientChunkText = nil
+	b.clientChunkMu.Unlock()
+}
+
 // clientChunkReq names the hydration chunk of one boundary: key identifies it
 // for the build, entry is the module preamble that binds `__m`, the exports
 // components are looked up in by name (dotted for members of a namespace
@@ -1060,7 +1087,7 @@ func (b *Builder) clientChunkJobs(reqs []clientChunkReq) ([]clientChunkInfo, []*
 	first := -1
 	b.clientChunkMu.Lock()
 	for i, r := range reqs {
-		if info, ok := b.clientChunks[r.key]; ok {
+		if info, ok := b.clientChunks[r.key]; ok && b.clientChunkReusable(info, r) {
 			infos[i] = info
 			continue
 		}
@@ -1393,6 +1420,11 @@ func (b *Builder) recordClientChunkFacts(r clientChunkReq, src string, out []byt
 	name := b.islandEntryName(src, r.resolveDir)
 	b.setIslandEntries("client-boundary\x00"+r.key, []islandEntry{{Name: name, Source: src, ResolveDir: r.resolveDir, Boundary: true}})
 	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out), inputs: metafileInputs(b.Root, metafile), split: split}
+	if b.DevMode {
+		info.sig = clientChunkSig(r)
+		info.stamps = b.stampInputs(metafileAllInputs(b.Root, metafile))
+		info.config = b.projectConfigStamp()
+	}
 	b.clientChunkMu.Lock()
 	if b.clientChunkText == nil {
 		b.clientChunkText = map[string]string{}
@@ -1486,6 +1518,9 @@ type clientSSRImpls struct {
 	// build (tests compare the two); shareless builds every page server
 	// bundle as if it were alone.
 	separate, shareless bool
+	// combinedInputs lists the files the combined build read, set when it
+	// succeeded (see devmemo.go).
+	combinedInputs []string
 }
 
 // clientSSRImpl is the build of one module's server render module. Its
@@ -1636,6 +1671,7 @@ func (c *clientSSRImpls) buildCombined(claimed []claimedImpl) error {
 		return fmt.Errorf("combined server render build: %s", hits[0].Text)
 	}
 	interopCJSDynamicImports(res.OutputFiles, res.Metafile, opts.AbsWorkingDir)
+	inputs := metafileAllInputs(opts.AbsWorkingDir, res.Metafile)
 	if !opts.MinifyWhitespace {
 		// Name each entry module in the output comments as its own Stdin
 		// build does, not by its batch path.
@@ -1679,6 +1715,7 @@ func (c *clientSSRImpls) buildCombined(claimed []claimedImpl) error {
 			return err
 		}
 	}
+	c.combinedInputs = inputs
 	return nil
 }
 

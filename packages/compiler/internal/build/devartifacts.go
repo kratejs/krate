@@ -1,6 +1,8 @@
 package build
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -42,15 +44,21 @@ func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS st
 	var serverBundles map[string]string
 	if len(ssrPages) > 0 {
 		serverBundles = b.rebuildClientSSRModules(ssrPages)
-		if err := b.writeHighlightTables(serverBundles); err != nil {
+		stop := b.phase("ssr:highlight-tables")
+		err := b.writeHighlightTables(serverBundles)
+		stop()
+		if err != nil {
 			return err
 		}
 	}
+	stopRT := b.phase("ssr:runtime-components")
 
 	// Collect runtime component sources referenced by this rebuild's regions
 	// and recompile just those.
 	runtimeBundles := b.refreshRuntimeComponents(results)
+	stopRT()
 
+	defer b.phase("ssr:manifests")()
 	if b.serverManifestOutOfStep(results) {
 		b.needFullRebuild.Store(true)
 	}
@@ -103,6 +111,7 @@ func (b *Builder) recordDevBoundaries(boundaries []ClientBoundary, replace bool)
 func (b *Builder) rebuildClientSSRModules(ssrPages []*PageResult) map[string]string {
 	impls := newClientSSRImpls(b.importResolver(), ssrPages, b.Root, b.Cfg.OutDir, b.actionModules(), b.Cfg.BaseURLPath())
 	b.recordDevBoundaries(impls.boundaries, false)
+	stopCombined := b.phase("ssr:client-modules-combined")
 	b.devBoundariesMu.Lock()
 	all := make([]ClientBoundary, 0, len(b.devBoundaries))
 	for src, cb := range b.devBoundaries {
@@ -123,9 +132,44 @@ func (b *Builder) rebuildClientSSRModules(ssrPages []*PageResult) map[string]str
 	}
 	sort.SliceStable(all, func(i, j int) bool { return own[all[i].SourcePath] && !own[all[j].SourcePath] })
 	impls.boundaries = all
-	impls.buildAll(impls.boundaries)
+	sig := b.ssrBuildSig(impls.boundaries)
+	if b.ssrMemo.valid(sig) {
+		// Nothing the render modules read changed: the files of the last
+		// build are the ones this build would write.
+		for _, ci := range impls.claim(impls.boundaries) {
+			ci.e.finish(func() error { return nil })
+		}
+		b.Prof.Add("dev:ssr-modules-reused", 0)
+	} else {
+		b.ssrMemo = nil
+		impls.buildAll(impls.boundaries)
+		if impls.combinedInputs != nil {
+			b.ssrMemo = &buildMemo{sig: sig, stamps: b.stampInputs(impls.combinedInputs), config: b.projectConfigStamp()}
+		}
+	}
+	stopCombined()
+	defer b.phase("ssr:page-bundles")()
 	bundles, _ := compileServerBundlesWith(impls, ssrPages, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
 	return bundles
+}
+
+// ssrBuildSig is what the combined server render build depends on besides
+// files: the boundaries it builds and the action modules it imports.
+func (b *Builder) ssrBuildSig(boundaries []ClientBoundary) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%v|%s", b.actionModules(), b.Cfg.BaseURLPath())
+	// The order only says which page's boundaries come first.
+	boundaries = append([]ClientBoundary(nil), boundaries...)
+	sort.SliceStable(boundaries, func(i, j int) bool {
+		if boundaries[i].SourcePath != boundaries[j].SourcePath {
+			return boundaries[i].SourcePath < boundaries[j].SourcePath
+		}
+		return boundaries[i].Spec+boundaries[i].Entry < boundaries[j].Spec+boundaries[j].Entry
+	})
+	for _, cb := range boundaries {
+		fmt.Fprintf(h, "\x00%s\x00%s\x00%s\x00%s\x00%s\x00%v", cb.ModuleID, cb.SourcePath, cb.Spec, cb.entrySource(), cb.resolveDir(), cb.Real)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // serverManifestOutOfStep reports whether a rebuilt page's render mode no
