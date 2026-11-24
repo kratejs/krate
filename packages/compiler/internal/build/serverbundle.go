@@ -31,7 +31,7 @@ func CompileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
 	impls := newClientSSRImpls(res, results, root, outDir, actionModules, actionBasePath)
 	impls.prebuild(impls.boundaries)
-	return compileServerBundlesWith(impls, results, root, outDir, sourcemap, actionModules, actionBasePath)
+	return compileServerBundlesWith(impls, results, root, outDir, sourcemap, actionModules, actionBasePath, nil)
 }
 
 // ssrBundlePages returns the non-SSG pages that need the Node renderer. A
@@ -58,10 +58,162 @@ func newClientSSRImpls(res *bundler.ImportResolver, results []*PageResult, root,
 	return impls
 }
 
+// serverBundleRun compiles the server bundles of pages that share their
+// resolutions and the sources their plugins derive from project files.
+type serverBundleRun struct {
+	impls          *clientSSRImpls
+	root, outDir   string
+	bundleDir      string
+	sourcemap      bool
+	actionModules  map[string]map[string]string
+	actionBasePath string
+	// serverMemo holds the package resolutions of the page bundles. The memo
+	// is native: the plugins ahead of the external-packages plugin answer an
+	// import from its importer, path and kind alone and none of them resolves
+	// again, so an import they leave to it is left to esbuild again in its
+	// resolve.
+	serverMemo *resolveMemo
+	files      *serverBundleFiles
+}
+
+func newServerBundleRun(impls *clientSSRImpls, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) *serverBundleRun {
+	r := &serverBundleRun{
+		impls: impls, root: root, outDir: outDir, sourcemap: sourcemap, actionModules: actionModules, actionBasePath: actionBasePath,
+		bundleDir:  filepath.Join(outDir, ".krate", "server-bundles"),
+		serverMemo: newNativeResolveMemo(),
+		files:      &serverBundleFiles{},
+	}
+	// The page bundles of a run share their package resolutions and the
+	// sources their plugins derive from project files, unless a test builds
+	// every page as if it were alone.
+	if impls.shareless {
+		r.serverMemo, r.files = nil, nil
+	}
+	return r
+}
+
+// compile builds the server bundle of page and returns its path relative to
+// the output directory, empty when the build failed. The failures are what
+// compileServerBundles reports for pages that cannot do without a bundle; logf
+// prints the problems that are shown as they happen.
+func (r *serverBundleRun) compile(page *PageResult, logf func(format string, args ...any)) (string, []error) {
+	root, outDir, impls, sourcemap := r.root, r.outDir, r.impls, r.sourcemap
+	actionModules, actionBasePath, bundleDir := r.actionModules, r.actionBasePath, r.bundleDir
+	serverMemo, files, res := r.serverMemo, r.files, impls.res
+	var failures []error
+	absSource := filepath.Join(root, page.SourcePath)
+	sourceData, err := os.ReadFile(absSource)
+	if err != nil {
+		logf("  %sWarning: cannot read %s for server bundle:%s %v\n", cYellow, page.SourcePath, cReset, err)
+		return "", failures
+	}
+
+	// Inject Head/Suspense/Script/Style imports at the top of the file
+	// so pages can use them as globals (matching krate compiler behavior)
+	meta := newSourceMeta(sourceRootFor(root), "")
+	pageSrc := meta.rewriteSource(absSource, string(sourceData))
+	if page.IslandStubs != nil {
+		pageSrc = page.IslandStubs.applyAttrs(pageSrc)
+	}
+	// Annotate Go-component call sites with __krateGoId so the shim can
+	// inline a server-tier component's build-time HTML (page.GoBaked).
+	if locals := goComponentLocals(absSource, pageSrc, root); len(locals) > 0 {
+		pageSrc = annotateGoCalls(pageSrc, absSource, locals)
+	}
+	if hoisted, herr := hoistInlineActions(root, absSource, pageSrc); herr != nil {
+		logf("  %sServer bundle error (%s):%s %v\n", cRed, page.SourcePath, cReset, herr)
+		failures = append(failures, herr)
+		return "", failures
+	} else if hoisted != nil {
+		pageSrc = withInlineActionImport(hoisted.Source)
+	}
+	injectedSource := injectServerGlobals(pageSrc) + serverExportEntrySuffix(page.ServerExports, absSource) + metadataEntrySuffix(page.MetadataSegments, page.MetadataPageFiles, root)
+	clientPage := bundler.HasUseClientDirective(string(sourceData)) && hasBoundaryFor(page.ClientBoundaries, absSource)
+	if clientPage {
+		// A "use client" page is a client boundary of the server tree, like
+		// any other "use client" module: re-export the file so the boundary
+		// plugin serves its stub instead of the page evaluating its hooks.
+		q := strconv.Quote(filepath.ToSlash(absSource))
+		injectedSource = "export { default } from " + q + ";\nexport * from " + q + ";\n"
+	}
+
+	// Compile with esbuild - use stdin so esbuild resolves relative imports
+	// from the project root (AbsWorkingDir) rather than a temp file location
+	route := page.OutName
+	if route == "." || route == "" {
+		route = "index"
+	}
+	outName := strings.TrimPrefix(route, "/") + ".server.mjs"
+	outPath := filepath.Join(bundleDir, outName)
+
+	cbPlugin, cbErr := clientBoundaryPlugin(page.ClientBoundaries, impls, outPath, files)
+	if cbErr != nil {
+		logf("  %sServer bundle error (%s):%s %v\n", cRed, page.SourcePath, cReset, cbErr)
+		failures = append(failures, cbErr)
+		return "", failures
+	}
+
+	stdinContents, stdinDir, stdinFile := injectedSource, filepath.Dir(absSource), filepath.Base(absSource)
+	var composed []api.Plugin
+	if len(page.ComposedLayouts) > 0 {
+		const pageModule = "krate-composed-page"
+		stdinContents = composedEntrySource(pageModule, page.ComposedLayouts)
+		if clientPage {
+			// The page file is imported by path below; the entry must not
+			// share its identity.
+			stdinFile = "krate-composed-entry.tsx"
+		}
+		composed = append(composed, composedLayoutPlugin(root, pageModule, injectedSource, filepath.Dir(absSource), page.ComposedLayouts, files))
+	}
+
+	pageOpts := api.BuildOptions{
+		AbsWorkingDir:   root,
+		Bundle:          true,
+		Format:          api.FormatESModule,
+		Platform:        api.PlatformNode,
+		Outfile:         outPath,
+		Write:           true,
+		Sourcemap:       sourceMapMode(sourcemap),
+		JSX:             api.JSXAutomatic,
+		JSXSideEffects:  false,
+		JSXImportSource: "@krate/runtime/server",
+		TsconfigRaw:     `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@krate/runtime/server" } }`,
+		Banner:          basePathBanner(actionBasePath),
+		External: []string{
+			"@krate/runtime",
+			"@krate/runtime/*",
+		},
+		Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(files), serverExportPlugin(page.ServerExports, absSource, files), goServerBundlePlugin(page.GoBaked, root, files), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), serverRuntimeTagsPlugin(), serverGlobalsPlugin(root), pathAliasPlugin(res), externalNodeModulesPluginMemo(outPath, serverMemo))...),
+		Stdin: &api.StdinOptions{
+			Loader:     api.LoaderTSX,
+			Contents:   stdinContents,
+			ResolveDir: stdinDir,
+			Sourcefile: stdinFile,
+		},
+	}
+	meta.apply(&pageOpts)
+	result := esbuildBuild(pageOpts)
+
+	if len(result.Errors) > 0 {
+		for _, e := range result.Errors {
+			logf("  %sServer bundle error (%s):%s %s\n", cYellow, page.SourcePath, cReset, e.Text)
+		}
+		failures = append(failures, fmt.Errorf("%s", result.Errors[0].Text))
+		return "", failures
+	}
+
+	if err := reportMissingServerExports(page, outPath); err != nil {
+		failures = append(failures, err)
+	}
+
+	relBundle, _ := filepath.Rel(outDir, outPath)
+	return relBundle, failures
+}
+
 // compileServerBundlesWith is compileServerBundles with the server render
-// modules built by impls, which a caller may have prebuilt.
-func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
-	res := impls.res
+// modules built by impls, which a caller may have prebuilt. A page whose
+// bundle is in done was compiled already (see compileEarly).
+func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string, done map[string]string) (map[string]string, []error) {
 	ssrPages := ssrBundlePages(results)
 	if len(ssrPages) == 0 {
 		return nil, nil
@@ -71,34 +223,18 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 	_ = os.MkdirAll(bundleDir, 0755)
 
 	bundles := make(map[string]string, len(ssrPages))
-	// The page bundles share their options, so a package import resolves
-	// once for all of them. The memo is native: the plugins ahead of the
-	// external-packages plugin answer an import from its importer, path and
-	// kind alone and none of them resolves again, so an import they leave to
-	// it is left to esbuild again in its resolve.
-	serverMemo := newNativeResolveMemo()
-	files := &serverBundleFiles{}
-	// The page bundles of a run share their package resolutions and the
-	// sources their plugins derive from project files, unless a test builds
-	// every page as if it were alone.
-	if impls.shareless {
-		serverMemo, files = nil, nil
-	}
+	run := newServerBundleRun(impls, root, outDir, sourcemap, actionModules, actionBasePath)
 	var fatal []error
 	var mu sync.Mutex
-	fail := func(page *PageResult, err error) {
-		if !page.ServerPage && len(page.ServerExports) == 0 && len(page.ComposedLayouts) == 0 {
-			return
-		}
-		mu.Lock()
-		fatal = append(fatal, fmt.Errorf("%s: server bundle: %w", page.SourcePath, err))
-		mu.Unlock()
-	}
 	var wg sync.WaitGroup
 	pool := newWorkerPool(buildWorkerLimit())
 
 	for _, page := range ssrPages {
 		page := page
+		if rel, ok := done[page.SourcePath]; ok {
+			bundles[page.SourcePath] = rel
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -109,116 +245,17 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 					_ = safe.Recover(r) // prints the stack; this page is skipped
 				}
 			}()
-
-			absSource := filepath.Join(root, page.SourcePath)
-			sourceData, err := os.ReadFile(absSource)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  %sWarning: cannot read %s for server bundle:%s %v\n", cYellow, page.SourcePath, cReset, err)
-				return
-			}
-
-			// Inject Head/Suspense/Script/Style imports at the top of the file
-			// so pages can use them as globals (matching krate compiler behavior)
-			meta := newSourceMeta(sourceRootFor(root), "")
-			pageSrc := meta.rewriteSource(absSource, string(sourceData))
-			if page.IslandStubs != nil {
-				pageSrc = page.IslandStubs.applyAttrs(pageSrc)
-			}
-			// Annotate Go-component call sites with __krateGoId so the shim can
-			// inline a server-tier component's build-time HTML (page.GoBaked).
-			if locals := goComponentLocals(absSource, pageSrc, root); len(locals) > 0 {
-				pageSrc = annotateGoCalls(pageSrc, absSource, locals)
-			}
-			if hoisted, herr := hoistInlineActions(root, absSource, pageSrc); herr != nil {
-				fmt.Fprintf(os.Stderr, "  %sServer bundle error (%s):%s %v\n", cRed, page.SourcePath, cReset, herr)
-				fail(page, herr)
-				return
-			} else if hoisted != nil {
-				pageSrc = withInlineActionImport(hoisted.Source)
-			}
-			injectedSource := injectServerGlobals(pageSrc) + serverExportEntrySuffix(page.ServerExports, absSource) + metadataEntrySuffix(page.MetadataSegments, page.MetadataPageFiles, root)
-			clientPage := bundler.HasUseClientDirective(string(sourceData)) && hasBoundaryFor(page.ClientBoundaries, absSource)
-			if clientPage {
-				// A "use client" page is a client boundary of the server tree, like
-				// any other "use client" module: re-export the file so the boundary
-				// plugin serves its stub instead of the page evaluating its hooks.
-				q := strconv.Quote(filepath.ToSlash(absSource))
-				injectedSource = "export { default } from " + q + ";\nexport * from " + q + ";\n"
-			}
-
-			// Compile with esbuild - use stdin so esbuild resolves relative imports
-			// from the project root (AbsWorkingDir) rather than a temp file location
-			route := page.OutName
-			if route == "." || route == "" {
-				route = "index"
-			}
-			outName := strings.TrimPrefix(route, "/") + ".server.mjs"
-			outPath := filepath.Join(bundleDir, outName)
-
-			cbPlugin, cbErr := clientBoundaryPlugin(page.ClientBoundaries, impls, outPath, files)
-			if cbErr != nil {
-				fmt.Fprintf(os.Stderr, "  %sServer bundle error (%s):%s %v\n", cRed, page.SourcePath, cReset, cbErr)
-				fail(page, cbErr)
-				return
-			}
-
-			stdinContents, stdinDir, stdinFile := injectedSource, filepath.Dir(absSource), filepath.Base(absSource)
-			var composed []api.Plugin
-			if len(page.ComposedLayouts) > 0 {
-				const pageModule = "krate-composed-page"
-				stdinContents = composedEntrySource(pageModule, page.ComposedLayouts)
-				if clientPage {
-					// The page file is imported by path below; the entry must not
-					// share its identity.
-					stdinFile = "krate-composed-entry.tsx"
-				}
-				composed = append(composed, composedLayoutPlugin(root, pageModule, injectedSource, filepath.Dir(absSource), page.ComposedLayouts, files))
-			}
-
-			pageOpts := api.BuildOptions{
-				AbsWorkingDir:   root,
-				Bundle:          true,
-				Format:          api.FormatESModule,
-				Platform:        api.PlatformNode,
-				Outfile:         outPath,
-				Write:           true,
-				Sourcemap:       sourceMapMode(sourcemap),
-				JSX:             api.JSXAutomatic,
-				JSXSideEffects:  false,
-				JSXImportSource: "@krate/runtime/server",
-				TsconfigRaw:     `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@krate/runtime/server" } }`,
-				Banner:          basePathBanner(actionBasePath),
-				External: []string{
-					"@krate/runtime",
-					"@krate/runtime/*",
-				},
-				Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(files), serverExportPlugin(page.ServerExports, absSource, files), goServerBundlePlugin(page.GoBaked, root, files), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), serverRuntimeTagsPlugin(), serverGlobalsPlugin(root), pathAliasPlugin(res), externalNodeModulesPluginMemo(outPath, serverMemo))...),
-				Stdin: &api.StdinOptions{
-					Loader:     api.LoaderTSX,
-					Contents:   stdinContents,
-					ResolveDir: stdinDir,
-					Sourcefile: stdinFile,
-				},
-			}
-			meta.apply(&pageOpts)
-			result := esbuildBuild(pageOpts)
-
-			if len(result.Errors) > 0 {
-				for _, e := range result.Errors {
-					fmt.Fprintf(os.Stderr, "  %sServer bundle error (%s):%s %s\n", cYellow, page.SourcePath, cReset, e.Text)
-				}
-				fail(page, fmt.Errorf("%s", result.Errors[0].Text))
-				return
-			}
-
-			if err := reportMissingServerExports(page, outPath); err != nil {
-				fail(page, err)
-			}
-
-			relBundle, _ := filepath.Rel(outDir, outPath)
+			rel, failures := run.compile(page, func(format string, args ...any) { fmt.Fprintf(os.Stderr, format, args...) })
 			mu.Lock()
-			bundles[page.SourcePath] = relBundle
-			mu.Unlock()
+			defer mu.Unlock()
+			if page.ServerPage || len(page.ServerExports) > 0 || len(page.ComposedLayouts) > 0 {
+				for _, err := range failures {
+					fatal = append(fatal, fmt.Errorf("%s: server bundle: %w", page.SourcePath, err))
+				}
+			}
+			if rel != "" {
+				bundles[page.SourcePath] = rel
+			}
 		}()
 	}
 

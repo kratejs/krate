@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 )
@@ -53,20 +54,32 @@ func (s *TailwindScanner) ScanClasses(dirs []string) map[string]bool {
 		".krate": true, "build": true, ".next": true, "coverage": true,
 	}
 
+	names := namesSignature(s.Names)
 	for _, dir := range dirs {
-		_ = fsutil.WalkExt(dir, exts, skipDirs, func(path string, _ os.FileInfo) error {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
+		_ = fsutil.WalkExt(dir, exts, skipDirs, func(path string, info os.FileInfo) error {
 			if s.excluded(path) {
 				return nil
 			}
-			text := string(data)
-			for _, tok := range candidateTokensNames(text, s.Names) {
+			scan, ok := scannedFiles.get(path, info, names)
+			if !ok {
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return nil
+				}
+				text := string(data)
+				scan = &fileScan{tokens: candidateTokensNames(text, s.Names), refs: map[string]bool{}, decls: map[string]bool{}}
+				collectVars(text, scan.refs, scan.decls)
+				scannedFiles.put(path, info, names, scan)
+			}
+			for _, tok := range scan.tokens {
 				classes[tok] = true
 			}
-			collectVars(text, s.VarRefs, s.VarDecls)
+			for k := range scan.refs {
+				s.VarRefs[k] = true
+			}
+			for k := range scan.decls {
+				s.VarDecls[k] = true
+			}
 			return nil
 		})
 	}
@@ -1190,4 +1203,60 @@ func namedSpacing(key string, theme TailwindTheme) (string, bool) {
 		}
 	}
 	return theme.themeRef("spacing-"+key, v), true
+}
+
+// fileScan is what scanning one file found.
+type fileScan struct {
+	tokens      []string
+	refs, decls map[string]bool
+}
+
+type scannedFile struct {
+	size  int64
+	mtime int64
+	names string
+	scan  *fileScan
+}
+
+// scanCache keeps what each file's last scan found, until the file changes
+// (size or modification time) or the project's utility names do. A dev rebuild
+// scans the whole project again for the classes the pages use; most of its
+// files are the ones it scanned the time before.
+type scanCache struct {
+	mu    sync.Mutex
+	files map[string]scannedFile
+}
+
+var scannedFiles = &scanCache{files: map[string]scannedFile{}}
+
+func (c *scanCache) get(path string, info os.FileInfo, names string) (*fileScan, bool) {
+	if info == nil {
+		return nil, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	f, ok := c.files[path]
+	if !ok || f.size != info.Size() || f.mtime != info.ModTime().UnixNano() || f.names != names {
+		return nil, false
+	}
+	return f.scan, true
+}
+
+func (c *scanCache) put(path string, info os.FileInfo, names string, scan *fileScan) {
+	if info == nil {
+		return
+	}
+	c.mu.Lock()
+	c.files[path] = scannedFile{size: info.Size(), mtime: info.ModTime().UnixNano(), names: names, scan: scan}
+	c.mu.Unlock()
+}
+
+// namesSignature identifies a set of utility names.
+func namesSignature(names map[string]bool) string {
+	list := make([]string, 0, len(names))
+	for n := range names {
+		list = append(list, n)
+	}
+	sort.Strings(list)
+	return strings.Join(list, "\x00")
 }

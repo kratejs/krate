@@ -170,6 +170,17 @@ const islandVirtualPrefix = "krate-island-module:"
 // modules it already evaluated.
 func (b *Builder) writeIslandBundles() error {
 	all := b.allIslandEntries()
+	// A dev rebuild whose entries and files are the ones of the last build
+	// finds its chunks already written (see devmemo.go).
+	sig := ""
+	if b.DevMode {
+		sig = b.islandBuildSig(all)
+		if b.islandMemo.valid(sig) {
+			b.Prof.Add("dev:island-bundles-reused", 0)
+			return nil
+		}
+		b.islandMemo = nil
+	}
 	chunksDir := filepath.Join(b.Cfg.OutDir, "chunks")
 	keep := map[string]bool{}
 	var entries, realEntries []islandEntry
@@ -230,7 +241,34 @@ func (b *Builder) writeIslandBundles() error {
 		}
 	}
 	b.setIslandGraph(graph)
+	if b.DevMode {
+		var inputs []string
+		for _, m := range append([]string{shared.Metafile}, flavourMetafiles(flavours)...) {
+			inputs = append(inputs, metafileAllInputs(b.Root, m)...)
+		}
+		b.islandMemo = &buildMemo{sig: sig, stamps: b.stampInputs(inputs), config: b.projectConfigStamp()}
+	}
 	return nil
+}
+
+// islandBuildSig is what the island chunk build depends on besides files:
+// the entries (with their generated modules), the output mode and the values
+// defined into the client code.
+func (b *Builder) islandBuildSig(entries []islandEntry) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%v|%v|%v|", b.shouldMinifyJS(), b.clientEnvDefines(), b.actionModules())
+	for _, e := range entries {
+		fmt.Fprintf(h, "\x00%s\x00%s\x00%s\x00%v\x00%v", e.Name, e.Source, e.ResolveDir, e.Real, e.Boundary)
+		keys := make([]string, 0, len(e.Virtual))
+		for k := range e.Virtual {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(h, "\x00%s\x00%s\x00%s", k, e.Virtual[k].Source, e.Virtual[k].ResolveDir)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func flavourMetafiles(flavours []*islandFlavour) []string {

@@ -419,6 +419,15 @@ type Builder struct {
 	// clientChunkText is the standalone build of each boundary chunk, by URL,
 	// for the CSS pass that scans client code.
 	clientChunkText map[string]string
+	// buildStart is when the current build began (see devmemo.go).
+	buildStart time.Time
+	// islandMemo and ssrMemo keep the last island chunk build and the last
+	// combined server render build of a dev session (see devmemo.go).
+	islandMemo *buildMemo
+	ssrMemo    *buildMemo
+	// early holds the server bundles a dev rebuild compiles while its pages
+	// are still building (see devearly.go).
+	early *earlyServerBundles
 
 	// actions holds the discovered `"use server"` modules and their compiled
 	// bundles for this build. It is refreshed by prepareActions before pages.
@@ -855,6 +864,11 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	if len(pages) == 0 {
 		return nil, nil
 	}
+	dl := b.Prof.Laps("dev:")
+	esbuild0 := esbuildStatsSnapshot()
+	if b.Prof.Enabled() {
+		defer func() { b.Prof.setEsbuild(esbuildStatsSince(esbuild0)) }()
+	}
 
 	var pageErrs []error
 
@@ -880,11 +894,14 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 		page   string
 	}
 
+	dl.Lap("1-prepare")
 	resultsCh := make(chan pageBuildResult, len(pages)+len(concrete))
 	var wg sync.WaitGroup
-	pool := newWorkerPool(buildWorkerLimit())
+	pool := newWorkerPool(devPageWorkers(len(pages) + len(concrete)))
 	rounds := newBuildRounds(len(pages)+len(concrete), pool)
 	b.rounds = rounds
+	b.prefetchLayoutCuts(pages, pool)
+	b.beginEarlyBundles()
 
 	for _, page := range pages {
 		wg.Add(1)
@@ -895,6 +912,9 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			defer pool.release()
 			printf("  %s>%s %s\n", cCyan, cReset, p)
 			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
+			if err == nil {
+				b.compileEarly(result)
+			}
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
 		}(page)
 	}
@@ -953,6 +973,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 		result.HeadHTML = afterPageCtx.HeadHTML
 	}
 
+	dl.Lap("2-pages")
 	if len(results) == 0 {
 		if len(pageErrs) > 0 {
 			// The pages exist; they failed. The pagesDir hint is only for an
@@ -973,6 +994,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			return results, err
 		}
 	}
+	dl.Lap("3-runtime-chunk")
 	// Island chunks are bundled for the whole site, so a page rebuilt alone
 	// refreshes the shared files its siblings import.
 	if b.takeIslandDirty() {
@@ -981,6 +1003,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			pageErrs = append(pageErrs, err)
 		}
 	}
+	dl.Lap("4-island-bundles")
 
 	// Per-page stylesheets: each page links only the CSS its own module graph
 	// imported (deduplicated across pages sharing identical CSS).
@@ -988,6 +1011,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 		return results, err
 	}
 
+	dl.Lap("5-page-css")
 	// Optional site-global stylesheet (Tailwind) linked on every page.
 	var globalCSS []string
 	if twCSS := b.tailwindCSS(); twCSS != "" {
@@ -999,15 +1023,18 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			globalCSS = append(globalCSS, f)
 		}
 	}
+	dl.Lap("6-tailwind")
 
 	// Dev builds keep component scopes in the page script; a subset build
 	// with shared scopes still writes chunks for the pages it built.
 	if err := b.writeSharedChunks(results); err != nil {
 		return results, err
 	}
+	dl.Lap("7-shared-chunks")
 
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, globalCSS, runtimeJS)
+	dl.Lap("8-html")
 
 	// Refresh the sidecar artifacts this subset of pages owns: an SSR/streaming
 	// page's server bundle, and any runtime components it references. Done here
@@ -1016,6 +1043,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	if err := b.refreshPageServerArtifacts(results, runtimeJS, globalCSS); err != nil {
 		return results, err
 	}
+	dl.Lap("9-server-artifacts")
 
 	if perrs := b.drainPluginErrs(); len(perrs) > 0 {
 		return results, fmt.Errorf("build failed: %d plugin error(s):\n  %s", len(perrs), strings.Join(perrs, "\n  "))
@@ -1087,6 +1115,8 @@ func (b *Builder) BuildAll() error {
 	defer b.closeJSWorker()
 
 	b.resetBuildCaches()
+	b.dropClientChunks()
+	b.islandMemo, b.ssrMemo = nil, nil
 	b.resetIslandEntries()
 	// A full build re-records every dependency; entries for deleted pages must
 	// not survive it.
@@ -1449,7 +1479,7 @@ func (b *Builder) BuildAll() error {
 			impls.buildAll(impls.boundaries)
 		}()
 		defer b.phase("parallel:server-bundles")()
-		serverBundles, serverBundleErrs = compileServerBundlesWith(impls, results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, actionMods, basePath)
+		serverBundles, serverBundleErrs = compileServerBundlesWith(impls, results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, actionMods, basePath, nil)
 	})
 	wl := b.Prof.Laps("write:")
 	// Write shared runtime chunk only if at least one page needs client JS.
@@ -3653,10 +3683,12 @@ func (b *Builder) resetBuildCaches() {
 	b.goParseCache = nil
 	// Client boundary chunks are per-build: a dev rebuild must pick up edits
 	// to a "use client" module or its imports.
-	b.clientChunkMu.Lock()
-	b.clientChunks = nil
-	b.clientChunkText = nil
-	b.clientChunkMu.Unlock()
+	// A dev rebuild keeps the chunks whose inputs it did not touch (see
+	// clientChunkReusable); every other build starts over.
+	b.buildStart = time.Now()
+	if !b.DevMode {
+		b.dropClientChunks()
+	}
 	// Filesystem-existence and import-resolution memos are per-build: a file
 	// added/removed between dev rebuilds must not be served from a stale entry.
 	// The parse cache is keyed by mtime+size, so it stays valid and is kept.

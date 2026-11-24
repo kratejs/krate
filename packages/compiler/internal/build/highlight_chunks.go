@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -291,15 +292,29 @@ func (b *Builder) writeHighlightTables(serverBundles map[string]string) error {
 	for _, l := range b.Cfg.Highlight.Languages {
 		add(l)
 	}
+	// The bundles are scanned side by side: one pass over a site's bundles
+	// is a few hundred milliseconds of regexp matching.
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	pool := newWorkerPool(buildWorkerLimit())
 	for _, rel := range serverBundles {
-		data, err := os.ReadFile(filepath.Join(b.Cfg.OutDir, filepath.FromSlash(rel)))
-		if err != nil {
-			continue
-		}
-		for _, m := range serverLangRe.FindAllStringSubmatch(string(data), -1) {
-			add(m[1])
-		}
+		wg.Add(1)
+		pool.acquire()
+		go func() {
+			defer wg.Done()
+			defer pool.release()
+			data, err := os.ReadFile(filepath.Join(b.Cfg.OutDir, filepath.FromSlash(rel)))
+			if err != nil || !bytes.Contains(data, []byte("lang")) {
+				return
+			}
+			for _, m := range serverLangRe.FindAllSubmatch(data, -1) {
+				mu.Lock()
+				add(string(m[1]))
+				mu.Unlock()
+			}
+		}()
 	}
+	wg.Wait()
 	if len(lexers) == 0 {
 		_ = os.Remove(path)
 		return nil
