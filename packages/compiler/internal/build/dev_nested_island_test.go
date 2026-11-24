@@ -86,7 +86,7 @@ export function Deep() { const [n] = useState(0); return <i data-deep="` + label
 	for _, v := range variants {
 		t.Run(v.name, func(t *testing.T) {
 			files := map[string]string{
-				"src/pages/cad/_layout.tsx": `import { Provider } from "../../components/provider";
+				"src/pages/area/_layout.tsx": `import { Provider } from "../../components/provider";
 import { Frame } from "../../components/frame";
 export default async function Layout({ children }: any) {
   await Promise.resolve();
@@ -104,16 +104,16 @@ import { Inner } from "./inner";
 import { useLook } from "./provider";
 export function Frame({ children }: any) { const look = useLook(); return <div data-look={look}><Inner />{children}</div>; }
 `,
-				innerFile:               inner(v.innerUse, "inner-a"),
-				helperFile:              helper("helper-a"),
-				deepFile:                deep(v.deepUse, "deep-a"),
-				"src/pages/cad/one.tsx": "export default async function P() { return <main>page one</main>; }\n",
-				"src/pages/cad/two.tsx": "export default async function P() { return <main>page two</main>; }\n",
-				"src/pages/index.tsx":   "export default async function P() { return <main>home</main>; }\n",
+				innerFile:                inner(v.innerUse, "inner-a"),
+				helperFile:               helper("helper-a"),
+				deepFile:                 deep(v.deepUse, "deep-a"),
+				"src/pages/area/one.tsx": "export default async function P() { return <main>page one</main>; }\n",
+				"src/pages/area/two.tsx": "export default async function P() { return <main>page two</main>; }\n",
+				"src/pages/index.tsx":    "export default async function P() { return <main>home</main>; }\n",
 			}
 			d := startDevRun(t, files)
-			d.waitBody(t, "/cad/one/", v.old)
-			urls0, code0 := devIslandChunksOf(t, d, "/cad/one/")
+			d.waitBody(t, "/area/one/", v.old)
+			urls0, code0 := devIslandChunksOf(t, d, "/area/one/")
 			if !strings.Contains(code0, v.old) {
 				t.Fatalf("no island chunk with the first version: %v", urls0)
 			}
@@ -124,12 +124,12 @@ export function Frame({ children }: any) { const look = useLook(); return <div d
 			prev := v.old
 			for _, label := range []string{base + "b", base + "c", base + "d"} {
 				d.write(t, v.file, v.edit(label))
-				d.waitBody(t, "/cad/one/", label)
-				d.waitBody(t, "/cad/two/", label)
+				d.waitBody(t, "/area/one/", label)
+				d.waitBody(t, "/area/two/", label)
 				var urls []string
 				var code string
 				waitUntilTrue(t, 15*time.Second, "the island chunk to hold "+label, func() bool {
-					urls, code = devIslandChunksOf(t, d, "/cad/one/")
+					urls, code = devIslandChunksOf(t, d, "/area/one/")
 					return strings.Contains(code, label)
 				})
 				if strings.Contains(code, prev) {
@@ -153,55 +153,55 @@ func TestDevEditingTheIslandModuleWithNestedComponentsRebuildsItsChunk(t *testin
 		return `"use client";
 import { useState } from "react";
 import { usePathname } from "@krate/runtime";
-import { useCad } from "./provider";
+import { useArea } from "./provider";
 import { TooltipProvider } from "../ui/tooltip";
 
-function FloatingHeader({ children }: any) {
+function InnerHeader({ children }: any) {
   return <header data-probe="` + label + `"><div className="bar">{children}</div></header>;
 }
 function TopBar() {
-  const { look } = useCad();
+  const { look } = useArea();
   const path = usePathname();
   const [n] = useState(0);
-  return <FloatingHeader>{look} {path} {n}</FloatingHeader>;
+  return <InnerHeader>{look} {path} {n}</InnerHeader>;
 }
-export function CadFrame({ children }: any) {
+export function OuterFrame({ children }: any) {
   return <TooltipProvider><TopBar /><main>{children}</main></TooltipProvider>;
 }
 `
 	}
-	const frameFile = "src/components/cad/top-bar.tsx"
+	const frameFile = "src/components/area/top-bar.tsx"
 	d := startDevRun(t, map[string]string{
-		"src/pages/cad/_layout.tsx": `import { CadProvider } from "../../components/cad/provider";
-import { CadFrame } from "../../components/cad/top-bar";
+		"src/pages/area/_layout.tsx": `import { AreaProvider } from "../../components/area/provider";
+import { OuterFrame } from "../../components/area/top-bar";
 export default async function Layout({ children }: any) {
   const a = await Promise.resolve(1);
-  return <CadProvider initial={a}><CadFrame>{children}</CadFrame></CadProvider>;
+  return <AreaProvider initial={a}><OuterFrame>{children}</OuterFrame></AreaProvider>;
 }
 `,
-		"src/components/cad/provider.tsx": `"use client";
+		"src/components/area/provider.tsx": `"use client";
 import { createContext, useContext } from "react";
 const C = createContext<any>({ look: "x" });
-export function CadProvider({ children }: any) { return <C.Provider value={{ look: "x" }}>{children}</C.Provider>; }
-export function useCad() { return useContext(C); }
+export function AreaProvider({ children }: any) { return <C.Provider value={{ look: "x" }}>{children}</C.Provider>; }
+export function useArea() { return useContext(C); }
 `,
 		"src/components/ui/tooltip.tsx": `"use client";
 export function TooltipProvider({ children }: any) { return <div>{children}</div>; }
 `,
-		frameFile:               frame("probe-a"),
-		"src/pages/cad/one.tsx": "export default async function P() { return <main>page one</main>; }\n",
-		"src/pages/cad/two.tsx": "export default async function P() { return <main>page two</main>; }\n",
-		"src/pages/index.tsx":   "export default async function P() { return <main>home</main>; }\n",
+		frameFile:                frame("probe-a"),
+		"src/pages/area/one.tsx": "export default async function P() { return <main>page one</main>; }\n",
+		"src/pages/area/two.tsx": "export default async function P() { return <main>page two</main>; }\n",
+		"src/pages/index.tsx":    "export default async function P() { return <main>home</main>; }\n",
 	})
-	d.waitBody(t, "/cad/one/", "probe-a")
+	d.waitBody(t, "/area/one/", "probe-a")
 	prev := "probe-a"
 	for _, label := range []string{"probe-b", "probe-c", "probe-d"} {
 		d.write(t, frameFile, frame(label))
-		d.waitBody(t, "/cad/one/", label)
+		d.waitBody(t, "/area/one/", label)
 		var urls []string
 		var code string
 		waitUntilTrue(t, 15*time.Second, "the island chunk to hold "+label, func() bool {
-			urls, code = devIslandChunksOf(t, d, "/cad/one/")
+			urls, code = devIslandChunksOf(t, d, "/area/one/")
 			return strings.Contains(code, label)
 		})
 		if strings.Contains(code, prev) {
