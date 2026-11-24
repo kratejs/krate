@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/pprof"
 	"sort"
 	"strconv"
@@ -466,13 +467,25 @@ func devRouteLabel(page, pagesDir string) string {
 // and rebuilds exactly what depends on them, falling back to a full rebuild when
 // nothing matches dependency tracking. Rebuilt routes are sent to reload.
 func (b *Builder) processChanges(changed []string, hub *DevHub) {
+	defer boostDevGC()()
 	if os.Getenv("KRATE_DEV_PROFILE") != "" {
 		started := time.Now()
 		b.Prof = NewProfiler(true)
 		if dir := os.Getenv("KRATE_DEV_CPUPROFILE"); dir != "" {
 			if f, err := os.Create(filepath.Join(dir, fmt.Sprintf("cpu-%d.prof", started.UnixNano()))); err == nil {
+				runtime.SetBlockProfileRate(1000)
+				runtime.SetMutexProfileFraction(5)
 				if pprof.StartCPUProfile(f) == nil {
-					defer func() { pprof.StopCPUProfile(); _ = f.Close() }()
+					defer func() {
+						pprof.StopCPUProfile()
+						_ = f.Close()
+						for _, name := range []string{"block", "mutex"} {
+							if g, err := os.Create(f.Name() + "." + name); err == nil {
+								_ = pprof.Lookup(name).WriteTo(g, 0)
+								_ = g.Close()
+							}
+						}
+					}()
 				}
 			}
 		}
