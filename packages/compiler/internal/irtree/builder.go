@@ -250,6 +250,7 @@ func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
 		HasLinks:         b.hasLinks,
 		RuntimeStore:     b.runtimeProps,
 		Functions:        ann.Functions,
+		ComponentSources: ann.ComponentSources,
 		CVAFactories:     b.cvaFactories,
 		ContextDefaults:  b.contextDefaults,
 		ModuleConstInits: b.moduleConstInits,

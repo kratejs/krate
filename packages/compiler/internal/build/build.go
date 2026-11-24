@@ -2391,6 +2391,10 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				}
 				b.warnPublicStylesheets(h)
 				h = b.prefixHeadURLs(h)
+				// 2c. The dev component inspector's table (see devcomponents.go).
+				if b.DevMode {
+					h = finishDevComponents(h, b.Root)
+				}
 				// 3. Minify code in memory
 				if b.Cfg.ShouldMinifyHTML() {
 					h = minifyHTMLWith(h, b.linkedWhiteSpaceRules(h))
@@ -2915,6 +2919,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 			injectDynamicRoutePlaceholders(tree, extractParamNames(page, b.Cfg.PagesDir))
 		}
 		emitter := renderer.NewEmitter()
+		emitter.DevInspect = b.DevMode
 		emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 		emitter.IconResolver = b.iconResolver
 		emitter.EvalJS = b.jsExprEvaluator()
@@ -2927,6 +2932,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 				injectDynamicRoutePlaceholders(t, extractParamNames(page, b.Cfg.PagesDir))
 			}
 			em := renderer.NewEmitter()
+			em.DevInspect = b.DevMode
 			em.CodeTheme = b.Cfg.Markdown.CodeTheme
 			em.IconResolver = b.iconResolver
 			em.EvalJS = b.jsExprEvaluator()
@@ -3930,6 +3936,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	}
 	layoutIslandCache.Store(layoutPath, hosted)
 	emitter := renderer.NewEmitter()
+	emitter.DevInspect = b.DevMode
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()
@@ -4060,6 +4067,7 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 		return nil, renderErrors(page, tree.Errors)
 	}
 	emitter := renderer.NewEmitter()
+	emitter.DevInspect = b.DevMode
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.BasePath = b.Cfg.BaseURLPath()
 	result := emitter.Emit(tree)
@@ -4201,6 +4209,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 		return ""
 	}
 	emitter := renderer.NewEmitter()
+	emitter.DevInspect = b.DevMode
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.EvalJS = b.jsExprEvaluator()
 	emitter.BasePath = b.Cfg.BaseURLPath()

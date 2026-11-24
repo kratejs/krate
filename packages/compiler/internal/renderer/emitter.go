@@ -38,6 +38,9 @@ const SrcMarkEnd = "/*@k:end*/"
 
 type EmitResult struct {
 	strippedMeta *sync.Map
+	// DevInspect makes GenerateNewHydrationJS register each client scope's
+	// signals and hydration time for the component inspector (dev only).
+	DevInspect bool
 	// TrackSources makes GenerateNewHydrationJS leave source markers.
 	TrackSources bool
 	SrcMarks     []SrcMark
@@ -215,6 +218,13 @@ type Emitter struct {
 	// signatures as inert (shared with sub-emitters); walkMetaSlots drops the
 	// hydration markers of their head tags. Reactive head content keeps them.
 	strippedMeta *sync.Map
+
+	// DevInspect adds the component inspector's markers (dev builds only;
+	// see devmarks.go). devStack holds the keys of the instances being
+	// emitted; componentSources the files components come from.
+	DevInspect       bool
+	devStack         []string
+	componentSources map[string]string
 }
 
 // goRenderCollector accumulates Go-component render requests and hands out
@@ -262,6 +272,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	e.contextDefaults = tree.ContextDefaults
 	e.moduleConsts = tree.ModuleConstInits
 	e.moduleRun = tree.ModuleRun
+	e.componentSources = tree.ComponentSources
 	e.externalIslands = map[string]string{}
 	for _, x := range tree.ExternalComponents {
 		e.externalIslands[externalIslandKey(x.Local, x.Offset)] = x.ID
@@ -309,7 +320,11 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	// body like <Toast/> compiles to h(Toast, ...) which throws ReferenceError.
 	listComponents := collectListComponentFuncs(tree.Root, tree.Functions)
 
+	if e.DevInspect {
+		output.HTML += devIslandComments(tree)
+	}
 	return &EmitResult{
+		DevInspect:       e.DevInspect,
 		Warnings:         e.unboundSlotWarnings(output.Signatures),
 		HTML:             output.HTML + output.Templates,
 		HeadHTML:         e.headHTML,
@@ -434,6 +449,24 @@ func (e *Emitter) emitNode(node *irtree.ComponentNode) SlotOutput {
 	if node == nil {
 		return SlotOutput{}
 	}
+	if !e.DevInspect {
+		return e.emitNodeTier(node)
+	}
+	c := e.devNode(node)
+	e.devStack = append(e.devStack, c.Key)
+	out := e.emitNodeTier(node)
+	e.devStack = e.devStack[:len(e.devStack)-1]
+	if node.Tier == irtree.TierRuntime && !node.IsSSREval {
+		// A region has no element at build time; it renders per request.
+		c.Region = "region-" + string(node.ID)
+		out.HTML = devComment(c) + out.HTML
+		return out
+	}
+	return e.devMark(out, c)
+}
+
+// emitNodeTier emits node by its tier.
+func (e *Emitter) emitNodeTier(node *irtree.ComponentNode) SlotOutput {
 	// SSR-evaluated components: use the SSREval engine with prop bindings
 	if node.IsSSREval {
 		return e.emitSSREvaluated(node)
@@ -570,6 +603,20 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	}
 	if node.SSREvalBindings != nil {
 		eval.SetBindings(node.SSREvalBindings)
+	}
+	if e.DevInspect {
+		sources := e.componentSources
+		eval.devStack = []string{string(node.ID)}
+		eval.devMark = func(fn *ast.FnDecl, parent, key, html string) string {
+			return MarkDevRoots(html, EncodeDevComponent(DevComponent{
+				Key:    key,
+				Name:   fn.Name,
+				Tier:   devBuildTimeTier(sources[fn.Name]),
+				File:   sources[fn.Name],
+				Line:   fn.Position.Line,
+				Parent: parent,
+			}))
+		}
 	}
 	eval.SetCallerValues(node.SSREvalCaller)
 	if e.IconResolver != nil {
@@ -1078,6 +1125,7 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 	outputs := make([]SlotOutput, len(slots))
 	subErrs := make([][]error, len(slots))
 	base := append([]irtree.SlotID{}, e.clientStack...)
+	devBase := append([]string{}, e.devStack...)
 	emitOne := func(idx int) {
 		sub := NewEmitter()
 		sub.functions = e.functions
@@ -1095,6 +1143,9 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 		sub.moduleRun = e.moduleRun
 		sub.CodeTheme = e.CodeTheme
 		sub.clientStack = append([]irtree.SlotID{}, base...)
+		sub.DevInspect = e.DevInspect
+		sub.devStack = append([]string{}, devBase...)
+		sub.componentSources = e.componentSources
 		outputs[idx] = sub.emitSlotNode(slots[idx])
 		subErrs[idx] = sub.errs
 	}

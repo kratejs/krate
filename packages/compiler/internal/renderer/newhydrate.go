@@ -81,6 +81,9 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	// Rebuild the comment-marker cache against the current DOM (fresh page
 	// load or SPA navigation).
 	b.WriteString("refreshSlots();\n")
+	if result.DevInspect {
+		b.WriteString(devRegisterJS)
+	}
 	for _, decl := range result.SharedModuleVars {
 		b.WriteString(decl)
 		b.WriteString(";\n")
@@ -195,7 +198,13 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		// One failing component must not stop the scopes after it, or the
 		// router. Suspense signals pass through to the boundary run.
 		b.WriteString("try{\n")
+		if result.DevInspect {
+			b.WriteString("var __kdt=performance.now();\n")
+		}
 		b.WriteString(bodies[i])
+		if result.DevInspect {
+			b.WriteString(devRegisterCall(sig))
+		}
 		b.WriteString("}catch(e){__krateScopeErr(e);}\n")
 		if owned || remountable {
 			b.WriteString("});\n")
@@ -740,3 +749,30 @@ window.isValidElement=function(v){return (typeof Node!=='undefined'&&v instanceo
 window.Children={toArray:function(c){if(c==null||c===false||c===true)return [];if(Array.isArray(c)){var o=[];for(var i=0;i<c.length;i++){var a=window.Children.toArray(c[i]);for(var j=0;j<a.length;j++)o.push(a[j]);}return o;}return [c];},count:function(c){return window.Children.toArray(c).length;},only:function(c){return window.Children.toArray(c)[0];},map:function(c,fn){return window.Children.toArray(c).map(fn);},forEach:function(c,fn){var a=window.Children.toArray(c);for(var i=0;i<a.length;i++)fn(a[i],i);}};
 window.cloneElement=function(el,props){if(el==null||el===false||el===true)return el;var n=(typeof Node!=='undefined'&&el instanceof Node)?el.cloneNode(true):el;if(props&&n&&n.nodeType===1){for(var k in props){if(k==='children')continue;var v=props[k];if(v==null||v===false)continue;if(k==='className'||k==='class'){n.setAttribute('class',String(v));}else if(k==='style'&&typeof v==='object'){for(var s in v)n.style[s]=v[s];}else if(k.indexOf('on')===0&&typeof v==='function'){krateOn(n,k,v);}else{n.setAttribute(k,String(v));}}}if(arguments.length>2){while(n.firstChild)n.removeChild(n.firstChild);for(var i=2;i<arguments.length;i++){var c=arguments[i];if(c==null||c===false||c===true)continue;n.appendChild(typeof Node!=='undefined'&&c instanceof Node?c:document.createTextNode(String(c)));}}return n;};
 `
+
+// devRegisterJS defines the dev-only helper each client scope calls at the
+// end of its hydration: it records the scope's hydration time in
+// __krate_dev_hydration[key] (ms) and its signal getters in
+// __krate_dev_signals ({c: key, name, get}), replacing the entries of an
+// earlier mount. It is global because lazy chunks call it too.
+const devRegisterJS = "globalThis.__krate_dev_reg=globalThis.__krate_dev_reg||function(c,t,s){var g=globalThis,h=g.__krate_dev_hydration||(g.__krate_dev_hydration={});h[c]=Math.round((performance.now()-t)*1000)/1000;var l=g.__krate_dev_signals||(g.__krate_dev_signals=[]);for(var i=0;i<s.length;i++){var e={c:c,name:s[i][0],get:s[i][1]},k=-1;for(var j=0;j<l.length;j++){if(l[j].c===c&&l[j].name===e.name){k=j;break;}}if(k<0)l.push(e);else l[k]=e;}};\n"
+
+// devRegisterCall registers one scope's signals and hydration time.
+func devRegisterCall(sig irtree.ComponentSignature) string {
+	var b strings.Builder
+	b.WriteString("__krate_dev_reg(")
+	b.WriteString(strconv.Quote(string(sig.ComponentID)))
+	b.WriteString(",__kdt,[")
+	for i, s := range sig.Signals {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString("[")
+		b.WriteString(strconv.Quote(s.Name))
+		b.WriteString(",")
+		b.WriteString(s.Name)
+		b.WriteString("]")
+	}
+	b.WriteString("]);\n")
+	return b.String()
+}

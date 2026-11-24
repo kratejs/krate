@@ -17,6 +17,12 @@ import (
 // that a static build assertion cannot see.
 func runHeadless(t *testing.T, page, check string) {
 	t.Helper()
+	runHeadlessMode(t, page, check, false)
+}
+
+// runHeadlessMode is runHeadless with a dev build when dev is set.
+func runHeadlessMode(t *testing.T, page, check string, dev bool) {
+	t.Helper()
 	if _, err := exec.LookPath("node"); err != nil {
 		skipOrFail(t, "node is not installed")
 	}
@@ -46,7 +52,9 @@ func runHeadless(t *testing.T, page, check string) {
 	cfg := config.Default()
 	cfg.PagesDir = pagesDir
 	cfg.OutDir = filepath.Join(root, "dist")
-	if err := New(root, cfg).BuildAll(); err != nil {
+	b := New(root, cfg)
+	b.DevMode = dev
+	if err := b.BuildAll(); err != nil {
 		t.Fatalf("build: %v", err)
 	}
 

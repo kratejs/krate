@@ -590,6 +590,9 @@ type ComponentTree struct {
 	Pages        map[string]*ComponentNode
 	RuntimeStore *RuntimePropStore
 	Functions    map[string]*ast.FnDecl
+	// ComponentSources maps component function names to the files that
+	// define them (the dev component inspector reads it).
+	ComponentSources map[string]string
 	// CVAFactories holds module-wide `const X = cva(...)` specs so the emitter
 	// can fold variant calls in prop-driven (SSREval) components.
 	CVAFactories map[string]*CVASpec
