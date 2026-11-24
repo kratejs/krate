@@ -78,11 +78,9 @@ func runBrowserConformanceMode(t *testing.T, shared, dev bool) {
 		cfg.OutDir = filepath.Join(t.TempDir(), "dist")
 	}
 	if dev {
+		// The overlay and its dock stay on: they must not cover the controls
+		// the corpus clicks, also without a dev server behind them.
 		cfg.OutDir = filepath.Join(t.TempDir(), "dist")
-		// Served statically there is no dev server for the overlay to talk
-		// to; its toolbar would cover the controls the corpus clicks.
-		off := false
-		cfg.DevServer.Overlay, cfg.DevServer.Toolbar = &off, &off
 	}
 	b := New(projectRoot, cfg)
 	b.shareAllScopes = shared
