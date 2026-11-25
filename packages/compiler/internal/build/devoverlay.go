@@ -202,19 +202,40 @@ var devBuildWait = 60 * time.Second
 // rewrites the server bundles page by page, so a request in that window got a
 // 404 or a page of the old build with the assets of the new one. The dev
 // endpoints (the reload stream, the error reports) and the health checks pass.
+// A rebuild in turn waits for the requests the gate let through before it (see
+// BeginBuild), except streams and upgraded connections, which stay open.
 func devBuildGate(hub *DevHub, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if idle := hub.buildIdle(); idle != nil && !strings.HasPrefix(p, "/__krate/") && p != "/healthz" && p != "/readyz" {
-			timer := time.NewTimer(devBuildWait)
+		if strings.HasPrefix(p, "/__krate/") || p == "/healthz" || p == "/readyz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		long := r.Header.Get("Upgrade") != "" || strings.Contains(r.Header.Get("Accept"), "text/event-stream")
+		var timeout <-chan time.Time
+		for {
+			idle, leave := hub.enterServe()
+			if idle == nil {
+				if long {
+					leave()
+				} else {
+					defer leave()
+				}
+				break
+			}
+			if timeout == nil {
+				timer := time.NewTimer(devBuildWait)
+				defer timer.Stop()
+				timeout = timer.C
+			}
 			select {
 			case <-idle:
+				continue
 			case <-r.Context().Done():
-				timer.Stop()
 				return
-			case <-timer.C:
+			case <-timeout:
 			}
-			timer.Stop()
+			break
 		}
 		next.ServeHTTP(w, r)
 	})

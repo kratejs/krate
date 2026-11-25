@@ -56,6 +56,64 @@ func TestDevBuildGateHoldsRequestsUntilTheRebuildEnds(t *testing.T) {
 	}
 }
 
+// A rebuild that starts while a request is being served waits for it: a full
+// rebuild empties the output, and a page whose server bundle was importing its
+// chunks then failed with a 500. An open event stream does not hold it up.
+func TestDevRebuildWaitsForTheRequestsBeingServed(t *testing.T) {
+	hub := NewDevHub()
+	entered := make(chan struct{}, 2)
+	release, closeStream := make(chan struct{}), make(chan struct{})
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		if r.URL.Path == "/api/events" {
+			<-closeStream
+			return
+		}
+		<-release
+	})
+	h := devBuildGate(hub, next)
+
+	go h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/page/", nil))
+	stream := httptest.NewRequest("GET", "/api/events", nil)
+	stream.Header.Set("Accept", "text/event-stream")
+	go h.ServeHTTP(httptest.NewRecorder(), stream)
+	<-entered
+	<-entered
+
+	began := make(chan struct{})
+	go func() {
+		hub.BeginBuild()
+		close(began)
+	}()
+	select {
+	case <-began:
+		t.Fatal("the rebuild began while a page was still being served")
+	case <-time.After(100 * time.Millisecond):
+	}
+	// Requests that arrive now wait for the rebuild, not for the page.
+	late := make(chan struct{})
+	go func() {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/late/", nil))
+		close(late)
+	}()
+	release <- struct{}{}
+	select {
+	case <-began:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the rebuild did not begin after the page was served")
+	}
+	select {
+	case <-entered:
+		t.Fatal("a request was served while the rebuild ran")
+	case <-time.After(50 * time.Millisecond):
+	}
+	hub.EndBuild()
+	<-entered
+	close(release)
+	<-late
+	close(closeStream)
+}
+
 // probe requests urls over and over until stopped and keeps every answer that
 // is not a 200.
 type probe struct {

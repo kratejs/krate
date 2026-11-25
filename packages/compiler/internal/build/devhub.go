@@ -90,10 +90,14 @@ type DevHub struct {
 	rebuilds    int
 
 	// builds counts the rebuilds running; idle is closed while there are none
-	// (nil then). Requests wait on it (see devBuildGate).
+	// (nil then). Requests wait on it (see devBuildGate). serving counts the
+	// requests the gate let through that have not finished; drained is closed
+	// when that count drops to zero while a rebuild waits for it.
 	buildMu sync.Mutex
 	builds  int
 	idle    chan struct{}
+	serving int
+	drained chan struct{}
 
 	// serverErrs are failed server-side parts (sidecars, middleware) that have
 	// not recovered yet, by source, so a tab opened later still shows them.
@@ -122,14 +126,33 @@ func NewDevHub() *DevHub {
 
 // BeginBuild marks a rebuild as running: the dev server holds requests for
 // pages and assets until EndBuild, since a rebuild rewrites the output they
-// are served from. Calls nest.
+// are served from. Calls nest. It returns once the requests already being
+// served have finished, or after devBuildDrainWait: a full rebuild empties the
+// output directory, and a page whose server bundle was still importing its
+// chunks failed with a 500.
 func (h *DevHub) BeginBuild() {
 	h.buildMu.Lock()
-	defer h.buildMu.Unlock()
 	if h.builds == 0 {
 		h.idle = make(chan struct{})
 	}
 	h.builds++
+	var drained chan struct{}
+	if h.serving > 0 {
+		if h.drained == nil {
+			h.drained = make(chan struct{})
+		}
+		drained = h.drained
+	}
+	h.buildMu.Unlock()
+	if drained == nil {
+		return
+	}
+	timer := time.NewTimer(devBuildDrainWait)
+	defer timer.Stop()
+	select {
+	case <-drained:
+	case <-timer.C:
+	}
 }
 
 // EndBuild ends a rebuild started with BeginBuild.
@@ -146,12 +169,32 @@ func (h *DevHub) EndBuild() {
 	}
 }
 
-// buildIdle returns a channel closed when no rebuild is running, or nil when
-// none is.
-func (h *DevHub) buildIdle() <-chan struct{} {
+// devBuildDrainWait caps how long a rebuild waits for the requests already
+// being served, so a slow page cannot hold it up.
+var devBuildDrainWait = 5 * time.Second
+
+// enterServe lets a request through when no rebuild is running and counts it
+// until leave is called; otherwise it returns the channel that closes when
+// the rebuilds end. Checking and counting under one lock means a rebuild
+// either sees the request or the request sees the rebuild.
+func (h *DevHub) enterServe() (idle <-chan struct{}, leave func()) {
 	h.buildMu.Lock()
 	defer h.buildMu.Unlock()
-	return h.idle
+	if h.idle != nil {
+		return h.idle, nil
+	}
+	h.serving++
+	return nil, h.leaveServe
+}
+
+func (h *DevHub) leaveServe() {
+	h.buildMu.Lock()
+	defer h.buildMu.Unlock()
+	h.serving--
+	if h.serving == 0 && h.drained != nil {
+		close(h.drained)
+		h.drained = nil
+	}
 }
 
 // SetReloadHook installs fn to run once for every "reload" event published.

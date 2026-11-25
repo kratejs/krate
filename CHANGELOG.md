@@ -761,7 +761,9 @@ host code runs in the native process. Names and options may change between relea
   rebuild of some pages rewrote the server bundles under a request. A page served just before a rebuild, or
   still open in a browser, also named island chunks the rebuild had deleted, which failed with `Failed to fetch
   dynamically imported module`. Requests for pages and assets now wait for the running rebuild (up to a minute),
-  and the chunks a rebuild replaced stay served from `.krate/dev-retired-chunks` for 30 minutes.
+  and the chunks a rebuild replaced stay served from `.krate/dev-retired-chunks` for 30 minutes. A rebuild
+  in turn waits (up to 5 seconds) for the requests already being served, since one that started just before
+  it could still answer a 404 or, for a server-rendered page importing its chunks, a 500.
 
 - Types: apps that keep `@types/react` (migrated Next.js apps) failed to type-check because Krate's
   `JSX.Element` is a DOM `Node`, which React's `ReactNode` rejects: `<Link>`/`<Head>` gave TS2786 under
