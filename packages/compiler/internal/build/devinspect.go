@@ -202,7 +202,7 @@ func devRouteInfo(root string, cfg *config.Config, outDir, urlPath string) (*Dev
 	info := &DevRouteInfo{
 		Path:       route,
 		Pattern:    pattern,
-		Source:     page.Source,
+		Source:     filepath.ToSlash(page.Source),
 		Mode:       page.mode(),
 		Revalidate: page.Revalidate,
 		Params:     params,
@@ -390,7 +390,7 @@ func devRouteList(root string, cfg *config.Config, outDir string, api []DevRoute
 		pat := devRoutePattern(root, cfg, p)
 		e, ok := byPattern[pat]
 		if !ok {
-			e = &DevRouteEntry{Pattern: pat, Source: p.Source, Kind: "page", Paths: []string{}}
+			e = &DevRouteEntry{Pattern: pat, Source: filepath.ToSlash(p.Source), Kind: "page", Paths: []string{}}
 			byPattern[pat] = e
 			order = append(order, pat)
 		}

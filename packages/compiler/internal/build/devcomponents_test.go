@@ -250,8 +250,9 @@ func TestDevComponentIslands(t *testing.T) {
 
 func TestFinishDevComponents(t *testing.T) {
 	t.Parallel()
+	root := t.TempDir()
 	enc := func(key, name, parent string) string {
-		return renderer.EncodeDevComponent(renderer.DevComponent{Key: key, Name: name, Tier: "static", File: "/r/src/" + name + ".tsx", Line: 1, Parent: parent})
+		return renderer.EncodeDevComponent(renderer.DevComponent{Key: key, Name: name, Tier: "static", File: filepath.Join(root, "src", name+".tsx"), Line: 1, Parent: parent})
 	}
 	doc := `<html><body><div id=root><main data-kd="` + enc("a", "A", "") + `">` +
 		`<p data-kd="` + enc("b", "B", "a") + ` ` + enc("c", "C", "b") + `">x</p>` +
@@ -263,7 +264,7 @@ func TestFinishDevComponents(t *testing.T) {
 		`</main></div>` +
 		`<!--kd:` + renderer.EncodeDevComponent(renderer.DevComponent{Key: "island:i1", Name: "Chart", Tier: "island", Island: "i1"}) + `-->` +
 		`</body></html>`
-	got := finishDevComponents(doc, "/r")
+	got := finishDevComponents(doc, root)
 	rows, marked := readDevTable(t, got)
 	names := []string{}
 	for _, r := range rows {
