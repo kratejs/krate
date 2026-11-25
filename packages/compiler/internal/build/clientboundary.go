@@ -981,7 +981,9 @@ type splitChunkFacts struct {
 	ownInputs    map[string]bool
 	ownText      string
 
-	once  sync.Once
+	// mu guards done and the exact check's result below.
+	mu    sync.Mutex
+	done  bool
 	exact clientChunkInfo
 	text  string
 	err   error
@@ -1359,8 +1361,11 @@ func (b *Builder) recordSplitClientChunk(r clientChunkReq, src string, o batchOu
 }
 
 // exactChunk returns info and the chunk text as a separate build gives them.
-// A chunk of a split batch is checked on its own, as an unsplit batch of
-// one, once.
+// A chunk of a split batch gets its own check once. The checks the pages ask
+// for are batched like the other client chunk jobs (runExactChunkJobs): one
+// esbuild call per round instead of one per chunk. Every caller waits on the
+// round job itself, never on a lock, so a page that asks while another page's
+// check is queued counts as waiting and the round can start.
 func (b *Builder) exactChunk(info clientChunkInfo) (clientChunkInfo, string, error) {
 	f := info.split
 	if f == nil {
@@ -1369,19 +1374,84 @@ func (b *Builder) exactChunk(info clientChunkInfo) (clientChunkInfo, string, err
 		b.clientChunkMu.Unlock()
 		return info, text, nil
 	}
-	f.once.Do(func() {
+	f.mu.Lock()
+	done := f.done
+	f.mu.Unlock()
+	if !done {
+		// Keyed by f, not only the chunk: f belongs to one split check, as the
+		// sync.Once it replaces did, so a later check of the chunk (another
+		// build on this Builder, other options) never reuses this result.
+		j := b.roundJobs.job("client-chunk-exact", fmt.Sprintf("%s\x00%p", f.req.key, f), f.req, b.runExactChunkJobs)
+		b.rounds.wait(j)
+		res, _ := j.output.(*clientChunkResult)
+		if res == nil {
+			// The job ran in a batch that failed outright.
+			res = b.checkClientChunkAlone(f.req)
+		}
+		f.mu.Lock()
+		if !f.done {
+			f.done = true
+			if res.err != nil {
+				f.err = res.err
+			} else {
+				f.exact = res.info
+				b.clientChunkMu.Lock()
+				f.text = b.clientChunkText[res.info.url]
+				b.clientChunkMu.Unlock()
+			}
+		}
+		f.mu.Unlock()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.exact, f.text, f.err
+}
+
+// runExactChunkJobs gives the chunks of jobs their own checks: unsplit
+// batches, which build every entry as a separate build would, of at most
+// clientChunkBatchSize entries, a few at once (see runClientChunkJobs).
+func (b *Builder) runExactChunkJobs(jobs []*roundJob) {
+	stop := b.phase("batch:client-chunks-exact-checks")
+	defer stop()
+	runSubBatches(jobs, clientChunkBatchSize, 3, b.runExactChunkBatch)
+}
+
+// runExactChunkBatch checks jobs in one unsplit esbuild call. An entry the
+// batch cannot stand in for (one another entry's wrapping changes), or that
+// fails, is checked alone as before, so its error names its own boundary.
+func (b *Builder) runExactChunkBatch(jobs []*roundJob) {
+	for range jobs {
 		b.Prof.Add("batch:client-chunks-exact", 0)
-		res := b.checkClientChunkAlone(f.req)
-		if res.err != nil {
-			f.err = res.err
+	}
+	if len(jobs) == 1 {
+		jobs[0].output = b.checkClientChunkAlone(jobs[0].input.(clientChunkReq))
+		return
+	}
+	guard := b.newUnavailableGuard()
+	opts, err := b.clientChunkOptions(guard)
+	if err == nil {
+		entries := make([]batchEntry, len(jobs))
+		for i, j := range jobs {
+			r := j.input.(clientChunkReq)
+			entries[i] = batchEntry{Source: clientChunkSource(r.entry), ResolveDir: r.resolveDir, Sourcefile: "krate-client-boundary.js", Loader: api.LoaderJS}
+		}
+		outs, res := esbuildBatch(opts, entries)
+		if len(res.Errors) == 0 {
+			for i, j := range jobs {
+				r := j.input.(clientChunkReq)
+				files := outs[i].Files
+				if outs[i].Unsafe || len(files) == 0 || len(guard.errors(files)) > 0 {
+					j.output = b.checkClientChunkAlone(r)
+					continue
+				}
+				j.output = b.recordClientChunk(r, entries[i].Source, batchJS(files), outs[i].Metafile, outs[i].Inputs)
+			}
 			return
 		}
-		f.exact = res.info
-		b.clientChunkMu.Lock()
-		f.text = b.clientChunkText[res.info.url]
-		b.clientChunkMu.Unlock()
-	})
-	return f.exact, f.text, f.err
+	}
+	for _, j := range jobs {
+		j.output = b.checkClientChunkAlone(j.input.(clientChunkReq))
+	}
 }
 
 // checkClientChunkAlone checks one chunk as an unsplit batch does, falling
