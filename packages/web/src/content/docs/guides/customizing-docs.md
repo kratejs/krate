@@ -175,9 +175,9 @@ site-wide styles in a page/layout module.
 
 Notes:
 
-- Search styles come from the theme's `.krate-docs-search-*` classes - override
-  them from your own imported stylesheet, or replace `DocsSearch` with your own
-  combobox against `window.__krateSearch`.
+- Search styles come from the `.krate-docs-search-*` classes in the theme's
+  `search.css` - override them from your own imported stylesheet, or replace
+  `DocsSearch` with your own UI against `window.__krateSearch`.
 - Interactive behavior (sidebar, TOC tracking, theme toggle) lives in the theme
   component itself (`@krate/base-docs-theme`), not a separate script.
   `@krate/simple-docs-theme` takes the opposite approach: its chrome has no

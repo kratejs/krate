@@ -1,24 +1,34 @@
 import { createSignal, onMount, onCleanup, useRef } from "@krate/runtime";
 import { PLATFORM_PREPAINT } from "./platform";
+import "./search.css";
 
 /**
- * Headless docs search - the theme places this wherever it wants and styles it
- * entirely with its own CSS. The plugin only provides the index + the
- * `window.__krateSearch` API ({ search(query, { limit }) => Promise<Hit[]> },
- * with Hit = { href, title, body, category }). No markup is injected by the
- * plugin and this component ships NO default styles: every class below
- * (`krate-docs-search*`) is yours to style.
+ * Docs search: a button that opens a modal search dialog. The plugin only
+ * provides the index and the `window.__krateSearch` API
+ * ({ search(query, { limit }) => Promise<Hit[]> }, with
+ * Hit = { href, title, body, category }); this component renders the UI and
+ * styles it with the `krate-docs-search*` classes in search.css.
+ *
+ * It works on any page of the site, not only docs pages: when the page does
+ * not advertise the search module, the component reads its URL from the docs
+ * index page (`docsUrl`).
  */
 export interface DocsSearchProps {
+  /** Text on the button, e.g. "Search docs". */
   placeholder?: string;
   maxResults?: number;
   label?: string;
   /**
-   * Keyboard shortcut that focuses the input (e.g. "mod+k", "/"). Defaults to
+   * Keyboard shortcut that opens the dialog (e.g. "mod+k", "/"). Defaults to
    * "mod+k" (Cmd+K on macOS, Ctrl+K elsewhere); pass "off" (or "none" / "")
    * to disable it.
    */
   hotkey?: string;
+  /**
+   * A docs page that advertises the search module, read when the current
+   * page does not (a marketing home page, a blog). Default "/docs/".
+   */
+  docsUrl?: string;
 }
 
 /** The effective hotkey: "mod+k" unless one is configured or turned off. */
@@ -37,18 +47,19 @@ interface Hit {
   category?: string;
 }
 
-/**
- * Inject the search module the docs plugin advertises in
- * `<meta name="krate-search-src">`. A no-op when the module is already loaded
- * or loading, or when the site loads it eagerly (no meta tag).
- */
-function loadSearchModule(): void {
+/** A result as the dialog shows it. */
+interface Row {
+  href: string;
+  title: string;
+  crumb: string;
+  snippet: string;
+}
+
+const RECENT_KEY = "krate-docs-search-recent";
+const RECENT_MAX = 5;
+
+function injectSearchScript(src: string): void {
   const w = window as any;
-  if (w.__krateSearch || w.__krateSearchLoading) return;
-  const meta = document.querySelector('meta[name="krate-search-src"]');
-  const src = meta && meta.getAttribute("content");
-  if (!src) return;
-  w.__krateSearchLoading = true;
   const el = document.createElement("script");
   el.src = src;
   el.async = true;
@@ -59,13 +70,53 @@ function loadSearchModule(): void {
   document.head.appendChild(el);
 }
 
-function searchAPI(): Promise<any> {
+/** The search module URL a page's markup advertises, if any. */
+function searchSrcIn(root: Document): string | null {
+  const meta = root.querySelector('meta[name="krate-search-src"]');
+  const content = meta && meta.getAttribute("content");
+  if (content) return content;
+  const script = root.querySelector('script[src*="/search/search."]');
+  return script ? script.getAttribute("src") : null;
+}
+
+/**
+ * Load the search module. The docs plugin advertises it in
+ * `<meta name="krate-search-src">` on docs pages; elsewhere the URL is read
+ * from the docs index page. A no-op when the module is loaded or loading.
+ */
+function loadSearchModule(docsUrl: string): void {
+  const w = window as any;
+  if (w.__krateSearch || w.__krateSearchLoading) return;
+  w.__krateSearchLoading = true;
+  const own = document.querySelector('meta[name="krate-search-src"]');
+  const ownSrc = own && own.getAttribute("content");
+  if (ownSrc) {
+    injectSearchScript(ownSrc);
+    return;
+  }
+  if (document.querySelector('script[src*="/search/search."]')) {
+    // Loaded eagerly by the page; it announces itself with krate:search-ready.
+    return;
+  }
+  fetch(docsUrl, { credentials: "same-origin" })
+    .then((r) => (r.ok ? r.text() : ""))
+    .then((html) => {
+      const src = html ? searchSrcIn(new DOMParser().parseFromString(html, "text/html")) : null;
+      if (src) injectSearchScript(src);
+      else w.__krateSearchLoading = false;
+    })
+    .catch(() => {
+      w.__krateSearchLoading = false;
+    });
+}
+
+function searchAPI(docsUrl: string): Promise<any> {
   const w = window as any;
   if (w.__krateSearch) return Promise.resolve(w.__krateSearch);
   return new Promise((resolve) => {
     const done = () => resolve((window as any).__krateSearch);
     w.addEventListener("krate:search-ready", done, { once: true });
-    loadSearchModule();
+    loadSearchModule(docsUrl);
     // In case the module loaded between the check and the listener.
     if ((window as any).__krateSearch) {
       w.removeEventListener("krate:search-ready", done);
@@ -89,10 +140,10 @@ interface HotkeyCombo {
 export function hotkeyKeys(hotkey: string, platform: "mac" | "other"): string[] {
   return hotkey.split("+").map((part) => {
     const p = part.trim().toLowerCase();
-    if (p === "mod") return platform === "mac" ? "\u2318" : "Ctrl";
-    if (p === "cmd" || p === "meta") return platform === "mac" ? "\u2318" : "Meta";
+    if (p === "mod") return platform === "mac" ? "⌘" : "Ctrl";
+    if (p === "cmd" || p === "meta") return platform === "mac" ? "⌘" : "Meta";
     if (p === "ctrl" || p === "control") return "Ctrl";
-    if (p === "alt" || p === "option") return platform === "mac" ? "\u2325" : "Alt";
+    if (p === "alt" || p === "option") return platform === "mac" ? "⌥" : "Alt";
     return p.toUpperCase();
   });
 }
@@ -142,117 +193,295 @@ function parseHotkey(hotkey: string | undefined): HotkeyCombo | null {
   return key ? { key, meta, ctrl, alt } : null;
 }
 
+/** Undo the HTML entities some engines leave in plain-text excerpts. */
+export function decodeEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&");
+}
+
+/** Query words worth highlighting (two characters or more). */
+export function queryTerms(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length >= 2);
+}
+
+/**
+ * About `size` characters of `body` around the first query term, cut at word
+ * boundaries, with an ellipsis where text was dropped.
+ */
+export function snippetAround(body: string, terms: string[], size: number): string {
+  const text = body.replace(/\s+/g, " ").trim();
+  if (text.length <= size) return text;
+  const lower = text.toLowerCase();
+  let at = -1;
+  for (const t of terms) {
+    const i = lower.indexOf(t);
+    if (i !== -1 && (at === -1 || i < at)) at = i;
+  }
+  let start = at > 40 ? at - 40 : 0;
+  if (start > 0) {
+    const space = text.indexOf(" ", start);
+    if (space !== -1 && space < at) start = space + 1;
+  }
+  let end = Math.min(text.length, start + size);
+  if (end < text.length) {
+    const space = text.lastIndexOf(" ", end);
+    if (space > start + size / 2) end = space;
+  }
+  return (start > 0 ? "…" : "") + text.slice(start, end) + (end < text.length ? "…" : "");
+}
+
+/** `text` split into runs that do and do not match a query term. */
+export function highlightParts(text: string, terms: string[]): { text: string; hit: boolean }[] {
+  if (terms.length === 0) return [{ text, hit: false }];
+  const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp("(" + escaped.join("|") + ")", "gi");
+  const out: { text: string; hit: boolean }[] = [];
+  let last = 0;
+  text.replace(re, (m: string, _g: string, offset: number) => {
+    if (offset > last) out.push({ text: text.slice(last, offset), hit: false });
+    out.push({ text: m, hit: true });
+    last = offset + m.length;
+    return m;
+  });
+  if (last < text.length) out.push({ text: text.slice(last), hit: false });
+  return out;
+}
+
+/** "Core concepts" for "/docs/core-concepts/routing/": the page's section. */
+export function crumbFor(href: string, category: string | undefined): string {
+  if (category) return category;
+  const parts = href.split(/[?#]/)[0].split("/").filter(Boolean);
+  // Drop the docs mount ("docs") and the page itself.
+  const sections = parts.slice(1, -1);
+  return sections
+    .map((s) => {
+      const words = s.replace(/[-_]+/g, " ");
+      return words.charAt(0).toUpperCase() + words.slice(1);
+    })
+    .join(" / ");
+}
+
+function readRecent(): Row[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((r) => r && typeof r.href === "string").slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRecent(row: Row): void {
+  try {
+    const next = [{ href: row.href, title: row.title, crumb: row.crumb, snippet: "" }].concat(
+      readRecent().filter((r) => r.href !== row.href),
+    );
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(next.slice(0, RECENT_MAX)));
+  } catch {
+    /* storage unavailable (private mode) - recent searches are optional */
+  }
+}
+
+function Highlighted(props: { text: string; terms: string[] }) {
+  return (
+    <>
+      {highlightParts(props.text, props.terms).map((part) =>
+        part.hit ? <mark>{part.text}</mark> : <span>{part.text}</span>,
+      )}
+    </>
+  );
+}
+
 export function DocsSearch(props: DocsSearchProps) {
-  const placeholder = props.placeholder || "Search";
+  const placeholder = props.placeholder || "Search docs";
   const limit = props.maxResults || 8;
   const label = props.label || "Search documentation";
   const hotkey = resolveSearchHotkey(props.hotkey);
+  const docsUrl = props.docsUrl || "/docs/";
 
-  const [results, setResults] = createSignal<Hit[]>([]);
-  const [open, setOpen] = createSignal(false);
+  const [rows, setRows] = createSignal<Row[]>([]);
+  const [terms, setTerms] = createSignal<string[]>([]);
+  const [query, setQuery] = createSignal("");
+  const [isOpen, setIsOpen] = createSignal(false);
+  const [closing, setClosing] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
-  const [active, setActive] = createSignal(-1);
+  const [active, setActive] = createSignal(0);
 
   const listId = "krate-docs-search-results";
   const statusId = "krate-docs-search-status";
   const optionId = (index: number) => "krate-docs-search-option-" + index;
 
-  // Krate assigns the element through ref={rootRef} at compile time.
-  // oxlint-disable-next-line eslint/prefer-const
-  let rootRef: HTMLElement | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let restoreFocus: HTMLElement | null = null;
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let closeTimer: ReturnType<typeof setTimeout> | null = null;
+  let seq = 0;
+
+  function showRecent() {
+    setTerms([]);
+    setRows(readRecent());
+    setActive(0);
+  }
 
   function run(q: string) {
+    const mine = ++seq;
     if (!q.trim()) {
-      setResults([]);
-      setOpen(false);
+      setLoading(false);
+      showRecent();
       return;
     }
     setLoading(true);
-    searchAPI()
+    searchAPI(docsUrl)
       .then((api) => api.search(q, { limit }))
       .then((hits: Hit[]) => {
-        setResults(hits || []);
-        setOpen(true);
-        setActive(-1);
+        if (mine !== seq) return;
+        const t = queryTerms(q);
+        setTerms(t);
+        setRows(
+          (hits || []).map((hit) => {
+            const href = hit.href || hit.path || "/";
+            return {
+              href,
+              title: decodeEntities(hit.title || "Untitled"),
+              crumb: crumbFor(href, hit.category),
+              snippet: snippetAround(decodeEntities(hit.body || hit.content || ""), t, 150),
+            };
+          }),
+        );
+        setActive(0);
         setLoading(false);
       })
       .catch(() => {
-        setResults([]);
+        if (mine !== seq) return;
+        setRows([]);
         setLoading(false);
       });
   }
 
   function onInput(value: string) {
+    setQuery(value);
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => run(value), 120);
+    timer = setTimeout(() => run(value), 90);
   }
 
-  function close(restore: boolean) {
-    setOpen(false);
-    setActive(-1);
-    if (restore && restoreFocus && inputRef.current === document.activeElement) {
-      restoreFocus.focus();
-      restoreFocus = null;
+  function warm() {
+    loadSearchModule(docsUrl);
+  }
+
+  function openDialog() {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (closeTimer) {
+      clearTimeout(closeTimer);
+      closeTimer = null;
     }
+    setClosing(false);
+    if (!dialog.open) dialog.showModal();
+    setIsOpen(true);
+    const input = inputRef.current;
+    if (query().trim() === "") showRecent();
+    if (input) {
+      input.focus();
+      input.select();
+    }
+    // Start the engine (and the index download) while the user types.
+    searchAPI(docsUrl).then((api) => api && api.ready && api.ready());
+  }
+
+  function closeDialog(animate: boolean) {
+    const dialog = dialogRef.current;
+    if (!dialog || !dialog.open) return;
+    if (!animate) {
+      setClosing(false);
+      setIsOpen(false);
+      dialog.close();
+      return;
+    }
+    setClosing(true);
+    closeTimer = setTimeout(() => {
+      closeTimer = null;
+      setClosing(false);
+      setIsOpen(false);
+      if (dialog.open) dialog.close();
+    }, 140);
+  }
+
+  function remember(index: number) {
+    const row = rows()[index];
+    if (row) writeRecent(row);
   }
 
   function choose(index: number) {
-    const hit = results()[index];
-    if (!hit) return;
-    const href = hit.href || hit.path || "/";
-    setOpen(false);
-    location.assign(href);
+    const link = document.getElementById(optionId(index));
+    if (!link) return;
+    // A real click, so the client router handles the navigation.
+    link.click();
+  }
+
+  function scrollActiveIntoView(index: number) {
+    const el = document.getElementById(optionId(index));
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape") {
+    const list = rows();
+    if (e.key === "ArrowDown" && list.length > 0) {
       e.preventDefault();
-      close(true);
-      return;
-    }
-    const list = results();
-    if (!open() || list.length === 0) return;
-    if (e.key === "Tab" && rootRef) {
-      // Keep keyboard focus inside the open search popover.
-      const focusables = Array.from(
-        rootRef.querySelectorAll<HTMLElement>('input, a[href]'),
-      );
-      if (focusables.length > 1) {
-        const current = focusables.indexOf(document.activeElement as HTMLElement);
-        if (e.shiftKey && current <= 0) {
-          e.preventDefault();
-          focusables[focusables.length - 1].focus();
-        } else if (!e.shiftKey && current === focusables.length - 1) {
-          e.preventDefault();
-          focusables[0].focus();
-        }
-      }
-    } else if (e.key === "ArrowDown") {
+      const next = (active() + 1) % list.length;
+      setActive(next);
+      scrollActiveIntoView(next);
+    } else if (e.key === "ArrowUp" && list.length > 0) {
       e.preventDefault();
-      setActive((active() + 1) % list.length);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActive((active() - 1 + list.length) % list.length);
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      setActive(0);
-    } else if (e.key === "End") {
-      e.preventDefault();
-      setActive(list.length - 1);
+      const next = (active() - 1 + list.length) % list.length;
+      setActive(next);
+      scrollActiveIntoView(next);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      choose(active() < 0 ? 0 : active());
+      if (list.length > 0) choose(active());
     }
   }
 
   onMount(function () {
-    function onDocClick(e: MouseEvent) {
-      if (rootRef && !rootRef.contains(e.target as Node)) close(false);
+    const dialog = dialogRef.current;
+
+    // Esc: animate the close instead of the browser's instant one.
+    function onCancel(e: Event) {
+      e.preventDefault();
+      closeDialog(true);
     }
-    document.addEventListener("click", onDocClick);
+    function onClose() {
+      setIsOpen(false);
+      setClosing(false);
+    }
+    // A click on the backdrop lands on the dialog itself, outside its box.
+    function onDialogClick(e: MouseEvent) {
+      if (!dialog || e.target !== dialog) return;
+      const r = dialog.getBoundingClientRect();
+      const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (!inside) closeDialog(true);
+    }
+    // Following a result: remember it and get the dialog out of the way.
+    function onResultClick(e: MouseEvent) {
+      const link = (e.target as HTMLElement).closest(".krate-docs-search-item") as HTMLElement | null;
+      if (!link) return;
+      const index = Number(link.getAttribute("data-index"));
+      if (index >= 0) remember(index);
+      if (!(e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1)) closeDialog(false);
+    }
+    if (dialog) {
+      dialog.addEventListener("cancel", onCancel);
+      dialog.addEventListener("close", onClose);
+      dialog.addEventListener("click", onDialogClick);
+      dialog.addEventListener("click", onResultClick);
+    }
 
     const combo = parseHotkey(hotkey);
     function onHotkey(e: KeyboardEvent) {
@@ -261,9 +490,11 @@ export function DocsSearch(props: DocsSearchProps) {
       if (combo.meta && !e.metaKey) return;
       if (combo.ctrl && !e.ctrlKey) return;
       if (combo.alt && !e.altKey) return;
-      // Don't steal the key while typing in another field.
+      // A bare key ("/") must not fire while typing in another field.
+      const bare = !combo.meta && !combo.ctrl && !combo.alt;
       const target = e.target as HTMLElement | null;
       if (
+        bare &&
         target &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
@@ -273,103 +504,184 @@ export function DocsSearch(props: DocsSearchProps) {
         return;
       }
       e.preventDefault();
-      const input = inputRef.current;
-      if (input) {
-        restoreFocus = document.activeElement as HTMLElement | null;
-        loadSearchModule();
-        input.focus();
-        input.select();
-      }
+      if (dialog && dialog.open && !closing()) closeDialog(true);
+      else openDialog();
     }
     if (combo) document.addEventListener("keydown", onHotkey);
 
+    // The client router swaps pages without a reload: close on navigation.
+    function onNavigate() {
+      closeDialog(false);
+    }
+    window.addEventListener("krate:navigate", onNavigate);
+
     onCleanup(function () {
-      document.removeEventListener("click", onDocClick);
+      if (dialog) {
+        dialog.removeEventListener("cancel", onCancel);
+        dialog.removeEventListener("close", onClose);
+        dialog.removeEventListener("click", onDialogClick);
+        dialog.removeEventListener("click", onResultClick);
+      }
       if (combo) document.removeEventListener("keydown", onHotkey);
+      window.removeEventListener("krate:navigate", onNavigate);
+      if (timer) clearTimeout(timer);
+      if (closeTimer) clearTimeout(closeTimer);
     });
   });
 
   return (
-    <div class="krate-docs-search" ref={rootRef}>
-      <span class="krate-docs-search-icon" aria-hidden="true">
-        <Icon name="tabler:search" width="15" height="15" />
-      </span>
-      <input
-        class="krate-docs-search-input"
-        type="search"
-        ref={inputRef}
-        placeholder={placeholder}
+    <div class="krate-docs-search">
+      <button
+        class="krate-docs-search-trigger"
+        type="button"
         aria-label={label}
-        role="combobox"
-        aria-haspopup="listbox"
-        aria-autocomplete="list"
-        aria-expanded={open() ? "true" : "false"}
-        aria-controls={open() ? listId : undefined}
-        aria-describedby={statusId}
-        aria-activedescendant={open() && active() >= 0 ? optionId(active()) : undefined}
-        autocomplete="off"
-        spellcheck="false"
-        onInput={(e: any) => onInput(e.target.value)}
-        onKeyDown={onKey}
-        onPointerEnter={loadSearchModule}
-        onFocus={() => {
-          loadSearchModule();
-          if (results().length > 0) setOpen(true);
-        }}
-        onBlur={() => {
-          // Keep the list open while focus moves into a result with the mouse.
-          setTimeout(() => {
-            if (rootRef && !rootRef.contains(document.activeElement)) close(false);
-          }, 0);
-        }}
-      />
-      {hotkey && (
-        <kbd class="krate-docs-search-kbd" aria-hidden="true">
-          <span class="krate-kbd-mac">{hotkeyLabel(hotkey, "mac")}</span>
-          <span class="krate-kbd-other">{hotkeyLabel(hotkey, "other")}</span>
-        </kbd>
-      )}
+        aria-haspopup="dialog"
+        aria-keyshortcuts={hotkey ? "Control+K Meta+K" : undefined}
+        onClick={openDialog}
+        onPointerEnter={warm}
+        onFocus={warm}
+      >
+        <span class="krate-docs-search-icon" aria-hidden="true">
+          <Icon name="tabler:search" width="16" height="16" />
+        </span>
+        <span class="krate-docs-search-placeholder">{placeholder}</span>
+        {hotkey && (
+          <kbd class="krate-docs-search-kbd" aria-hidden="true">
+            <span class="krate-kbd-mac">{hotkeyLabel(hotkey, "mac")}</span>
+            <span class="krate-kbd-other">{hotkeyLabel(hotkey, "other")}</span>
+          </kbd>
+        )}
+      </button>
       {hotkey && (
         <Head>
           <script>{"(function(){" + PLATFORM_PREPAINT + "})();"}</script>
         </Head>
       )}
-      <div class="krate-docs-search-status" id={statusId} role="status" aria-live="polite">
-        {loading()
-          ? "Searching"
-          : open()
-            ? results().length === 0
-              ? "No results"
-              : results().length + (results().length === 1 ? " result" : " results")
-            : ""}
-      </div>
-      {open() && (
-        <div class="krate-docs-search-results" id={listId} role="listbox" aria-label={label}>
-          {loading() && results().length === 0 && (
-            <div class="krate-docs-search-empty">Searching...</div>
-          )}
-          {!loading() && results().length === 0 && (
-            <div class="krate-docs-search-empty">No results</div>
-          )}
-          {results().map((hit, i) => (
-            <a
-              key={hit.href || hit.path || i}
-              id={optionId(i)}
-              class={`krate-docs-search-item${i === active() ? " active" : ""}`}
-              href={hit.href || hit.path || "/"}
-              role="option"
-              aria-selected={i === active() ? "true" : "false"}
-            >
-              <span class="krate-docs-search-title">{hit.title || "Untitled"}</span>
-              {(hit.body || hit.content) && (
-                <span class="krate-docs-search-snippet">
-                  {(hit.body || hit.content || "").slice(0, 150)}
-                </span>
-              )}
-            </a>
-          ))}
+      <dialog
+        class={`krate-docs-search-dialog${closing() ? " closing" : ""}`}
+        ref={dialogRef}
+        aria-label={label}
+      >
+        <div class="krate-docs-search-field">
+          <span class="krate-docs-search-field-icon" aria-hidden="true">
+            {loading() ? (
+              <span class="krate-docs-search-spinner" />
+            ) : (
+              <Icon name="tabler:search" width="18" height="18" />
+            )}
+          </span>
+          <input
+            class="krate-docs-search-input"
+            type="text"
+            ref={inputRef}
+            placeholder="Search the documentation"
+            aria-label={label}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={isOpen() && rows().length > 0 ? "true" : "false"}
+            aria-controls={rows().length > 0 ? listId : undefined}
+            aria-describedby={statusId}
+            aria-activedescendant={rows().length > 0 ? optionId(active()) : undefined}
+            autocomplete="off"
+            spellcheck="false"
+            onInput={(e: any) => onInput(e.target.value)}
+            onKeyDown={onKey}
+          />
+          <button class="krate-docs-search-close" type="button" aria-label="Close search" onClick={() => closeDialog(true)}>
+            <kbd>Esc</kbd>
+            <Icon name="tabler:x" width="18" height="18" />
+          </button>
         </div>
-      )}
+        <div class="krate-docs-search-status" id={statusId} role="status" aria-live="polite">
+          {loading()
+            ? "Searching"
+            : query().trim() === ""
+              ? ""
+              : rows().length === 0
+                ? "No results"
+                : rows().length + (rows().length === 1 ? " result" : " results")}
+        </div>
+        <div class="krate-docs-search-body">
+          {query().trim() === "" && rows().length > 0 && (
+            <div class="krate-docs-search-group">Recent</div>
+          )}
+          {query().trim() === "" && rows().length === 0 && (
+            <div class="krate-docs-search-empty">
+              <Icon name="tabler:book-2" width="28" height="28" />
+              <p>Search guides, API reference and examples.</p>
+            </div>
+          )}
+          {query().trim() !== "" && !loading() && rows().length === 0 && (
+            <div class="krate-docs-search-empty">
+              <Icon name="tabler:mood-empty" width="28" height="28" />
+              <p>
+                No results for <strong>{query()}</strong>
+              </p>
+            </div>
+          )}
+          {rows().length > 0 && (
+            <div class="krate-docs-search-results" id={listId} role="listbox" aria-label={label}>
+              {rows().map((row, i) => (
+                <a
+                  key={row.href}
+                  id={optionId(i)}
+                  data-index={String(i)}
+                  class={`krate-docs-search-item${i === active() ? " active" : ""}`}
+                  href={row.href}
+                  role="option"
+                  aria-selected={i === active() ? "true" : "false"}
+                  onPointerMove={() => {
+                    if (active() !== i) setActive(i);
+                  }}
+                >
+                  <span class="krate-docs-search-item-icon" aria-hidden="true">
+                    {query().trim() === "" ? (
+                      <Icon name="tabler:history" width="18" height="18" />
+                    ) : (
+                      <Icon name="tabler:file-text" width="18" height="18" />
+                    )}
+                  </span>
+                  <span class="krate-docs-search-item-text">
+                    {row.crumb && <span class="krate-docs-search-crumb">{row.crumb}</span>}
+                    <span class="krate-docs-search-title">
+                      <Highlighted text={row.title} terms={terms()} />
+                    </span>
+                    {row.snippet && (
+                      <span class="krate-docs-search-snippet">
+                        <Highlighted text={row.snippet} terms={terms()} />
+                      </span>
+                    )}
+                  </span>
+                  <span class="krate-docs-search-item-enter" aria-hidden="true">
+                    <Icon name="tabler:corner-down-left" width="16" height="16" />
+                  </span>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+        <div class="krate-docs-search-footer" aria-hidden="true">
+          <span>
+            <kbd>
+              <Icon name="tabler:arrow-up" width="12" height="12" />
+            </kbd>
+            <kbd>
+              <Icon name="tabler:arrow-down" width="12" height="12" />
+            </kbd>
+            to navigate
+          </span>
+          <span>
+            <kbd>
+              <Icon name="tabler:corner-down-left" width="12" height="12" />
+            </kbd>
+            to open
+          </span>
+          <span>
+            <kbd>Esc</kbd>
+            to close
+          </span>
+        </div>
+      </dialog>
     </div>
   );
 }

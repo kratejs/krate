@@ -1,0 +1,486 @@
+/* DocsSearch: the header button and its modal search dialog.
+   Colours come from the page's tokens (the docs theme or a site stylesheet),
+   with fallbacks so the component also looks right on pages without them. */
+
+.krate-docs-search {
+    --ks-bg: var(--color-bg, #ffffff);
+    --ks-fg: var(--color-fg, #0a0a0a);
+    --ks-text: var(--color-text-main, var(--ks-fg));
+    --ks-muted: var(--color-muted, #6a6a6a);
+    --ks-subtle: var(--color-muted-bg, var(--color-bg-subtle, #f5f5f5));
+    --ks-border: var(--color-border, #e5e5e5);
+    --ks-accent: var(--color-primary, #c2410c);
+    --ks-accent-bg: var(--docs-accent-bg, rgba(249, 115, 22, 0.1));
+    --ks-focus: var(--color-focus, var(--ks-accent));
+    --ks-radius: var(--radius, 8px);
+    --ks-mono: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    display: flex;
+    align-items: center;
+}
+
+/* Header button */
+
+.krate-docs-search-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 240px;
+    height: 34px;
+    padding: 0 0.45rem 0 0.65rem;
+    border: 1px solid var(--ks-border);
+    border-radius: var(--ks-radius);
+    background: var(--ks-subtle);
+    color: var(--ks-muted);
+    font: inherit;
+    font-size: 0.875rem;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.krate-docs-search-trigger:hover {
+    border-color: color-mix(in srgb, var(--ks-border) 55%, var(--ks-fg));
+    color: var(--ks-fg);
+}
+
+.krate-docs-search-trigger:focus-visible {
+    outline: 2px solid var(--ks-focus);
+    outline-offset: 2px;
+}
+
+.krate-docs-search-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+}
+
+.krate-docs-search-placeholder {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.krate-docs-search-kbd {
+    flex: 0 0 auto;
+    padding: 0.1rem 0.4rem;
+    border: 1px solid var(--ks-border);
+    border-radius: 5px;
+    background: var(--ks-bg);
+    color: var(--ks-muted);
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1.35;
+}
+
+/* Shortcut label for the platform; data-platform is set before first paint. */
+.krate-kbd-mac {
+    display: none;
+}
+
+:root[data-platform="mac"] .krate-kbd-mac {
+    display: inline;
+}
+
+:root[data-platform="mac"] .krate-kbd-other {
+    display: none;
+}
+
+/* Dialog */
+
+.krate-docs-search-dialog {
+    width: min(640px, calc(100vw - 2rem));
+    max-width: none;
+    max-height: min(580px, calc(100dvh - 8rem));
+    margin: 12vh auto auto;
+    padding: 0;
+    border: 1px solid var(--ks-border);
+    border-radius: 14px;
+    background: var(--ks-bg);
+    color: var(--ks-text);
+    box-shadow:
+        0 32px 80px -16px rgba(0, 0, 0, 0.35),
+        0 12px 24px -12px rgba(0, 0, 0, 0.18);
+    overflow: hidden;
+}
+
+.krate-docs-search-dialog[open] {
+    display: flex;
+    flex-direction: column;
+    animation: krate-search-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.krate-docs-search-dialog.closing {
+    animation: krate-search-out 0.14s ease-in forwards;
+}
+
+.krate-docs-search-dialog::backdrop {
+    background: rgba(10, 10, 10, 0.42);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    animation: krate-search-fade-in 0.18s ease;
+}
+
+.krate-docs-search-dialog.closing::backdrop {
+    animation: krate-search-fade-out 0.14s ease-in forwards;
+}
+
+:root[data-theme="dark"] .krate-docs-search-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.62);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .krate-docs-search-dialog::backdrop {
+        background: rgba(0, 0, 0, 0.62);
+    }
+}
+
+/* Keep the page still behind the open dialog. */
+html:has(.krate-docs-search-dialog[open]) {
+    overflow: hidden;
+}
+
+@keyframes krate-search-in {
+    from {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.98);
+    }
+}
+
+@keyframes krate-search-out {
+    to {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.985);
+    }
+}
+
+@keyframes krate-search-fade-in {
+    from {
+        opacity: 0;
+    }
+}
+
+@keyframes krate-search-fade-out {
+    to {
+        opacity: 0;
+    }
+}
+
+.krate-docs-search-field {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex: 0 0 auto;
+    padding: 0 0.75rem 0 1rem;
+    border-bottom: 1px solid var(--ks-border);
+}
+
+.krate-docs-search-field-icon {
+    display: inline-flex;
+    width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    color: var(--ks-accent);
+}
+
+.krate-docs-search-spinner {
+    width: 15px;
+    height: 15px;
+    border: 2px solid color-mix(in srgb, var(--ks-accent) 25%, transparent);
+    border-top-color: var(--ks-accent);
+    border-radius: 50%;
+    animation: krate-search-spin 0.7s linear infinite;
+}
+
+@keyframes krate-search-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.krate-docs-search-input {
+    flex: 1;
+    min-width: 0;
+    height: 56px;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--ks-fg);
+    font: inherit;
+    font-size: 1.0625rem;
+}
+
+/* The input is always focused while the dialog is open; the caret marks it,
+   so drop the page's global focus ring. */
+.krate-docs-search-dialog .krate-docs-search-input:focus,
+.krate-docs-search-dialog .krate-docs-search-input:focus-visible {
+    outline: none;
+    box-shadow: none;
+}
+
+.krate-docs-search-input::placeholder {
+    color: var(--ks-muted);
+    opacity: 1;
+}
+
+.krate-docs-search-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    padding: 0.25rem;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ks-muted);
+    font: inherit;
+    cursor: pointer;
+}
+
+.krate-docs-search-close:hover {
+    color: var(--ks-fg);
+}
+
+.krate-docs-search-close:focus-visible {
+    outline: 2px solid var(--ks-focus);
+}
+
+.krate-docs-search-close svg {
+    display: none;
+}
+
+.krate-docs-search-dialog kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.35rem;
+    height: 1.35rem;
+    padding: 0 0.3rem;
+    border: 1px solid var(--ks-border);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    background: var(--ks-subtle);
+    color: var(--ks-muted);
+    font-family: inherit;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1;
+}
+
+.krate-docs-search-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.krate-docs-search-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.5rem;
+}
+
+.krate-docs-search-group {
+    padding: 0.5rem 0.6rem 0.35rem;
+    color: var(--ks-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.krate-docs-search-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 2.25rem 1rem 2.5rem;
+    color: var(--ks-muted);
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.krate-docs-search-empty p {
+    margin: 0;
+}
+
+.krate-docs-search-empty strong {
+    color: var(--ks-fg);
+    font-weight: 600;
+}
+
+.krate-docs-search-results {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.krate-docs-search-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 9px;
+    color: var(--ks-text);
+    text-decoration: none;
+    scroll-margin: 0.5rem;
+}
+
+.krate-docs-search-item.active {
+    background: var(--ks-accent-bg);
+}
+
+.krate-docs-search-item-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--ks-border);
+    border-radius: 8px;
+    background: var(--ks-bg);
+    color: var(--ks-muted);
+}
+
+.krate-docs-search-item.active .krate-docs-search-item-icon {
+    border-color: color-mix(in srgb, var(--ks-accent) 35%, var(--ks-border));
+    color: var(--ks-accent);
+}
+
+.krate-docs-search-item-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.krate-docs-search-crumb {
+    overflow: hidden;
+    color: var(--ks-muted);
+    font-size: 0.72rem;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.krate-docs-search-title {
+    color: var(--ks-fg);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.krate-docs-search-snippet {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    color: var(--ks-muted);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}
+
+.krate-docs-search-item mark {
+    padding: 0 0.05em;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--ks-accent) 16%, transparent);
+    color: inherit;
+}
+
+.krate-docs-search-title mark {
+    color: var(--ks-accent);
+    background: transparent;
+}
+
+.krate-docs-search-item-enter {
+    display: inline-flex;
+    align-self: center;
+    flex: 0 0 auto;
+    color: var(--ks-accent);
+    opacity: 0;
+    transform: translateX(-4px);
+    transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.krate-docs-search-item.active .krate-docs-search-item-enter {
+    opacity: 1;
+    transform: none;
+}
+
+.krate-docs-search-footer {
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+    flex: 0 0 auto;
+    padding: 0.6rem 1rem;
+    border-top: 1px solid var(--ks-border);
+    background: var(--ks-subtle);
+    color: var(--ks-muted);
+    font-size: 0.75rem;
+}
+
+.krate-docs-search-footer span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+/* Small screens: an icon button and a full-screen sheet. */
+@media (max-width: 640px) {
+    .krate-docs-search-trigger {
+        width: 36px;
+        height: 36px;
+        min-width: 44px;
+        min-height: 44px;
+        justify-content: center;
+        padding: 0;
+        border-color: transparent;
+        background: transparent;
+    }
+
+    .krate-docs-search-placeholder,
+    .krate-docs-search-kbd {
+        display: none;
+    }
+
+    .krate-docs-search-dialog {
+        width: 100vw;
+        height: 100dvh;
+        max-height: none;
+        margin: 0;
+        border: 0;
+        border-radius: 0;
+    }
+
+    .krate-docs-search-close kbd,
+    .krate-docs-search-footer,
+    .krate-docs-search-item-enter {
+        display: none;
+    }
+
+    .krate-docs-search-close svg {
+        display: block;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .krate-docs-search-dialog[open],
+    .krate-docs-search-dialog.closing,
+    .krate-docs-search-dialog::backdrop,
+    .krate-docs-search-dialog.closing::backdrop {
+        animation-duration: 0.001ms;
+    }
+}

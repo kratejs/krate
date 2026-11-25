@@ -151,17 +151,28 @@ Keywords are weighted highest, then title words, then body phrases.
 ## Customizing the UI
 
 The search assets live in `dist/docs/search/` after a build. Search is a theme
-concern: `@krate/base-docs-theme` renders its `DocsSearch` component
-(combobox input, keyboard navigation, live result count) and styles it with the
+concern: `@krate/base-docs-theme` renders its `DocsSearch` component, a button
+that opens a modal search dialog (keyboard navigation, highlighted matches,
+recently opened results, a live result count), and styles it with the
 `.krate-docs-search-*` classes. Override those classes from your own stylesheet,
 or render your own search UI against the headless `window.__krateSearch` API.
-`Ctrl+K` (`Cmd+K` on macOS) focuses the search box by default. Set
-`search.hotkey` (for example `"/"`) to change the shortcut, or `"off"` to
-disable it.
+`Ctrl+K` (`Cmd+K` on macOS) opens the dialog by default. Set `search.hotkey`
+(for example `"/"`) to change the shortcut, or `"off"` to disable it.
+
+`DocsSearch` also works outside the docs, for example in a marketing site's
+header. Import it from `@krate/base-docs-theme/search`; on a page that does not
+advertise the search module it reads the module URL from the docs index page
+(`docsUrl`, default `"/docs/"`):
+
+```tsx
+import { DocsSearch } from "@krate/base-docs-theme/search";
+
+<DocsSearch placeholder="Search docs" />
+```
 
 The search module (`docs/search/search.<hash>.js`) is minified and
 content-hashed, and by default it is not loaded with the page: `DocsSearch`
-fetches it the first time the box is focused, hovered or opened with the hotkey,
+fetches it the first time the button is focused, hovered or the dialog opened,
 and the first query waits for it. A custom search UI can do the same: the module
 URL is in `<meta name="krate-search-src">`; inject a script with it and wait for
 the `krate:search-ready` event. Set `search.load` to `"eager"` to keep a deferred
