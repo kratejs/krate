@@ -180,6 +180,18 @@ func TestDevAPIRoute(t *testing.T) {
 	if info.Dynamic || len(info.Params) != 0 || info.StaticPaths != 0 {
 		t.Errorf("static route = %+v", info)
 	}
+	// The budget usage is in the raw bytes checks.budget counts: the
+	// hydration script and the runtime chunk, not their gzip sizes.
+	u := info.BudgetUsage
+	if u == nil || u.Hydration == 0 || int64(u.JS) <= int64(info.Sizes.GzipJS) || u.JS <= u.Hydration {
+		t.Fatalf("home budget usage = %+v (sizes %+v)", u, info.Sizes)
+	}
+	if u.Route < u.JS+int(info.Sizes.HTML) {
+		t.Errorf("route usage %d is below html+js %d", u.Route, u.JS+int(info.Sizes.HTML))
+	}
+	if int64(u.JS) != info.Sizes.JS {
+		t.Errorf("budget js %d, raw js %d: the page loads no other script, so they must match", u.JS, info.Sizes.JS)
+	}
 
 	// A path no page serves.
 	if rec := devDo(t, h, "GET", "/__krate/dev/route?path=/nope/x", ""); rec.Code != 404 {
@@ -669,5 +681,69 @@ func TestAPIFailureIsAttributedToAPI(t *testing.T) {
 		if l.Src != LogSrcAPI || l.Lvl != "error" {
 			t.Errorf("line %+v, want src api, lvl error", l)
 		}
+	}
+}
+
+func TestDevAPICode(t *testing.T) {
+	t.Parallel()
+	d := &devAPI{root: t.TempDir(), cfg: config.Default(), hub: NewDevHub()}
+	mux := http.NewServeMux()
+	d.register(func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, devEndpointGuard("127.0.0.1", h)) })
+	rec := devDo(t, mux, "GET", "/__krate/dev/code?code=kr5002", "")
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var got struct{ Code, Title, Explanation, DocsURL string }
+	decodeJSON(t, rec, &got)
+	if got.Code != "KR5002" || got.Title != "Lowercase event handler prop" || got.Explanation == "" || got.DocsURL != devDocsURL+"kr5002" {
+		t.Errorf("code = %+v", got)
+	}
+	for _, q := range []string{"", "?code=", "?code=KR0000", "?code=%3Cscript%3E"} {
+		if rec := devDo(t, mux, "GET", "/__krate/dev/code"+q, ""); rec.Code != http.StatusNotFound {
+			t.Errorf("GET /code%s = %d, want 404", q, rec.Code)
+		}
+	}
+	if rec := devDo(t, mux, "POST", "/__krate/dev/code?code=KR5002", "{}"); rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /code = %d, want 405", rec.Code)
+	}
+}
+
+func TestCrashRuntimeAndRestarts(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ name, out, want string }{
+		{"node", "v22.11.0\n", "node 22.11"},
+		{"bun", "1.1.30\n", "bun 1.1"},
+		{"deno", "deno 2.0.6 (stable, release, x86_64-unknown-linux-gnu)\nv8 12.9\ntypescript 5.6\n", "deno 2.0"},
+		{"go", "go1.26.1\n", "go 1.26"},
+		{"node", "garbage", "node"},
+	} {
+		if got := formatRuntimeLabel(c.name, c.out); got != c.want {
+			t.Errorf("formatRuntimeLabel(%q, %q) = %q, want %q", c.name, c.out, got, c.want)
+		}
+	}
+	src := "test sidecar " + t.Name()
+	t0 := time.Unix(1000, 0)
+	if n := noteCrash(src, t0); n != 1 {
+		t.Errorf("first crash count = %d", n)
+	}
+	if n := noteCrash(src, t0.Add(20*time.Second)); n != 2 {
+		t.Errorf("second crash count = %d", n)
+	}
+	if n := noteCrash(src, t0.Add(70*time.Second)); n != 2 {
+		t.Errorf("a crash over a minute old still counts: %d", n)
+	}
+	if sidecarRuntimeLabel(src) != "" {
+		t.Errorf("a source without a program has a runtime label")
+	}
+	if sh, err := exec.LookPath("sh"); err == nil {
+		noteSidecarRuntime(src, sh)
+		// sh has no --version on every system; the label falls back to the name.
+		if got := sidecarRuntimeLabel(src); !strings.HasPrefix(got, "sh") {
+			t.Errorf("label = %q", got)
+		}
+	}
+	data, _ := json.Marshal(ClientError{Kind: "server", Runtime: "node 22.11", Restarts: 2})
+	if !strings.Contains(string(data), `"runtime":"node 22.11","restarts":2`) {
+		t.Errorf("JSON %s", data)
 	}
 }

@@ -586,6 +586,7 @@ func (g *goAPISupervisor) spawn() error {
 	g.stop()
 
 	cmd := exec.Command(g.binPath)
+	noteSidecarRuntime("Go API sidecar", "go")
 	execx.ConfigureTree(cmd)
 	cmd.Env = append(os.Environ(), g.env...)
 	if g.socket != "" {

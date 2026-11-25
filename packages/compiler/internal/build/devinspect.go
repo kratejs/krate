@@ -104,8 +104,12 @@ type DevRouteInfo struct {
 	Sizes       *DevRouteSizes    `json:"sizes,omitempty"`
 	Islands     []DevRouteIsland  `json:"islands"`
 	Budget      *DevRouteBudget   `json:"budget,omitempty"`
-	BuiltAt     int64             `json:"builtAt,omitempty"` // unix ms of the built document
-	Document    string            `json:"document,omitempty"`
+	// BudgetUsage is what the page ships as checks.budget measures it (raw
+	// bytes of the built files, see CheckSite), so it compares with Budget.
+	// Present with Budget when the page has a built document.
+	BudgetUsage *DevRouteBudget `json:"budgetUsage,omitempty"`
+	BuiltAt     int64           `json:"builtAt,omitempty"` // unix ms of the built document
+	Document    string          `json:"document,omitempty"`
 }
 
 // devURLRoute turns a request URL path into the route it names: no query,
@@ -236,9 +240,33 @@ func devRouteInfo(root string, cfg *config.Config, outDir, urlPath string) (*Dev
 		b := DevRouteBudget{JS: chk.JSBudgetBytes, Hydration: chk.HydrationBudgetBytes, IslandJS: chk.IslandBudgetBytes, Route: chk.RouteBudgetBytes}
 		if b != (DevRouteBudget{}) {
 			info.Budget = &b
+			if doc != "" {
+				if data, err := os.ReadFile(doc); err == nil {
+					u := devBudgetUsage(outDir, filepath.Dir(doc), string(data), m.RuntimeJS)
+					info.BudgetUsage = &u
+				}
+			}
 		}
 	}
 	return info, true
+}
+
+// devBudgetUsage measures a built page the way `krate check` does for
+// checks.budget: raw bytes of the hydration script next to the document, the
+// runtime chunk when the page links it, its island chunks and stylesheets.
+func devBudgetUsage(outDir, pageDir, html, runtimeJS string) DevRouteBudget {
+	hydration := pageJSBytes(pageDir)
+	js := hydration
+	if rt := strings.TrimPrefix(runtimeJS, "/"); rt != "" && strings.Contains(html, rt) {
+		js += fileSize(filepath.Join(outDir, filepath.FromSlash(rt)))
+	}
+	islands := islandBytesForPage(outDir, pageDir, html)
+	return DevRouteBudget{
+		JS:        js,
+		Hydration: hydration,
+		IslandJS:  islands,
+		Route:     len(html) + pageCSSBytes(outDir, html) + js + islands,
+	}
 }
 
 var devRouteInfoRe = regexp.MustCompile(`(?is)<script\b[^>]*\bid=["']?__krate_route\b["']?[^>]*>(.*?)</script>`)
@@ -281,6 +309,10 @@ func measureDevPage(outDir, base, html, runtimeJS string) (DevRouteSizes, []DevR
 	}
 	islands := []DevRouteIsland{}
 	for _, ref := range load.Scripts {
+		if path.Base(ref) == "krate-dev.js" {
+			// The overlay itself ships only in dev.
+			continue
+		}
 		abs := resolveOutURL(outDir, base, ref)
 		if abs == "" {
 			continue

@@ -1586,18 +1586,21 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 					_ = os.MkdirAll(filepath.Dir(bunPath), 0755)
 					_ = os.WriteFile(bunPath, []byte(apiServerBunScriptContent), 0644)
 					cmd = exec.Command("bun", "run", bunPath, nodeAPIDir, portStr, middlewarePath, actionDir, instrumentationArg)
+					noteSidecarRuntime("Node API sidecar", "bun")
 
 				case "deno":
 					scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
 					_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
 					_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
 					cmd = exec.Command("deno", "run", "--allow-net", "--allow-read", "--allow-sys", "--allow-env", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir, instrumentationArg)
+					noteSidecarRuntime("Node API sidecar", "deno")
 
 				default:
 					scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
 					_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
 					_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
 					cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir, instrumentationArg)
+					noteSidecarRuntime("Node API sidecar", "node")
 				}
 				execx.ConfigureTree(cmd)
 				cmd.Env = append(os.Environ(), environ.Overlay(environ.Current)...)

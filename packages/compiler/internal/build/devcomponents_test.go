@@ -339,6 +339,8 @@ const count = sigs.find((s) => s.name === 'n');
 if (!count || count.get() !== 2) fail('signals = ' + JSON.stringify(sigs.map((s) => s.name)));
 const h = win.__krate_dev_hydration || {};
 if (!Object.keys(h).includes(count.c) || typeof h[count.c] !== 'number') fail('hydration = ' + JSON.stringify(h));
+const hs = win.__krate_dev_hydration_start || {};
+if (typeof hs[count.c] !== 'number' || hs[count.c] < 0) fail('hydration start = ' + JSON.stringify(hs));
 const table = JSON.parse(d.getElementById('__krate_dev_components').textContent);
 if (!table.some((r) => r.key === count.c && r.tier === 'client')) fail('table = ' + JSON.stringify(table));
 `

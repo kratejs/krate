@@ -57,6 +57,11 @@ type ClientError struct {
 	ExitCode *int     `json:"exitCode,omitempty"`
 	Log      []string `json:"log,omitempty"`
 	Restart  string   `json:"restart,omitempty"`
+	// Runtime is the sidecar's runtime and version ("node 22.11",
+	// "bun 1.1", "go 1.26"); Restarts how often that part failed and was
+	// restarted within the last minute, this failure included.
+	Runtime  string `json:"runtime,omitempty"`
+	Restarts int    `json:"restarts,omitempty"`
 }
 
 // DevHub fans dev events out to all connected SSE clients. The previous

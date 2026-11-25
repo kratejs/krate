@@ -764,10 +764,11 @@ window.cloneElement=function(el,props){if(el==null||el===false||el===true)return
 
 // devRegisterJS defines the dev-only helper each client scope calls at the
 // end of its hydration: it records the scope's hydration time in
-// __krate_dev_hydration[key] (ms) and its signal getters in
-// __krate_dev_signals ({c: key, name, get}), replacing the entries of an
-// earlier mount. It is global because lazy chunks call it too.
-const devRegisterJS = "globalThis.__krate_dev_reg=globalThis.__krate_dev_reg||function(c,t,s){var g=globalThis,h=g.__krate_dev_hydration||(g.__krate_dev_hydration={});h[c]=Math.round((performance.now()-t)*1000)/1000;var l=g.__krate_dev_signals||(g.__krate_dev_signals=[]);for(var i=0;i<s.length;i++){var e={c:c,name:s[i][0],get:s[i][1]},k=-1;for(var j=0;j<l.length;j++){if(l[j].c===c&&l[j].name===e.name){k=j;break;}}if(k<0)l.push(e);else l[k]=e;}};\n"
+// __krate_dev_hydration[key] (ms), when it started in
+// __krate_dev_hydration_start[key] (ms after navigation start) and its
+// signal getters in __krate_dev_signals ({c: key, name, get}), replacing the
+// entries of an earlier mount. It is global because lazy chunks call it too.
+const devRegisterJS = "globalThis.__krate_dev_reg=globalThis.__krate_dev_reg||function(c,t,s){var g=globalThis,h=g.__krate_dev_hydration||(g.__krate_dev_hydration={}),a=g.__krate_dev_hydration_start||(g.__krate_dev_hydration_start={});h[c]=Math.round((performance.now()-t)*1000)/1000;a[c]=Math.round(t*1000)/1000;var l=g.__krate_dev_signals||(g.__krate_dev_signals=[]);for(var i=0;i<s.length;i++){var e={c:c,name:s[i][0],get:s[i][1]},k=-1;for(var j=0;j<l.length;j++){if(l[j].c===c&&l[j].name===e.name){k=j;break;}}if(k<0)l.push(e);else l[k]=e;}};\n"
 
 // devRegisterCall registers one scope's signals and hydration time.
 func devRegisterCall(sig irtree.ComponentSignature) string {

@@ -336,6 +336,7 @@ func (s *SSRServer) Start() error {
 	}
 
 	s.cmd = exec.Command(runtimeCmd, runtimeArgs...)
+	noteSidecarRuntime("SSR renderer", runtimeCmd)
 	execx.ConfigureTree(s.cmd)
 	s.cmd.Env = env
 	after := attachSidecarOutput(s.cmd, LogSrcSSR)

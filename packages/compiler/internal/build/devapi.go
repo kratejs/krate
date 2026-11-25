@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fix"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
@@ -69,6 +70,7 @@ type devAPI struct {
 // devEndpointGuard.
 func (d *devAPI) register(guard func(pattern string, h http.HandlerFunc)) {
 	guard(devAPIBase+"/info", d.get(d.info))
+	guard(devAPIBase+"/code", d.get(d.code))
 	guard(devAPIBase+"/route", d.get(d.route))
 	guard(devAPIBase+"/routes", d.get(d.routes))
 	guard(devAPIBase+"/activity", d.get(d.activity))
@@ -158,6 +160,23 @@ func (d *devAPI) info(w http.ResponseWriter, r *http.Request) {
 			"configured": strings.TrimSpace(d.cfg.DevServer.Editor),
 			"available":  availableEditors(),
 		},
+	})
+}
+
+// GET /__krate/dev/code?code=KR5002: the registry's title and explanation
+// of a diagnostic code, for the overlay's category chip and popover.
+func (d *devAPI) code(w http.ResponseWriter, r *http.Request) {
+	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
+	info, ok := diag.Lookup(diag.Code(code))
+	if code == "" || !ok {
+		devError(w, http.StatusNotFound, "unknown diagnostic code")
+		return
+	}
+	devJSON(w, http.StatusOK, map[string]string{
+		"code":        string(info.Code),
+		"title":       info.Title,
+		"explanation": info.Explanation,
+		"docsURL":     devDocsURL + strings.ToLower(string(info.Code)),
 	})
 }
 
