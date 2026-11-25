@@ -155,13 +155,25 @@
         return enginePromise;
     }
 
+    // Pagefind's plain excerpt keeps the page's HTML entities (&lt;Link&gt;);
+    // hits carry plain text, so decode them.
+    function decodeEntities(text) {
+        return String(text)
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#0?39;|&apos;/g, "'")
+            .replace(/&nbsp;/g, " ")
+            .replace(/&amp;/g, "&");
+    }
+
     // Normalize a Pagefind result (already data()'d) into krate's hit shape.
     function toHit(data) {
         var meta = data.meta || {};
         return {
             href: data.url || "/",
-            title: meta.title || "Untitled",
-            body: data.plain_excerpt || "",
+            title: decodeEntities(meta.title || "Untitled"),
+            body: decodeEntities(data.plain_excerpt || ""),
         };
     }
 
