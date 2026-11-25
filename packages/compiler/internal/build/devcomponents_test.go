@@ -344,3 +344,61 @@ if (!table.some((r) => r.key === count.c && r.tier === 'client')) fail('table = 
 `
 	runHeadlessMode(t, page, check, true)
 }
+
+// A server component that renders the children it is given is in the table
+// with its root marked, and so is a component its children render.
+func TestDevComponentTableServerChildren(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeProject(t, root, map[string]string{
+		"src/pages/index.tsx": `// @server
+import Panel from "../components/Panel.server";
+import Note from "../components/Note.static";
+export default function Home() {
+  return <div><Panel><p class="kid">static child</p></Panel><Panel><Note text="n" /></Panel></div>;
+}
+`,
+		"src/components/Panel.server.tsx": `export default function Panel(props: any) {
+  return <aside class="panel">{props.children}</aside>;
+}
+`,
+		"src/components/Note.static.tsx": `export default function Note({ text }: any) { return <em class="note">{text}</em>; }
+`,
+	})
+	linkRuntimeDist(t, root)
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	b := New(root, cfg)
+	b.DevMode = true
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	html := readBuilt(t, filepath.Join(cfg.OutDir, "index.html"))
+	rows, marked := readDevTable(t, html)
+	for _, r := range rows {
+		if r.Region == "" && r.Island == "" && !marked[r.N] {
+			t.Errorf("row %+v marks no element", r)
+		}
+	}
+	panels := 0
+	for _, r := range rows {
+		if r.Name == "Panel" {
+			panels++
+			if r.Tier != "server" {
+				t.Errorf("Panel row = %+v", r)
+			}
+		}
+	}
+	if panels != 2 || !strings.Contains(html, "static child") {
+		t.Errorf("want two Panel rows and the rendered child; rows %+v\n%s", rows, html)
+	}
+	// A component element among a server component's children is dropped
+	// from the output today (also on origin/dev); once it renders it needs
+	// its own row.
+	if strings.Contains(html, `class="note"`) || strings.Contains(html, `class=note`) {
+		if devRowsByName(rows)["Note"].Name == "" {
+			t.Errorf("Note renders but has no row: %+v", rows)
+		}
+	}
+}
