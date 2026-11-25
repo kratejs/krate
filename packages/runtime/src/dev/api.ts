@@ -54,6 +54,8 @@ export interface RouteData {
   };
   islands?: { id: string; chunk: string; gzip: number }[];
   budget?: { js?: number; hydration?: number; islandJS?: number; route?: number };
+  /** The page as checks.budget measures it (raw bytes), to compare with budget. */
+  budgetUsage?: { js?: number; hydration?: number; islandJS?: number; route?: number };
   builtAt?: number;
   document?: string;
 }

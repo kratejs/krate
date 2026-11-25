@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { filterItems, fuzzyMatch, markRanges, routeItems, type RouteInfo } from './commands.js';
 import { highlightLine, wordAt } from './highlight.js';
-import { commentRanges, componentPath, hydrationOf, readTable, signalsOf, tierCounts, type CompRow } from './inspect.js';
-import { cleanMessage, copyForAI, frameText, issueFromDiagnostic, issueFromRuntime, issueFromServer, issueSummary } from './issues.js';
-import { buildDetail, buildHeadline, filterLogs, headChecks, pageIslands } from './panel.js';
+import { commentRanges, componentPath, hydrationOf, hydrationStartOf, readTable, signalsOf, tierCounts, type CompRow } from './inspect.js';
+import { cleanMessage, copyForAI, frameText, isBuildWarning, issueFromDiagnostic, issueFromRuntime, issueFromServer, issueSummary, issuesFromDiagnostics } from './issues.js';
+import { budgetHTML, buildDetail, buildHeadline, filterLogs, headChecks, pageIslands } from './panel.js';
 import { DEFAULT_SETTINGS, SETTINGS_KEY, kbd, loadSettings, nearestCorner, saveSettings, shortcutOf } from './settings.js';
-import { applyChange } from './modal.js';
+import { applyChange, serverSub } from './modal.js';
+import { REQUEST_RING, RequestLog, captureRequests } from './requests.js';
 import { errorName, firstAppFrame, isFrameworkFile, parseFrame, parseStack, projectLocation, splitStack } from './stack.js';
 import { fmtMs, isTypingTarget, kb, routeMatches, stripBase } from './util.js';
 import type { BuildRecord, LogLine } from './api.js';
@@ -334,5 +335,79 @@ describe('panel helpers', () => {
     expect(filterLogs(lines, 'browser', '', false)).toHaveLength(1);
     expect(filterLogs(lines, 'all', '', true).map((x) => x.text)).toEqual(['TypeError']);
     expect(filterLogs(lines, 'all', 'dash', false).map((x) => x.src)).toEqual(['ssr']);
+  });
+});
+
+describe('dev overlay additions', () => {
+  it('words a warnings-only summary', () => {
+    const w = issueFromDiagnostic({ message: 'm', file: 'src/a.tsx', line: 1, severity: 'warning', code: 'KR5002' }, 0, 0);
+    expect(issueSummary([w])).toBe('1 warning in 1 file');
+    expect(issueSummary([w, { ...w, id: 'y', severity: 'error' }])).toBe('2 issues in 1 file');
+    // A warning keeps its id whatever its position in the report.
+    expect(issueFromDiagnostic({ message: 'm', file: 'src/a.tsx', line: 1, severity: 'warning', code: 'KR5002' }, 7, 0).id).toBe(w.id);
+  });
+
+  it('merges repeated diagnostics', () => {
+    const d = { message: 'm', file: 'src/a.tsx', line: 1, code: 'KR5002', severity: 'warning' };
+    const list = issuesFromDiagnostics([d, d, { ...d, line: 2 }], 0);
+    expect(list.map((i) => i.count)).toEqual([2, 1]);
+    expect(isBuildWarning(list[0])).toBe(true);
+  });
+
+  it('writes the crash subtitle', () => {
+    const base = issueFromServer({ message: 'x', kind: 'server', source: 'Go API sidecar', exitCode: 2, runtime: 'go 1.26', restarts: 1, restart: 'go' }, Date.UTC(2026, 0, 1, 12, 44, 30));
+    expect(serverSub(base, '12:44:30')).toBe('go 1.26 · exited with code 2 · 12:44:30 · restarted once in the last minute');
+    expect(serverSub({ ...base, server: { ...base.server!, restarts: 5 } }, 't')).toContain('restarted 5 times in the last minute');
+    expect(serverSub({ ...base, server: { message: 'x', kind: 'server' } }, 't')).toBe('t');
+  });
+
+  it('compares the budget with the usage the checks measure', () => {
+    expect(budgetHTML({ pattern: '/', budget: { js: 1024 } })).toBe('');
+    const html = budgetHTML({ pattern: '/', budget: { js: 1024, hydration: 2048 }, budgetUsage: { js: 2048, hydration: 1024 } });
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const rows = Array.from(div.querySelectorAll('.bgt')).map((r) => r.textContent + (r.classList.contains('over') ? '!' : ''));
+    expect(rows).toEqual(['JS2 of 1 KB!', 'Hydration1 of 2 KB']);
+  });
+
+  it('reads when an instance started hydrating', () => {
+    const g = { __krate_dev_hydration_start: { k1: 312.4 }, __krate_island_hydration: { i3: { start: 40, end: 42, ms: 2 } } };
+    expect(hydrationStartOf({ n: 0, key: 'k1', name: 'A', tier: 'client', parent: -1 }, g)).toBe(312.4);
+    expect(hydrationStartOf({ n: 1, island: 'i3', name: 'B', tier: 'island', parent: -1 }, g)).toBe(40);
+    expect(hydrationStartOf({ n: 2, name: 'C', tier: 'static', parent: -1 }, g)).toBeUndefined();
+  });
+
+  it('records failed XHR requests and keeps a ring', async () => {
+    class FakeXHR {
+      status = 0;
+      listeners: Record<string, (() => void)[]> = {};
+      open(_m: string, _u: string) {}
+      send() {
+        setTimeout(() => {
+          this.status = 503;
+          for (const fn of this.listeners.load || []) fn();
+        }, 0);
+      }
+      addEventListener(t: string, fn: () => void) {
+        (this.listeners[t] ||= []).push(fn);
+      }
+    }
+    const g: any = { XMLHttpRequest: FakeXHR };
+    const log = new RequestLog();
+    const undo = captureRequests(log, g);
+    const x = new g.XMLHttpRequest();
+    x.open('put', '/api/save');
+    x.send();
+    const internal = new g.XMLHttpRequest();
+    internal.open('GET', '/__krate/dev/info');
+    internal.send();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(log.list.map((r) => r.method + ' ' + r.url + ' ' + r.status)).toEqual(['PUT /api/save 503']);
+    expect(log.near(log.list[0].t)).toHaveLength(1);
+    expect(log.near(log.list[0].t + 60000)).toHaveLength(0);
+    undo();
+    for (let i = 0; i < REQUEST_RING + 5; i++) log.add({ method: 'GET', url: '/x' + i, status: 500, ms: 1, t: 0 });
+    expect(log.list).toHaveLength(REQUEST_RING);
+    expect(log.list[0].url).toBe('/x5');
   });
 });

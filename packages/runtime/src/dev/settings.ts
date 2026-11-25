@@ -13,6 +13,8 @@ export interface Settings {
   editor: string;
   openOnRuntime: boolean;
   consoleIssues: boolean;
+  /** List build warnings (KR5002, ...) with the issues. */
+  showWarnings: boolean;
   collapsed: boolean;
 }
 
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   editor: '',
   openOnRuntime: true,
   consoleIssues: true,
+  showWarnings: true,
   collapsed: false,
 };
 
@@ -37,7 +40,7 @@ export function loadSettings(): Settings {
     if (CORNERS.includes(raw.corner as Corner)) s.corner = raw.corner as Corner;
     if (THEMES.includes(raw.theme as Theme)) s.theme = raw.theme as Theme;
     if (typeof raw.editor === 'string' && /^[\w.-]{0,40}$/.test(raw.editor)) s.editor = raw.editor;
-    for (const k of ['openOnRuntime', 'consoleIssues', 'collapsed'] as const) {
+    for (const k of ['openOnRuntime', 'consoleIssues', 'showWarnings', 'collapsed'] as const) {
       if (typeof raw[k] === 'boolean') s[k] = raw[k] as boolean;
     }
   } catch {

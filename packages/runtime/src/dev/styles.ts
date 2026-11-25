@@ -94,6 +94,11 @@ svg.i{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;stroke-widt
 .dock.mini{padding:0;width:38px;justify-content:center}
 .dock.mini .markbtn{margin:0}
 .dock .pip{position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--kd-err);border:2px solid var(--kd-bg)}
+.dock .pip.w{background:var(--kd-warn)}
+.badge.warn{background:rgba(251,191,36,.1);color:var(--kd-warn);border:1px solid rgba(251,191,36,.26)}
+.dock button.seg:hover .badge.warn{filter:brightness(1.1)}
+.dock.warn{border-color:rgba(251,191,36,.24)}
+.dock .seg.stale{background:rgba(251,191,36,.08);color:var(--kd-warn-fg2);font-size:12px}
 .spin{width:12px;height:12px;border-radius:50%;border:2px solid var(--kd-line2);border-top-color:var(--kd-accent);animation:rot .8s linear infinite;flex:none}
 @keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(260%)}}
 @keyframes rot{to{transform:rotate(360deg)}}
@@ -140,6 +145,13 @@ svg.i{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;stroke-widt
 .bar i{display:block;height:100%}
 .budget{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--kd-fg2);margin-top:7px}
 .budget .over{color:var(--kd-err)}
+.bgts{margin-top:12px;display:grid;gap:6px}
+.bgt{display:grid;grid-template-columns:84px minmax(0,1fr) auto;gap:10px;align-items:center;font-size:12px;color:var(--kd-fg2)}
+.bgt .bar{height:4px}
+.bgt .bar i{background:var(--kd-ok)}
+.bgt.over .bar i{background:var(--kd-err)}
+.bgt.over .v{color:var(--kd-err)}
+.bgt-note{font-size:11.5px;color:var(--kd-fg3);line-height:1.4;margin-top:2px}
 .rows{border:1px solid var(--kd-line);border-radius:10px;overflow:hidden}
 .row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-top:1px solid var(--kd-line);width:100%;white-space:nowrap}
 .row:first-child{border-top:0}
@@ -200,6 +212,25 @@ svg.i{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;stroke-widt
 .d-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 .code{font:600 11.5px var(--mono);padding:3px 7px;border-radius:6px;background:var(--kd-err-soft);color:var(--kd-err);border:1px solid var(--kd-err-line)}
 .code.w{background:rgba(251,191,36,.1);color:var(--kd-warn);border-color:rgba(251,191,36,.26)}
+.whatbtn{font-size:12.5px;color:var(--kd-accent-fg)}
+.whatbtn:hover{text-decoration:underline}
+.codepop{position:relative;margin:-2px 0 12px;padding:11px 13px;border-radius:10px;background:var(--kd-raise);border:1px solid var(--kd-line2);box-shadow:0 10px 30px var(--kd-sh);color:var(--kd-fg2);font-size:12.5px;line-height:1.5}
+.codepop .t{color:var(--kd-fg);font-weight:600;margin-bottom:4px;padding-right:22px}
+.codepop code{background:var(--kd-chip);padding:0 5px;border-radius:4px;font-size:12px;color:var(--kd-fg)}
+.codepop .x{position:absolute;top:7px;right:7px}
+.codepop a{display:inline-block;margin-top:8px;color:var(--kd-accent-fg);text-decoration:none}
+.codepop a:hover{text-decoration:underline}
+.cf.w .cf-l.hl{background:rgba(251,191,36,.08);box-shadow:inset 2px 0 0 var(--kd-warn)}
+.cf.w .cf-l.hl .n,.cf.w .cf-l.ann .c{color:var(--kd-warn)}
+.cf.w .sq{text-decoration-color:var(--kd-warn)}
+.reqs{border:1px solid var(--kd-line);border-radius:10px;overflow:hidden}
+.req{display:grid;grid-template-columns:62px 52px minmax(0,1fr) auto auto;gap:12px;align-items:baseline;padding:7px 12px;border-top:1px solid var(--kd-line);font:12px var(--mono)}
+.req:first-child{border-top:0}
+.req .st{color:var(--kd-err-fg)}
+.req .m{color:var(--kd-fg2)}
+.req .u{color:var(--kd-fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.req .ms,.req .ts{color:var(--kd-fg3)}
+.req .why{grid-column:3/-1;color:var(--kd-fg3);font-size:11.5px;margin-top:-3px}
 .d-msg{font-size:19px;font-weight:600;letter-spacing:-.015em;line-height:1.35;margin:0 0 14px;color:var(--kd-strong);word-break:break-word;white-space:pre-wrap}
 .d-msg.long{font-size:15px;line-height:1.45}
 .d-msg code{font-size:17px;background:var(--kd-chip);padding:1px 6px;border-radius:5px;font-weight:500}

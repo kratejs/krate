@@ -2,6 +2,8 @@
 // decodes them so runtime stack traces point at real source locations instead
 // of bundle offsets. Fetches fail silently when maps are absent.
 
+import { rawFetch } from './requests.js';
+
 interface MapSegment {
   genCol: number;
   src: number;
@@ -78,7 +80,7 @@ async function loadSourceMap(url: string): Promise<DecodedMap | null> {
     try {
       const u = new URL(url, location.href);
       if (u.protocol !== location.protocol || u.host !== location.host) return null;
-      const res = await fetch(url + '.map');
+      const res = await rawFetch(url + '.map');
       if (!res.ok) return null;
       const json = await res.json();
       if (!json || typeof json.mappings !== 'string') return null;

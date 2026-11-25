@@ -13,6 +13,7 @@ import {
   elementBox,
   formatValue,
   hydrationOf,
+  hydrationStartOf,
   indexElements,
   kdNumbers,
   rangeBox,
@@ -320,7 +321,15 @@ export class Inspector {
     if (gz !== undefined) kv += '<dt>Shipped</dt><dd><span class="mono">' + kb(gz) + ' KB gz</span></dd>';
     else if (row.tier === 'static' || row.tier === 'server') kv += '<dt>Shipped</dt><dd><span class="mono">HTML only, no JS</span></dd>';
     const ms = hydrationOf(row);
-    if (ms !== undefined) kv += '<dt>Hydrated</dt><dd><span class="mono">' + (ms < 10 ? ms.toFixed(1) : Math.round(ms)) + ' ms</span></dd>';
+    if (ms !== undefined) {
+      const at = hydrationStartOf(row);
+      kv +=
+        '<dt>Hydrated</dt><dd><span class="mono">' +
+        (ms < 10 ? ms.toFixed(1) : Math.round(ms)) +
+        ' ms' +
+        (at !== undefined ? ', ' + Math.round(at) + ' ms after load' : '') +
+        '</span></dd>';
+    }
     if (row.tier === 'runtime') kv += '<dt>Renders</dt><dd><span class="mono">per request</span></dd>';
     tip.innerHTML =
       '<div class="tip-h"><span class="name">' +

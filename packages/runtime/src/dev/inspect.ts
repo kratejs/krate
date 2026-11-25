@@ -86,6 +86,15 @@ export function hydrationOf(row: CompRow, g: any = globalThis): number | undefin
   return undefined;
 }
 
+/** When an instance started hydrating, in ms after navigation start. */
+export function hydrationStartOf(row: CompRow, g: any = globalThis): number | undefined {
+  const st = g.__krate_dev_hydration_start;
+  if (row.key && st && typeof st[row.key] === 'number') return st[row.key];
+  const isl = row.island && g.__krate_island_hydration ? g.__krate_island_hydration[row.island] : undefined;
+  if (isl && typeof isl.start === 'number') return isl.start;
+  return undefined;
+}
+
 /** A signal value as short text for the tooltip. */
 export function formatValue(v: unknown): string {
   if (typeof v === 'string') return JSON.stringify(v.length > 40 ? v.slice(0, 40) + '...' : v);

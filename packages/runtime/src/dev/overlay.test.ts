@@ -59,7 +59,8 @@ const API: Routes = {
     layouts: ['src/pages/_layout.tsx'],
     sizes: { html: 14540, js: 61200, css: 6963, gzipJs: 21914, gzipRuntime: 13414, gzipIslands: 8499 },
     islands: [],
-    budget: { js: 30720 },
+    budget: { js: 30720, route: 102400 },
+    budgetUsage: { js: 61200, route: 82703 },
   },
   '/__krate/dev/routes': [
     { pattern: '/', source: 'src/pages/index.tsx', mode: 'ssg', kind: 'page', paths: ['/'] },
@@ -169,8 +170,8 @@ describe('dock', () => {
 describe('error overlay', () => {
   const diags = [
     { file: 'src/components/LikeButton.tsx', line: 14, col: 7, code: 'KR5002', message: 'invalid event handler `onclick`', hint: 'rename it to onClick' },
-    { file: 'src/components/Newsletter.tsx', line: 22, col: 3, code: 'KR5005', severity: 'warning', message: 'ignored default' },
   ];
+  const warnings = [{ file: 'src/components/Newsletter.tsx', line: 22, col: 3, code: 'KR5005', severity: 'warning', message: 'ignored default' }];
   const withFix: Routes = {
     ...API,
     '/__krate/dev/source': { file: 'src/components/LikeButton.tsx', lang: 'tsx', start: 13, lines: ['      class="like"', '      onclick={toggle}', '    >'] },
@@ -180,7 +181,7 @@ describe('error overlay', () => {
 
   it('pages through build issues with the rail and arrow keys', async () => {
     await start({}, withFix);
-    FakeEventSource.last!.emit('build-error', { diagnostics: diags });
+    FakeEventSource.last!.emit('build-error', { diagnostics: diags, warnings });
     await flush();
     expect(app!.modalOpen).toBe(true);
     expect($('.m-title')!.textContent).toBe('Build failed');
@@ -203,7 +204,7 @@ describe('error overlay', () => {
 
   it('applies a fix through the dev server', async () => {
     const calls = await start({}, withFix);
-    FakeEventSource.last!.emit('build-error', { diagnostics: diags });
+    FakeEventSource.last!.emit('build-error', { diagnostics: diags, warnings });
     await flush();
     key('KeyF', { key: 'f' });
     await flush();
@@ -215,12 +216,28 @@ describe('error overlay', () => {
 
   it('closes when a rebuild passes', async () => {
     await start({}, withFix);
-    FakeEventSource.last!.emit('build-error', { diagnostics: diags });
+    FakeEventSource.last!.emit('build-error', { diagnostics: diags, warnings });
     await flush();
-    // A reload for another page clears build errors without reloading this tab.
+    // The passing build reports its warnings (none), then a reload for
+    // another page clears build errors without reloading this tab.
+    FakeEventSource.last!.emit('build-end', { build: { ...BUILD, id: 9 }, warnings: [] });
     FakeEventSource.last!.emit('reload', { pages: ['/other'] });
     expect(app!.modalOpen).toBe(false);
     expect(app!.visibleIssues()).toHaveLength(0);
+  });
+
+  it('keeps the warnings a passing build reports, without opening', async () => {
+    await start({}, withFix);
+    FakeEventSource.last!.emit('build-error', { diagnostics: diags, warnings });
+    await flush();
+    key('Escape', { key: 'Escape' });
+    FakeEventSource.last!.emit('build-end', { build: { ...BUILD, id: 9 }, warnings });
+    FakeEventSource.last!.emit('reload', { pages: ['/other'] });
+    expect(app!.modalOpen).toBe(false);
+    expect(app!.visibleIssues().map((i) => i.code)).toEqual(['KR5005']);
+    expect($('.dock')!.classList.contains('warn')).toBe(true);
+    expect($('.dock')!.classList.contains('error')).toBe(false);
+    expect($('.dock .badge.warn')!.textContent).toBe('1 warning');
   });
 
   it('splits a runtime stack into app frames and folded framework frames', async () => {
@@ -302,7 +319,11 @@ describe('panel', () => {
     const body = $('.p-body')!.textContent!;
     expect(body).toContain('/blog/[slug]');
     expect(body).toContain('1 of 24 paths from generateStaticParams');
-    expect(body).toContain('21.4 of 30 KB budget');
+    expect(body).toContain('21.4 KB gzipped');
+    // The budget compares raw bytes with raw bytes, as checks.budget does.
+    const budgets = Array.from(shadow().querySelectorAll('.bgt')).map((b) => b.textContent + (b.classList.contains('over') ? ' over' : ''));
+    expect(budgets).toEqual(['JS59.8 of 30 KB over', 'Route total80.8 of 100 KB']);
+    expect($('.bgt-note')!.textContent).toContain('not minified');
     expect($('.row .name')!.textContent).toBe('LikeButton');
     expect($('.row .sub')!.textContent).toBe('1 signal');
     expect($('.row .right')!.textContent).toBe('0.9ms');
@@ -458,5 +479,171 @@ describe('command menu and shortcuts', () => {
     expect(app!.modalOpen).toBe(false);
     key('KeyE', { altKey: true, key: 'e' });
     expect(app!.modalOpen).toBe(true);
+  });
+});
+
+describe('build warnings', () => {
+  const warning = { file: 'src/components/Like.tsx', line: 4, col: 23, code: 'KR5002', severity: 'warning', message: 'invalid event handler `onclick` on <button>: React event props are camelCase', hint: 'rename it to onClick' };
+  const routes: Routes = {
+    ...API,
+    '/__krate/dev/code': { code: 'KR5002', title: 'Lowercase event handler prop', explanation: 'React spells event props in camelCase: `onClick`.' },
+    '/__krate/dev/source': { file: 'src/components/Like.tsx', lang: 'tsx', start: 3, lines: ['  const [n, setN] = createSignal(0);', '  return <button class="like" onclick={() => setN(n() + 1)}>Like</button>;', '}'] },
+    'GET /__krate/dev/fix': { changes: [{ file: 'src/components/Like.tsx', line: 4, col: 31, code: 'KR5002', from: 'onclick', to: 'onClick' }] },
+    'POST /__krate/dev/fix': { applied: true, changes: [{}] },
+  };
+
+  it('shows an amber dock badge that opens them, never the overlay by itself', async () => {
+    await start({}, routes);
+    FakeEventSource.last!.emit('build-end', { build: { ...BUILD, id: 5 }, warnings: [warning, warning] });
+    await flush();
+    expect(app!.modalOpen).toBe(false);
+    expect($('.dock')!.className).toContain('warn');
+    expect($('.dock .badge.warn')!.textContent).toBe('1 warning');
+    click('[data-act=issues]');
+    await flush();
+    expect(app!.modalOpen).toBe(true);
+    expect($('.m-title')!.textContent).toBe('Build warnings');
+    expect($('.m-title')!.className).toContain('amber');
+    expect($('.m-sub')!.textContent).toContain('1 warning in 1 file');
+    expect($('.d-meta .code.w')!.textContent).toBe('KR5002');
+    expect($('.d-meta .chip')!.textContent).toBe('Lowercase event handler prop');
+    expect($('.cf')!.className).toBe('cf w');
+    expect($('.diff .add')!.textContent).toContain('onClick={() => setN(n() + 1)}');
+    expect($('.m-foot')!.textContent).toContain('The build passed with warnings');
+  });
+
+  it('lists warnings in the rail with the errors, amber-tinted', async () => {
+    await start({}, routes);
+    FakeEventSource.last!.emit('build-error', { diagnostics: [{ message: 'Unexpected token', file: 'src/pages/a.tsx', line: 2 }], warnings: [warning] });
+    await flush();
+    expect(app!.modalOpen).toBe(true);
+    expect(shadow().querySelectorAll('.rail .issue.e')).toHaveLength(1);
+    expect(shadow().querySelectorAll('.rail .issue.w')).toHaveLength(1);
+    expect($('.rail .issue.w .top1')!.textContent).toContain('warning');
+    expect($('.dock .badge.err')!.textContent).toBe('1 issue');
+  });
+
+  it('applies the safe fix and fix all, and clears once the rebuild reports none', async () => {
+    const calls = await start({}, routes);
+    FakeEventSource.last!.emit('build-warnings', { warnings: [warning, { ...warning, file: 'src/components/Other.tsx', line: 9 }] });
+    click('[data-act=issues]');
+    await flush();
+    click('[data-act=fix]');
+    await flush();
+    const posts = () => calls.filter((c) => c.init?.method === 'POST' && c.url.endsWith('/fix')).map((c) => JSON.parse(String(c.init!.body)));
+    expect(posts()).toEqual([{ file: 'src/components/Like.tsx', code: 'KR5002' }]);
+    click('[data-act=fix-all]');
+    await flush();
+    expect(posts()[1]).toEqual({ all: true });
+    FakeEventSource.last!.emit('build-end', { build: { ...BUILD, id: 6 }, warnings: [] });
+    expect(app!.modalOpen).toBe(false);
+    expect($('.dock .badge')).toBeNull();
+  });
+
+  it('hides them with the Show build warnings setting', async () => {
+    await start({}, routes);
+    FakeEventSource.last!.emit('build-warnings', { warnings: [warning] });
+    expect($('.dock .badge.warn')).not.toBeNull();
+    click('[data-act=panel]');
+    click('[data-tab=settings]');
+    click('[data-act=setting][data-k=showWarnings]');
+    expect(app!.settings.showWarnings).toBe(false);
+    expect($('.dock .badge')).toBeNull();
+    expect(app!.visibleIssues()).toHaveLength(0);
+  });
+
+  it('explains the code in a popover that keeps the docs link', async () => {
+    await start({}, routes);
+    FakeEventSource.last!.emit('build-warnings', { warnings: [warning] });
+    click('[data-act=issues]');
+    await flush();
+    click('.whatbtn');
+    expect($('.codepop')!.textContent).toContain('React spells event props in camelCase');
+    expect($('.codepop a')!.getAttribute('href')).toBe('https://docs.test/#kr5002');
+    key('Escape', { key: 'Escape' });
+    expect($('.codepop')).toBeNull();
+    expect(app!.modalOpen).toBe(true);
+    key('Escape', { key: 'Escape' });
+    expect(app!.modalOpen).toBe(false);
+  });
+});
+
+describe('last good page', () => {
+  it('dismisses the overlay and the dock says the page is the last good build until it passes', async () => {
+    await start();
+    FakeEventSource.last!.emit('build-error', { diagnostics: [{ message: 'Unexpected token', file: 'src/pages/a.tsx', line: 2 }] });
+    await flush();
+    expect($('.m-foot')!.textContent).toContain('Last good build');
+    click('[data-act=last-good]');
+    expect(app!.modalOpen).toBe(false);
+    expect($('.dock .seg.stale')!.textContent).toContain('Last good build');
+    expect($('.dock .badge.err')!.textContent).toBe('1 issue');
+    FakeEventSource.last!.emit('build-end', { build: { ...BUILD, id: 7 }, warnings: [] });
+    FakeEventSource.last!.emit('reload', { pages: ['/other'] });
+    expect($('.dock .seg.stale')).toBeNull();
+    expect($('.dock .badge')).toBeNull();
+  });
+
+  it('is not offered on the error shell, which has no last good page', async () => {
+    await start({ page: undefined });
+    FakeEventSource.last!.emit('build-error', { diagnostics: [{ message: 'Unexpected token' }] });
+    await flush();
+    expect($('[data-act=last-good]')).toBeNull();
+  });
+});
+
+describe('server crash subtitle', () => {
+  it('names the runtime and the restarts of the last minute', async () => {
+    await start();
+    FakeEventSource.last!.emit('client-error', {
+      clientError: { kind: 'server', message: 'SSR renderer failed: exited unexpectedly', source: 'SSR renderer', detail: 'exited unexpectedly', exitCode: 1, restart: 'ssr', runtime: 'node 22.11', restarts: 2 },
+    });
+    await flush();
+    const sub = $('.m-sub')!.textContent!;
+    expect(sub.startsWith('node 22.11 \u00B7 exited with code 1 \u00B7 ')).toBe(true);
+    expect(sub.endsWith(' \u00B7 restarted twice in the last minute')).toBe(true);
+  });
+});
+
+describe('request tab', () => {
+  it('lists the failed requests near a runtime error and hides when there are none', async () => {
+    await start({}, { ...API, '/api/likes': () => new Response('nope', { status: 500 }), '/api/ok': { ok: true } });
+    await fetch('/api/ok');
+    await fetch('/api/likes', { method: 'POST' });
+    await fetch('/api/missing');
+    await flush();
+    // The overlay's own requests are not the page's.
+    expect(app!.requests.list.map((r) => r.status + ' ' + r.method + ' ' + r.url)).toEqual(['500 POST /api/likes', '404 GET /api/missing']);
+    const err = new TypeError('boom');
+    err.stack = 'TypeError: boom\n    at load (src/components/LikeButton.tsx:22:31)';
+    window.dispatchEvent(new ErrorEvent('error', { error: err, message: 'Uncaught TypeError: boom' }));
+    await flush();
+    const tab = $('[data-act=rt-tab][data-v=requests]')!;
+    expect(tab.textContent).toBe('Requests2');
+    tab.click();
+    const rows = Array.from(shadow().querySelectorAll('.req')).map((r) => r.querySelector('.st')!.textContent + ' ' + r.querySelector('.u')!.textContent);
+    expect(rows).toEqual(['500 /api/likes', '404 /api/missing']);
+  });
+
+  it('does not list its own report again when the dev server echoes it with a mapped stack', async () => {
+    const calls = await start({}, { ...API, '/broken/index.abc.js.map': { version: 3, sources: ['src/components/Thrower.tsx'], mappings: 'AAMI' } });
+    const err = new TypeError('boom');
+    err.stack = 'TypeError: boom\n    at explode (http://localhost:3000/broken/index.abc.js:1:5)';
+    window.dispatchEvent(new ErrorEvent('error', { error: err, message: 'Uncaught TypeError: boom' }));
+    await flush(12);
+    expect(calls.some((c) => c.url.endsWith('index.abc.js.map'))).toBe(true);
+    const sent = JSON.parse(await ((navigator.sendBeacon as any).mock.calls[0][1] as Blob).text());
+    expect(sent.stack).toContain('src/components/Thrower.tsx:7:');
+    FakeEventSource.last!.emit('client-error', { clientError: sent });
+    await flush();
+    expect(app!.visibleIssues()).toHaveLength(1);
+    expect(app!.visibleIssues()[0].file).toBe('src/components/Thrower.tsx');
+  });
+
+  it('has no Requests tab without failed requests', async () => {
+    await start();
+    window.dispatchEvent(new ErrorEvent('error', { error: new Error('x'), message: 'x' }));
+    await flush();
+    expect($('[data-act=rt-tab][data-v=requests]')).toBeNull();
   });
 });

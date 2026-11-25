@@ -2,10 +2,11 @@
 // Host and Memory tabs.
 
 import type { KrateDev } from './app.js';
-import type { BuildRecord, LogLine } from './api.js';
+import type { BuildRecord, LogLine, RouteData } from './api.js';
 import { icon, mark } from './icons.js';
 import { type CompRow, TIERS, type Tier, hydrationOf, readTable, signalsOf, tierCounts } from './inspect.js';
 import { type HostEvent, hostEventLine, jsHeapBytes, memoryRows, type MemoryReport, parseFrames } from './native.js';
+import { rawFetch } from './requests.js';
 import { kbds } from './settings.js';
 import { clock, copyText, esc, fmtMs, kb, plural } from './util.js';
 
@@ -169,6 +170,48 @@ export function headChecks(doc: Document = document): HeadCheck[] {
   ];
 }
 
+const BUDGET_ROWS: [keyof NonNullable<RouteData['budget']>, string][] = [
+  ['js', 'JS'],
+  ['hydration', 'Hydration'],
+  ['islandJS', 'Island JS'],
+  ['route', 'Route total'],
+];
+
+/**
+ * checks.budget against the page measured the same way the checks measure
+ * it: raw bytes, not gzip. Dev builds are not minified, so production is
+ * smaller than what this shows.
+ */
+export function budgetHTML(r: RouteData | null | undefined): string {
+  const b = r?.budget;
+  const u = r?.budgetUsage;
+  if (!b || !u) return '';
+  let rows = '';
+  for (const [k, label] of BUDGET_ROWS) {
+    const limit = b[k];
+    if (!limit) continue;
+    const used = u[k] || 0;
+    rows +=
+      '<div class="bgt' +
+      (used > limit ? ' over' : '') +
+      '"><span class="k">' +
+      esc(label) +
+      '</span><span class="bar"><i style="width:' +
+      pct(Math.min(used, limit), Math.max(limit, 1)) +
+      '"></i></span><span class="v mono">' +
+      kb(used) +
+      ' of ' +
+      kb(limit) +
+      ' KB</span></div>';
+  }
+  if (!rows) return '';
+  return (
+    '<div class="bgts">' +
+    rows +
+    '<div class="bgt-note">checks.budget counts raw bytes. This dev build is not minified, so the production numbers are smaller; run krate build or krate check for them.</div></div>'
+  );
+}
+
 function routeTab(app: KrateDev): string {
   const r = app.route && app.routeFor === location.pathname ? app.route : null;
   const page = app.pageRoute();
@@ -215,8 +258,7 @@ function routeTab(app: KrateDev): string {
   const s = r?.sizes;
   if (s) {
     const js = s.gzipJs || 0;
-    const budget = r?.budget?.js;
-    const total = Math.max(budget || 0, js, 1);
+    const total = Math.max(js, 1);
     const rt = s.gzipRuntime || 0;
     const isl = s.gzipIslands || 0;
     const other = Math.max(0, js - rt - isl);
@@ -239,11 +281,11 @@ function routeTab(app: KrateDev): string {
       kb(isl) +
       '</span>' +
       (other > 0 ? ' \u00B7 <span style="color:var(--kd-blue)">page ' + kb(other) + '</span>' : '') +
-      '</span>' +
-      (budget
-        ? '<span class="' + (js > budget ? 'over' : '') + '">' + kb(js) + ' of ' + kb(budget) + ' KB budget</span>'
-        : '<span>' + kb(js) + ' KB gzipped</span>') +
-      '</div></div></div>';
+      '</span><span>' +
+      kb(js) +
+      ' KB gzipped</span></div></div>' +
+      budgetHTML(r) +
+      '</div>';
   }
 
   html += '<div class="sect"><div class="lbl">Islands on this page</div>';
@@ -660,7 +702,7 @@ function settingsTab(app: KrateDev): string {
       avail.map((e) => '<option value="' + esc(e.id) + '"' + (e.id === s.editor ? ' selected' : '') + '>' + esc(e.label) + '</option>').join('') +
       '</select></label></div>';
   }
-  const tog = (k: 'openOnRuntime' | 'consoleIssues' | 'collapsed', t: string, d: string) =>
+  const tog = (k: 'openOnRuntime' | 'consoleIssues' | 'showWarnings' | 'collapsed', t: string, d: string) =>
     '<div class="setrow"><div><div class="t">' +
     esc(t) +
     '</div>' +
@@ -675,6 +717,7 @@ function settingsTab(app: KrateDev): string {
   html +=
     tog('openOnRuntime', 'Open overlay on runtime errors', 'Off: only the dock count changes') +
     tog('consoleIssues', 'Treat console.error as an issue', '') +
+    tog('showWarnings', 'Show build warnings', 'Listed with the issues; they never open the overlay') +
     tog('collapsed', 'Collapse dock to the mark', 'Expands on hover') +
     '</div><div class="sect"><div class="lbl">Shortcuts</div><div class="keys">' +
     '<span>Command menu</span><span>' +
@@ -697,7 +740,7 @@ function hostRowsHTML(app: KrateDev): string {
 
 async function pollHost(app: KrateDev): Promise<void> {
   try {
-    const res = await fetch(app.cfg.events + '?since=' + app.hostSeq, { cache: 'no-store' });
+    const res = await rawFetch(app.cfg.events + '?since=' + app.hostSeq, { cache: 'no-store' });
     if (!res.ok) return;
     const parsed = parseFrames(new Uint8Array(await res.arrayBuffer()));
     for (const v of parsed.values) {
@@ -721,7 +764,7 @@ async function pollHost(app: KrateDev): Promise<void> {
 async function pollMemory(app: KrateDev): Promise<void> {
   let rep: MemoryReport | null = null;
   try {
-    const res = await fetch(app.cfg.memory, { cache: 'no-store' });
+    const res = await rawFetch(app.cfg.memory, { cache: 'no-store' });
     if (res.ok) rep = (await res.json()) as MemoryReport;
   } catch {
     /* the tab is best-effort */
@@ -779,8 +822,9 @@ export function panelClick(app: KrateDev, act: string, t: HTMLElement, _e: Mouse
       app.setSettings({ theme: t.dataset.v as any });
       return true;
     case 'setting': {
-      const k = t.dataset.k as 'openOnRuntime' | 'consoleIssues' | 'collapsed';
+      const k = t.dataset.k as 'openOnRuntime' | 'consoleIssues' | 'showWarnings' | 'collapsed';
       app.setSettings({ [k]: !app.settings[k] });
+      if (k === 'showWarnings') app.issuesChanged(false);
       if (k === 'consoleIssues' && !app.settings.consoleIssues) {
         app.issues = app.issues.filter((i) => i.origin !== 'console');
         app.issuesChanged(false);

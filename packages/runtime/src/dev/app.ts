@@ -10,15 +10,17 @@ import {
   type DevClientError,
   type DevDiagnostic,
   type Issue,
-  issueFromDiagnostic,
+  isBuildWarning,
   issueFromRuntime,
   issueFromServer,
+  issuesFromDiagnostics,
 } from './issues.js';
 import { hostStackOf, parseFrames } from './native.js';
+import { RequestLog, captureRequests, rawFetch } from './requests.js';
 import { type Settings, kbd, loadSettings, nearestCorner, saveSettings, shortcutOf } from './settings.js';
 import { symbolicateStack } from './sourcemap.js';
 import { STYLE } from './styles.js';
-import { basename, devConfig, esc, fmtMs, formatArg, isTypingTarget, plural, routeMatches, type ResolvedConfig } from './util.js';
+import { basename, clock, devConfig, esc, fmtMs, formatArg, isTypingTarget, plural, routeMatches, type ResolvedConfig } from './util.js';
 import { renderPanel, renderPanelBody, panelClick, type Tab, visibleTabs, refreshLogs, stopPanelTimers, startPanelTimers } from './panel.js';
 import { renderModal, modalClick, modalKey, prepareIssue } from './modal.js';
 import { openPalette, closePalette, paletteKey, paletteClick } from './palette.js';
@@ -63,7 +65,18 @@ export class KrateDev {
   tails = new Map<string, LogLine[]>();
   fixes = new Map<string, FixChange[] | null>();
   busy = new Set<string>();
-  runtimeTab: 'stack' | 'console' = 'stack';
+  runtimeTab: 'stack' | 'console' | 'requests' = 'stack';
+  /** Failed fetch/XHR requests of the page, for the runtime error's Request tab. */
+  requests = new RequestLog();
+  /**
+   * The build failed and the error overlay was dismissed with "Show last good
+   * page": the page on screen is the last good build until a build passes.
+   */
+  staleView = false;
+  /** Registry entries of diagnostic codes (null: unknown), from /code. */
+  codes = new Map<string, { title: string; explanation: string } | null>();
+  /** The code whose "What this means" popover is open. */
+  codePop = '';
   unfold = new Set<string>();
 
   // panel
@@ -146,6 +159,7 @@ export class KrateDev {
     if (this.cfg.frames) this.connectFrames();
     else this.connectSSE();
     this.captureRuntimeErrors();
+    this.unbind.push(captureRequests(this.requests));
     void this.loadStartup();
   }
 
@@ -204,7 +218,7 @@ export class KrateDev {
   async getJSON<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T | null> {
     if (!this.cfg.api) return null;
     try {
-      const res = await fetch(this.apiURL(path, params), { cache: 'no-store', headers: { Accept: 'application/json' } });
+      const res = await rawFetch(this.apiURL(path, params), { cache: 'no-store', headers: { Accept: 'application/json' } });
       if (!res.ok) return null;
       return (await res.json()) as T;
     } catch {
@@ -215,7 +229,7 @@ export class KrateDev {
   async postJSON(path: string, body: unknown): Promise<{ status: number; data: any }> {
     if (!this.cfg.api) return { status: 0, data: null };
     try {
-      const res = await fetch(this.apiURL(path), {
+      const res = await rawFetch(this.apiURL(path), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(body),
@@ -294,8 +308,8 @@ export class KrateDev {
     const ed = this.settings.editor;
     const known = ed && this.info?.editor?.available?.some((e) => e.id === ed);
     try {
-      let res = await fetch(known ? url + '&editor=' + encodeURIComponent(ed) : url);
-      if (!res.ok && known) res = await fetch(url);
+      let res = await rawFetch(known ? url + '&editor=' + encodeURIComponent(ed) : url);
+      if (!res.ok && known) res = await rawFetch(url);
       if (!res.ok) this.toast('Could not open the editor', file, 'x');
     } catch {
       this.toast('Could not open the editor', file, 'x');
@@ -326,14 +340,15 @@ export class KrateDev {
     if (!d) return;
     d.hidden = this.hiddenAll;
     const issues = this.visibleIssues();
-    const errors = issues.length;
+    const warnings = issues.filter(isBuildWarning).length;
+    const errors = issues.length - warnings;
     const mini = this.settings.collapsed && !this.peek;
     const inspecting = this.inspector.on;
     const down = this.conn === 'down';
     d.className =
       'dock' +
       (mini ? ' mini' : '') +
-      (down ? ' off' : errors ? ' error' : '') +
+      (down ? ' off' : errors ? ' error' : warnings ? ' warn' : '') +
       (this.building && !down ? ' building' : '') +
       (inspecting ? ' inspect' : '');
     const markBtn =
@@ -343,7 +358,13 @@ export class KrateDev {
       mark() +
       '</button>';
     if (mini) {
-      d.innerHTML = markBtn + (errors ? '<i class="pip" aria-label="' + esc(plural(errors, 'issue')) + '"></i>' : '');
+      d.innerHTML =
+        markBtn +
+        (errors
+          ? '<i class="pip" aria-label="' + esc(plural(errors, 'issue')) + '"></i>'
+          : warnings
+            ? '<i class="pip w" aria-label="' + esc(plural(warnings, 'warning')) + '"></i>'
+            : '');
       return;
     }
     if (down) {
@@ -373,10 +394,22 @@ export class KrateDev {
       const what = n === 1 ? ' ' + basename(this.buildFiles[0]) : n > 1 ? ' ' + n + ' files' : '';
       html += '<div class="seg busy" role="status"><span>Rebuilding' + esc(what) + '</span></div>';
     } else if (errors) {
-      const serverOnly = issues.every((i) => i.kind === 'server');
+      const serverOnly = issues.every((i) => i.kind === 'server' || isBuildWarning(i));
+      if (this.staleView && issues.some((i) => i.kind === 'build' && i.severity === 'error')) {
+        html +=
+          '<div class="seg stale" role="status" title="The build failed; this is the last build that passed">' +
+          '<span>Last good build' +
+          (this.lastGoodAt ? ' ' + esc(clock(this.lastGoodAt)) : '') +
+          '</span></div>';
+      }
       html +=
         '<button class="seg" type="button" data-act="issues" title="Show issues"><span class="badge err">' +
         esc(serverOnly ? 'Server down' : plural(errors, 'issue')) +
+        '</span></button>';
+    } else if (warnings) {
+      html +=
+        '<button class="seg" type="button" data-act="issues" title="Show build warnings"><span class="badge warn">' +
+        esc(plural(warnings, 'warning')) +
         '</span></button>';
     } else if (this.lastBuild) {
       html +=
@@ -480,7 +513,7 @@ export class KrateDev {
   visibleIssues(): Issue[] {
     const rank = { build: 0, server: 1, runtime: 2 };
     return this.issues
-      .filter((i) => !this.ignored.has(i.id))
+      .filter((i) => !this.ignored.has(i.id) && (this.settings.showWarnings || !isBuildWarning(i)))
       .sort((a, b) => rank[a.kind] - rank[b.kind] || (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1));
   }
 
@@ -725,6 +758,7 @@ export class KrateDev {
     };
     sse.addEventListener('reload', (e) => this.onReload(parse(e)));
     sse.addEventListener('build-error', (e) => this.onBuildError(parse(e)));
+    sse.addEventListener('build-warnings', (e) => this.onBuildWarnings(parse(e)));
     sse.addEventListener('client-error', (e) => this.onClientError(parse(e)));
     sse.addEventListener('build-start', (e) => this.onBuildStart(parse(e)));
     sse.addEventListener('build-end', (e) => this.onBuildEnd(parse(e)));
@@ -738,7 +772,7 @@ export class KrateDev {
   private connectFrames(): void {
     let connectedOnce = false;
     const run = async (): Promise<void> => {
-      const res = await fetch(this.cfg.frames, { cache: 'no-store' });
+      const res = await rawFetch(this.cfg.frames, { cache: 'no-store' });
       if (!res.ok || !res.body) throw new Error('hmr stream unavailable');
       const reader = res.body.getReader();
       let buf: Uint8Array = new Uint8Array(0);
@@ -759,6 +793,7 @@ export class KrateDev {
             this.setConn('open');
           } else if (m.type === 'reload') this.onReload(m);
           else if (m.type === 'build-error') this.onBuildError(m);
+          else if (m.type === 'build-warnings') this.onBuildWarnings(m);
           else if (m.type === 'client-error') this.onClientError(m);
           else if (m.type === 'build-start') this.onBuildStart(m);
           else if (m.type === 'build-end') this.onBuildEnd(m);
@@ -801,6 +836,9 @@ export class KrateDev {
       this.routes = undefined;
       this.frames.clear();
       this.fixes.clear();
+      if (b.ok) this.staleView = false;
+      // Every build reports the warnings it leaves.
+      this.setWarnings(d && Array.isArray(d.warnings) ? d.warnings : []);
     }
     this.renderDock();
     if (this.panelOpen && (this.tab === 'activity' || this.tab === 'route')) {
@@ -813,8 +851,9 @@ export class KrateDev {
   onReload(d: any): void {
     // A rebuild without diagnostics supersedes any compile error on screen,
     // whichever route it touched.
-    if (this.issues.some((i) => i.kind === 'build')) {
-      this.issues = this.issues.filter((i) => i.kind !== 'build');
+    this.staleView = false;
+    if (this.issues.some((i) => i.kind === 'build' && i.severity === 'error')) {
+      this.issues = this.issues.filter((i) => !(i.kind === 'build' && i.severity === 'error'));
       this.issuesChanged(false);
     }
     let cssOnly = false;
@@ -846,22 +885,43 @@ export class KrateDev {
 
   onBuildError(d: any): void {
     const diags: DevDiagnostic[] = d && Array.isArray(d.diagnostics) ? d.diagnostics : [];
-    const now = Date.now();
-    // A component used by several pages reports the same diagnostic once per page.
-    const next: Issue[] = [];
-    const byKey = new Map<string, Issue>();
-    diags.forEach((x, i) => {
-      const k = [x.code, x.file, x.line, x.col, x.message].join('|');
-      const dup = byKey.get(k);
-      if (dup) {
-        dup.count++;
-        return;
-      }
-      const issue = issueFromDiagnostic(x, i, now);
-      byKey.set(k, issue);
-      next.push(issue);
-    });
-    // Keep the times of diagnostics that were already on screen.
+    const warns: DevDiagnostic[] = d && Array.isArray(d.warnings) ? d.warnings : [];
+    const next = [
+      ...issuesFromDiagnostics(diags, Date.now()),
+      ...issuesFromDiagnostics(
+        warns.map((w) => ({ ...w, severity: 'warning' })),
+        Date.now(),
+        diags.length,
+      ),
+    ];
+    this.replaceBuildIssues(next);
+    // Only errors open the overlay; warnings wait in the dock.
+    this.issuesChanged(next.some((i) => i.severity === 'error'));
+  }
+
+  /** The warnings of the latest build (build-end, build-warnings). */
+  onBuildWarnings(d: any): void {
+    this.setWarnings(d && Array.isArray(d.warnings) ? d.warnings : []);
+  }
+
+  setWarnings(list: DevDiagnostic[]): void {
+    const next = issuesFromDiagnostics(
+      list.map((w) => ({ ...w, severity: 'warning' })),
+      Date.now(),
+    );
+    const before = this.issues.filter(isBuildWarning);
+    if (before.length === next.length && before.every((b, k) => b.id === next[k].id && b.count === next[k].count)) return;
+    this.issues = [...this.issues.filter((i) => !isBuildWarning(i)), ...next];
+    for (const n of next) {
+      const old = before.find((i) => i.id === n.id);
+      if (old) n.time = old.time;
+    }
+    this.fixes.clear();
+    this.issuesChanged(false);
+  }
+
+  /** Replaces every build issue (errors and warnings), keeping the times of those already on screen. */
+  private replaceBuildIssues(next: Issue[]): void {
     for (const n of next) {
       const old = this.issues.find((i) => i.id === n.id);
       if (old) n.time = old.time;
@@ -869,7 +929,13 @@ export class KrateDev {
     this.issues = [...next, ...this.issues.filter((i) => i.kind !== 'build')];
     this.frames.clear();
     this.fixes.clear();
-    this.issuesChanged(next.length > 0);
+  }
+
+  /** "Show last good page": the overlay closes and the dock says what is on screen. */
+  showLastGood(): void {
+    this.staleView = true;
+    this.closeModal();
+    this.renderDock();
   }
 
   onClientError(d: { clientError?: DevClientError } | null): void {
@@ -898,7 +964,7 @@ export class KrateDev {
    * reload (the caller reloads when this rejects).
    */
   async swapStylesheets(): Promise<void> {
-    const res = await fetch(location.href, { cache: 'no-store', headers: { Accept: 'text/html' } });
+    const res = await rawFetch(location.href, { cache: 'no-store', headers: { Accept: 'text/html' } });
     if (!res.ok) throw new Error('fetch failed');
     const next = new DOMParser().parseFromString(await res.text(), 'text/html');
     const inline = (d: Document) =>
@@ -1052,7 +1118,12 @@ export class KrateDev {
     const raw = payload.stack;
     Promise.race([symbolicateStack(raw), new Promise<string>((r) => setTimeout(() => r(raw), 1500))])
       .catch(() => raw)
-      .then((stack) => this.send({ ...payload, stack }));
+      .then((stack) => {
+        // The dev server echoes the report to every tab; this one knows it
+        // by the mapped stack it sent.
+        this.seen.add(payload.message + '|' + stack);
+        this.send({ ...payload, stack });
+      });
   }
 
   private send(payload: DevClientError): void {
@@ -1067,7 +1138,7 @@ export class KrateDev {
       /* fall through to fetch */
     }
     try {
-      fetch(this.cfg.errors, { method: 'POST', body, headers: { 'Content-Type': 'application/json' }, keepalive: true }).catch(() => {});
+      rawFetch(this.cfg.errors, { method: 'POST', body, headers: { 'Content-Type': 'application/json' }, keepalive: true }).catch(() => {});
     } catch {
       /* reporting is best-effort */
     }

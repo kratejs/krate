@@ -27,6 +27,10 @@ export interface DevClientError {
   exitCode?: number;
   log?: string[];
   restart?: string;
+  /** The sidecar's runtime and version ("node 22.11"). */
+  runtime?: string;
+  /** How often it failed and was restarted within the last minute. */
+  restarts?: number;
 }
 
 export type IssueKind = 'build' | 'runtime' | 'server';
@@ -66,11 +70,14 @@ export interface CodeFrame {
 }
 
 export function issueFromDiagnostic(d: DevDiagnostic, i: number, time: number): Issue {
+  const warning = d.severity === 'warning';
   return {
-    id: 'b' + i + ':' + (d.code || '') + ':' + (d.file || '') + ':' + (d.line || 0),
+    // A warning keeps its id across builds (it can be ignored for the
+    // session); errors are numbered as reported.
+    id: (warning ? 'w:' + (d.col || 0) + ':' : 'b' + i + ':') + (d.code || '') + ':' + (d.file || '') + ':' + (d.line || 0),
     kind: 'build',
-    severity: d.severity === 'warning' ? 'warning' : 'error',
-    label: d.code || (d.severity === 'warning' ? 'Warning' : 'Build error'),
+    severity: warning ? 'warning' : 'error',
+    label: d.code || (warning ? 'Warning' : 'Build error'),
     message: d.message.replace(/^UI: /, ''),
     file: d.file,
     line: d.line,
@@ -81,6 +88,33 @@ export function issueFromDiagnostic(d: DevDiagnostic, i: number, time: number): 
     count: 1,
     time,
   };
+}
+
+/** True for a build warning (it never blocks the build or opens the overlay). */
+export function isBuildWarning(i: Issue): boolean {
+  return i.kind === 'build' && i.severity === 'warning';
+}
+
+/**
+ * Build issues from a list of diagnostics, one per location: a component
+ * used by several pages reports the same diagnostic once per page.
+ */
+export function issuesFromDiagnostics(diags: DevDiagnostic[], time: number, offset = 0): Issue[] {
+  const out: Issue[] = [];
+  const byKey = new Map<string, Issue>();
+  diags.forEach((x, i) => {
+    if (!x || typeof x.message !== 'string') return;
+    const k = [x.code, x.file, x.line, x.col, x.message, x.severity].join('|');
+    const dup = byKey.get(k);
+    if (dup) {
+      dup.count++;
+      return;
+    }
+    const issue = issueFromDiagnostic(x, offset + i, time);
+    byKey.set(k, issue);
+    out.push(issue);
+  });
+  return out;
 }
 
 const ORIGIN_LABEL: Record<string, string> = {
@@ -152,7 +186,8 @@ export function issueFromServer(ce: DevClientError, time: number): Issue {
 export function issueSummary(issues: Issue[]): string {
   const files = new Set(issues.map((i) => i.file).filter(Boolean));
   const n = issues.length;
-  return n + (n === 1 ? ' issue' : ' issues') + (files.size ? ' in ' + files.size + (files.size === 1 ? ' file' : ' files') : '');
+  const word = n && issues.every((i) => i.severity === 'warning') ? 'warning' : 'issue';
+  return n + ' ' + word + (n === 1 ? '' : 's') + (files.size ? ' in ' + files.size + (files.size === 1 ? ' file' : ' files') : '');
 }
 
 function fence(lang: string, body: string): string {

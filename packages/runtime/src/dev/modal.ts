@@ -7,6 +7,7 @@ import { highlightLine, wordAt } from './highlight.js';
 import { icon, mark } from './icons.js';
 import { componentPath, readTable } from './inspect.js';
 import { type CodeFrame, type Issue, copyForAI, issueSummary } from './issues.js';
+import { type FailedRequest, NEAR_BEFORE_MS, displayURL, rawFetch } from './requests.js';
 import { parseStack, splitStack } from './stack.js';
 import { basename, clock, copyText, dirname, esc, plural, richText } from './util.js';
 
@@ -75,15 +76,24 @@ function componentAt(app: KrateDev, i: Issue): string[] {
 function sub(app: KrateDev, i: Issue, list: Issue[]): string {
   const t = clock(i.time);
   if (i.kind === 'build') return issueSummary(list.filter((x) => x.kind === 'build')) + ' \u00B7 ' + t;
-  if (i.kind === 'server') {
-    const parts = [];
-    if (i.server?.exitCode !== undefined) parts.push('exited with code ' + i.server.exitCode);
-    if (i.count > 1) parts.push('reported ' + plural(i.count, 'time'));
-    parts.push(t);
-    return parts.join(' \u00B7 ');
-  }
+  if (i.kind === 'server') return serverSub(i, t);
   const path = componentAt(app, i);
   return 'in the browser' + (path.length ? ' while rendering ' + path[path.length - 1] : '') + ' \u00B7 ' + t;
+}
+
+const TIMES = ['', 'once', 'twice'];
+
+/** "node 22.11 · exited with code 1 · 12:44:30 · restarted twice in the last minute". */
+export function serverSub(i: Issue, t: string): string {
+  const s = i.server;
+  const parts: string[] = [];
+  if (s?.runtime) parts.push(s.runtime);
+  if (s?.exitCode !== undefined) parts.push('exited with code ' + s.exitCode);
+  if (i.count > 1 && !s?.restarts) parts.push('reported ' + plural(i.count, 'time'));
+  parts.push(t);
+  const n = s?.restarts || 0;
+  if (n > 0 && s?.restart) parts.push('restarted ' + (TIMES[n] || n + ' times') + ' in the last minute');
+  return parts.join(' \u00B7 ');
 }
 
 function railHTML(app: KrateDev, list: Issue[]): string {
@@ -154,7 +164,9 @@ export function codeFrameHTML(frame: CodeFrame | null, i: Issue, note = ''): str
     return '';
   }
   let html =
-    '<div class="cf"><div class="cf-bar"><span>' +
+    '<div class="cf' +
+    (i.kind === 'build' && i.severity === 'warning' ? ' w' : '') +
+    '"><div class="cf-bar"><span>' +
     esc(basename(file)) +
     '</span>' +
     (i.served ? '<span>built output, no source map</span>' : '') +
@@ -197,19 +209,38 @@ function buildDetail(app: KrateDev, i: Issue, list: Issue[]): string {
   const frame = app.frames.get(frameKey(i)) || null;
   const fix = fixFor(app, i);
   let html = '<div class="d-meta">';
+  const info = i.code ? app.codes.get(i.code) : undefined;
   if (i.code) {
-    html +=
-      '<span class="code' +
-      (i.severity === 'warning' ? ' w' : '') +
-      '">' +
-      esc(i.code) +
-      '</span><a class="link" style="font-size:12.5px;text-decoration:none" href="' +
-      esc(app.docsURL(i.code)) +
-      '" target="_blank" rel="noopener">What this means \u2197</a>';
+    html += '<span class="code' + (i.severity === 'warning' ? ' w' : '') + '">' + esc(i.code) + '</span>';
+    if (info) html += '<span class="chip">' + esc(info.title) + '</span>';
+    html += info
+      ? '<button class="whatbtn" type="button" data-act="code-pop" aria-expanded="' +
+        (app.codePop === i.code) +
+        '" aria-controls="kd-codepop">What this means</button>'
+      : '<a class="link" style="font-size:12.5px;text-decoration:none" href="' +
+        esc(app.docsURL(i.code)) +
+        '" target="_blank" rel="noopener">What this means \u2197</a>';
   } else {
     html += '<span class="code' + (i.severity === 'warning' ? ' w' : '') + '">' + esc(i.label) + '</span>';
   }
-  html += '</div>' + msgHTML(richText(i.message), i.message);
+  html += '</div>';
+  if (i.code && info && app.codePop === i.code) {
+    html +=
+      '<div class="codepop" id="kd-codepop" role="dialog" aria-label="' +
+      esc(i.code + ': ' + info.title) +
+      '"><button class="iconbtn x" type="button" data-act="code-pop" aria-label="Close">' +
+      icon('x') +
+      '</button><div class="t">' +
+      esc(i.code) +
+      ' \u00B7 ' +
+      esc(info.title) +
+      '</div><div>' +
+      richText(info.explanation) +
+      '</div><a href="' +
+      esc(app.docsURL(i.code)) +
+      '" target="_blank" rel="noopener">Read the docs \u2197</a></div>';
+  }
+  html += msgHTML(richText(i.message), i.message);
   html += fileLine(app, i, frame?.file);
   html += codeFrameHTML(frame, i, fix ? 'expected ' + fix.to : '');
   if (i.hint) html += '<div class="hint">' + icon('lightbulb') + '<div>' + richText(i.hint) + '</div></div>';
@@ -288,17 +319,28 @@ function runtimeDetail(app: KrateDev, i: Issue): string {
   html += fileLine(app, i, frame?.file);
   html += codeFrameHTML(frame, i);
   const console = app.localLogs.slice(-30);
+  const reqs = app.requests.near(i.time);
+  const tab = app.runtimeTab === 'requests' && !reqs.length ? 'stack' : app.runtimeTab;
   html +=
     '<div class="subtabs" role="tablist"><button type="button" role="tab" data-act="rt-tab" data-v="stack" aria-selected="' +
-    (app.runtimeTab === 'stack') +
+    (tab === 'stack') +
     '">Stack' +
     (frames.length ? '<span>' + appCount + ' of ' + frames.length + '</span>' : '') +
     '</button><button type="button" role="tab" data-act="rt-tab" data-v="console" aria-selected="' +
-    (app.runtimeTab === 'console') +
+    (tab === 'console') +
     '">Console<span>' +
     console.length +
-    '</span></button></div>';
-  if (app.runtimeTab === 'console') {
+    '</span></button>' +
+    (reqs.length
+      ? '<button type="button" role="tab" data-act="rt-tab" data-v="requests" aria-selected="' +
+        (tab === 'requests') +
+        '">Requests<span>' +
+        reqs.length +
+        '</span></button>'
+      : '') +
+    '</div>';
+  if (tab === 'requests') return html + requestsHTML(reqs, i.time);
+  if (tab === 'console') {
     html += console.length
       ? '<div class="term">' +
         console
@@ -372,6 +414,38 @@ function runtimeDetail(app: KrateDev, i: Issue): string {
   return html;
 }
 
+/** Failed requests around a runtime error, newest last. */
+export function requestsHTML(reqs: FailedRequest[], at: number): string {
+  let html = '<div class="reqs" role="list">';
+  for (const r of reqs) {
+    const delta = Math.round((r.t - at) / 100) / 10;
+    html +=
+      '<div class="req" role="listitem"><span class="st">' +
+      esc(r.status ? String(r.status) : 'failed') +
+      '</span><span class="m">' +
+      esc(r.method) +
+      '</span><span class="u" title="' +
+      esc(r.url) +
+      '">' +
+      esc(displayURL(r.url)) +
+      '</span><span class="ms">' +
+      esc(r.ms + ' ms') +
+      '</span><span class="ts" title="' +
+      esc(clock(r.t)) +
+      '">' +
+      esc((delta > 0 ? '+' : '') + delta + ' s') +
+      '</span>' +
+      (r.error ? '<span class="why">' + esc(r.error) + '</span>' : '') +
+      '</div>';
+  }
+  return (
+    html +
+    '</div><div class="empty" style="text-align:left;padding:8px 2px 0">Failed fetch and XHR requests of this page from ' +
+    NEAR_BEFORE_MS / 1000 +
+    ' s before the error; times are relative to it.</div>'
+  );
+}
+
 function frameworkOrigin(frames: { file: string }[]): string {
   if (frames.every((f) => /node_modules/.test(f.file))) return ' from node_modules';
   if (frames.every((f) => /runtime|krate-|chunks\/runtime/.test(f.file))) return ' from @krate/runtime';
@@ -429,11 +503,23 @@ function serverDetail(app: KrateDev, i: Issue): string {
 
 function footer(app: KrateDev, i: Issue): string {
   if (i.kind === 'build') {
+    const failed = app.visibleIssues().some((x) => x.kind === 'build' && x.severity === 'error');
+    if (!failed) {
+      return (
+        '<span class="sp">' +
+        (app.busy.has('fixed') ? '<span class="spin"></span>Fix applied, rebuilding.' : 'The build passed with warnings. They clear when the code is fixed.') +
+        '</span><span class="grow"></span>' +
+        '<button class="b ghost" type="button" data-act="ignore">Ignore this warning for the session</button>'
+      );
+    }
+    // A built page on screen is the last good build; the error shell is not.
+    const lastGood = !!app.lastGoodAt && !!app.cfg.page;
     return (
       '<span class="sp"><span class="spin"></span>' +
       (app.busy.has('fixed') ? 'Fix applied, rebuilding.' : 'Watching for changes. This closes when the build passes.') +
       '</span><span class="grow"></span>' +
-      (app.lastGoodAt ? '<span>Last good build ' + clock(app.lastGoodAt) + '</span>' : '')
+      (app.lastGoodAt ? '<span>Last good build ' + clock(app.lastGoodAt) + '</span>' : '') +
+      (lastGood ? '<button class="link" type="button" data-act="last-good">Show last good page</button>' : '')
     );
   }
   if (i.kind === 'server') {
@@ -520,7 +606,7 @@ export function renderModal(app: KrateDev): void {
 /** A code frame from a script the page loaded, for stacks without a source map. */
 async function servedFrame(file: string, line: number): Promise<CodeFrame | null> {
   try {
-    const res = await fetch('/' + file.replace(/^\/+/, ''), { cache: 'force-cache' });
+    const res = await rawFetch('/' + file.replace(/^\/+/, ''), { cache: 'force-cache' });
     if (!res.ok) return null;
     const all = (await res.text()).split('\n');
     const start = Math.max(1, line - 3);
@@ -571,6 +657,15 @@ export function prepareIssue(app: KrateDev, i: Issue | undefined): void {
       app.busy.delete('tail:' + i.id);
       const lines = r && Array.isArray(r.lines) ? r.lines.filter((l) => l.t <= i.time + 1000).slice(-40) : [];
       app.tails.set(i.id, lines);
+      rerender();
+    });
+  }
+  if (i.kind === 'build' && i.code && !app.codes.has(i.code) && !app.busy.has('code:' + i.code)) {
+    const code = i.code;
+    app.busy.add('code:' + code);
+    void app.getJSON<{ title?: string; explanation?: string }>('/code', { code }).then((r) => {
+      app.busy.delete('code:' + code);
+      app.codes.set(code, r && typeof r.title === 'string' ? { title: r.title, explanation: r.explanation || '' } : null);
       rerender();
     });
   }
@@ -681,8 +776,15 @@ export function modalClick(app: KrateDev, act: string, t: HTMLElement, _e: Mouse
       location.reload();
       return true;
     case 'rt-tab':
-      app.runtimeTab = t.dataset.v === 'console' ? 'console' : 'stack';
+      app.runtimeTab = t.dataset.v === 'console' ? 'console' : t.dataset.v === 'requests' ? 'requests' : 'stack';
       renderModal(app);
+      return true;
+    case 'code-pop':
+      app.codePop = i && i.code && app.codePop !== i.code ? i.code : '';
+      renderModal(app);
+      return true;
+    case 'last-good':
+      app.showLastGood();
       return true;
     case 'unfold': {
       const k = t.dataset.k || '';
@@ -698,7 +800,12 @@ export function modalClick(app: KrateDev, act: string, t: HTMLElement, _e: Mouse
 export function modalKey(app: KrateDev, e: KeyboardEvent, typing: boolean): boolean {
   if (e.key === 'Escape') {
     e.preventDefault();
-    app.closeModal();
+    if (app.codePop) {
+      app.codePop = '';
+      renderModal(app);
+    } else {
+      app.closeModal();
+    }
     return true;
   }
   if (typing || e.ctrlKey || e.metaKey || e.altKey) return false;
