@@ -24,6 +24,10 @@ type SrcMark struct {
 	File string
 	Line int
 	Col  int
+	// Lines marks a statement that may span several generated lines (a
+	// component body declaration or an effect): the map follows its lines
+	// into the source instead of pointing every line at its first one.
+	Lines bool `json:",omitempty"`
 }
 
 // SrcMarkPrefix opens the marker comment (/*@k:N*/) that GenerateNewHydrationJS
@@ -857,6 +861,7 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		}
 	}
 	sig := irtree.ComponentSignature{
+		BodyPos:         node.BodyPos,
 		ComponentID:     node.ID,
 		Tier:            node.Tier,
 		Signals:         node.Signals,

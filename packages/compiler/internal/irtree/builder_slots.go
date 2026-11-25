@@ -3726,7 +3726,7 @@ func (b *builder) collectBodySignalUses(body []ast.Stmt, decls []SignalDecl) []s
 // switch/try/blocks) so effects nested inside conditionals are still emitted -
 // a top-level-only walk silently drops them, leaving the callback to never run
 // during hydration.
-func (b *builder) collectEffectJS(body []ast.Stmt) []string {
+func (b *builder) collectEffectJS(body []ast.Stmt, node *ComponentNode) []string {
 	var effects []string
 	var walk func(stmts []ast.Stmt)
 	walk = func(stmts []ast.Stmt) {
@@ -3740,11 +3740,13 @@ func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 							if len(call.Args) >= 1 {
 								js := generateExprJS(call.Args[0], b.sigMap())
 								effects = append(effects, "createEffect("+js+")")
+								b.noteStmtPos(node, effects[len(effects)-1], s.Pos())
 							}
 						case "onMount":
 							if len(call.Args) >= 1 {
 								js := generateExprJS(call.Args[0], b.sigMap())
 								effects = append(effects, "onMount("+js+")")
+								b.noteStmtPos(node, effects[len(effects)-1], s.Pos())
 							}
 						case "onCleanup":
 							// Top-level onCleanup registers a root-scoped cleanup
@@ -3752,6 +3754,7 @@ func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 							if len(call.Args) >= 1 {
 								js := generateExprJS(call.Args[0], b.sigMap())
 								effects = append(effects, "onCleanup("+js+")")
+								b.noteStmtPos(node, effects[len(effects)-1], s.Pos())
 							}
 						case "createEffectDeps", "useImperativeHandle":
 							// React useEffect/useLayoutEffect with a non-empty
@@ -3760,6 +3763,7 @@ func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 							// hydration emitter runs it in the ref phase).
 							if len(call.Args) >= 1 {
 								effects = append(effects, generateExprJS(call, b.sigMap()))
+								b.noteStmtPos(node, effects[len(effects)-1], s.Pos())
 							}
 						}
 					}

@@ -345,6 +345,22 @@ func deadDecls(result *EmitResult, sig irtree.ComponentSignature, render func(st
 // ev renders each ExtraVars entry ("" drops it). marks records source marks;
 // the props-read analysis renders scopes without them.
 func writeScopeBody(b *strings.Builder, result *EmitResult, sig irtree.ComponentSignature, render func(v string) string, marks bool) {
+	// stmt writes one body statement, with a source mark when its position
+	// is known (dev and source-mapped builds).
+	stmt := func(src, js string) {
+		p, ok := sig.BodyPos[src]
+		marked := marks && result.TrackSources && ok && p.File != "" && p.Line > 0
+		if marked {
+			b.WriteString(SrcMarkPrefix + itoa(len(result.SrcMarks)) + "*/")
+			result.SrcMarks = append(result.SrcMarks, SrcMark{File: p.File, Line: p.Line, Col: p.Col, Lines: true})
+		}
+		b.WriteString(js)
+		b.WriteString(";")
+		if marked {
+			b.WriteString(SrcMarkEnd)
+		}
+		b.WriteString("\n")
+	}
 	// The component's own props object declaration must precede signal
 	// initializers: signal RawInits like `createSignal(props.x || "")`
 	// evaluate props at hydration time (they can't be const-folded when the
@@ -364,8 +380,7 @@ func writeScopeBody(b *strings.Builder, result *EmitResult, sig irtree.Component
 	// ahead is safe.
 	for _, ev := range sig.PreSignalVars {
 		if js := render(ev); js != "" {
-			b.WriteString(js)
-			b.WriteString(";\n")
+			stmt(ev, js)
 		}
 	}
 
@@ -412,8 +427,7 @@ func writeScopeBody(b *strings.Builder, result *EmitResult, sig irtree.Component
 			continue
 		}
 		if js := render(ev); js != "" {
-			b.WriteString(js)
-			b.WriteString(";\n")
+			stmt(ev, js)
 		}
 	}
 
@@ -444,8 +458,7 @@ func writeScopeBody(b *strings.Builder, result *EmitResult, sig irtree.Component
 	// refs; children's layout effects (and handles) run before parents'.
 	for _, eff := range sig.Effects {
 		if isRefPhaseEffect(eff) {
-			b.WriteString(eff)
-			b.WriteString(";\n")
+			stmt(eff, eff)
 		}
 	}
 
@@ -464,8 +477,7 @@ func writeScopeBody(b *strings.Builder, result *EmitResult, sig irtree.Component
 		if isRefPhaseEffect(eff) {
 			continue
 		}
-		b.WriteString(eff)
-		b.WriteString(";\n")
+		stmt(eff, eff)
 	}
 
 	// Slot bindings: compact calls into the shared kbind* helpers.

@@ -453,6 +453,30 @@ func (b *Builder) shouldMinifyJS() bool {
 	return b.Cfg.ShouldMinifyJS() && !b.DevMode
 }
 
+// hydrationMaps reports whether page and component scripts carry source maps
+// back to the .tsx files: when the config asks for them, and always in dev,
+// where the overlay maps runtime errors to the original files and lines. Dev
+// output is not minified, so its map is the one the source markers give.
+func (b *Builder) hydrationMaps() bool {
+	return b.Cfg.Sourcemap || b.DevMode
+}
+
+// devOnlyMaps reports whether source maps are written only because this is a
+// dev build (the config does not ask for them).
+func (b *Builder) devOnlyMaps() bool {
+	return b.DevMode && !b.Cfg.Sourcemap
+}
+
+// hydrationMapDir is the directory a page or component map names its
+// sources relative to: the project root in dev and native builds (the
+// overlay and the terminal print project paths), else the script's own.
+func (b *Builder) hydrationMapDir(scriptDir string) string {
+	if b.NativeTarget || b.DevMode {
+		return b.Root
+	}
+	return scriptDir
+}
+
 // viewTransitionsOff reports whether View Transitions are disabled. A native
 // app is a single window, not a set of documents: unless the config asks for
 // them, they stay off (a cross-document transition aborts the WebKitGTK web
@@ -3179,6 +3203,8 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	hydrationJS := ""
 	runtimeRefs := []string{}
 	var jsBytes []byte
+	// devMap is the page script's source map in a dev build (cached with it).
+	var devMap []byte
 	hasJS := false
 	var pageProviders *islandProviders
 	pageIslands := tree.ExternalComponents
@@ -3230,7 +3256,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries, bundle.CSSModules)...)
 	var sharedScopes []renderer.SharedScope
 	if needsHydrate {
-		emitResult.TrackSources = b.Cfg.Sourcemap
+		emitResult.TrackSources = b.hydrationMaps()
 		// npm functions called by client code are bundled into the script.
 		vendor := collectVendorImports(bundle)
 		for _, rb := range b.routeStack(page) {
@@ -3272,13 +3298,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 			// original .tsx positions.
 			inputMap := ""
 			if len(emitResult.SrcMarks) > 0 {
-				mapDir := pageDir
-				if b.NativeTarget {
-					// The terminal prints these paths: project-relative reads
-					// better than a path out of the build directory.
-					mapDir = b.Root
-				}
-				rawJS, inputMap = buildHydrationMap(rawJS, emitResult.SrcMarks, mapDir)
+				rawJS, inputMap = buildHydrationMap(rawJS, emitResult.SrcMarks, b.hydrationMapDir(pageDir))
 			}
 			finalJS := rawJS
 			mapJSON := ""
@@ -3307,6 +3327,12 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 			jsFile = "index." + jsHash + ".js"
 			finalJS = substituteImportMetaURL(finalJS, outName, jsFile, b.Cfg.BaseURLPath())
 			jsPath := filepath.Join(pageDir, jsFile)
+			if b.devOnlyMaps() && inputMap != "" {
+				// Dev: a map from the page script to the .tsx files, for the
+				// overlay's runtime errors. A script without markers gets none.
+				devMap = []byte(inputMap)
+				finalJS = appendSourceMappingURL(finalJS, jsFile+".map")
+			}
 			if err := writeOutput(jsPath, []byte(finalJS)); err != nil {
 				return nil, "", err
 			}
@@ -3326,6 +3352,10 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 				}
 				finalJS = appendSourceMappingURL(finalJS, jsFile+".map")
 				if err := writeOutput(jsPath, []byte(finalJS)); err != nil {
+					return nil, "", err
+				}
+			} else if devMap != nil {
+				if err := writeOutput(jsPath+".map", devMap); err != nil {
 					return nil, "", err
 				}
 			}
@@ -3403,7 +3433,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	if renderMode != RenderSSG {
 		result.IslandStubs = newIslandServerStubs(entryModule.Program, tree.ExternalComponents, islandSSR)
 	}
-	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes)
+	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes, devMap)
 	return result, bundle.CSS, nil
 }
 
@@ -3444,6 +3474,12 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		if err := writeOutput(filepath.Join(pageDir, e.JSFile), e.JSBytes); err != nil {
 			c.markMiss()
 			return nil, "", false
+		}
+		if len(e.MapBytes) > 0 {
+			if err := writeOutput(filepath.Join(pageDir, e.JSFile+".map"), e.MapBytes); err != nil {
+				c.markMiss()
+				return nil, "", false
+			}
 		}
 	}
 	if len(e.AssetFiles) > 0 {
@@ -3494,7 +3530,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 
 // maybeStoreDiskPage persists a freshly built page result when caching is
 // enabled and the page is a plain SSG page.
-func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, bundle *bundler.Bundle, jsBytes []byte) {
+func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, bundle *bundler.Bundle, jsBytes, mapBytes []byte) {
 	c := b.diskCache
 	if c == nil || !c.enabled || bundle == nil {
 		return
@@ -3527,6 +3563,7 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		RuntimeRefs:   r.RuntimeRefs,
 		JSFile:        r.JSFile,
 		JSBytes:       jsBytes,
+		MapBytes:      mapBytes,
 		SharedScopes:  r.SharedScopes,
 		CSS:           r.CSS,
 		HasJS:         r.HasJS,

@@ -64,6 +64,8 @@ type diskPageEntry struct {
 	RuntimeRefs []string
 	JSFile      string
 	JSBytes     []byte
+	// MapBytes is the page script's source map of a dev build.
+	MapBytes []byte
 	// SharedScopes are the component templates the page script calls; the
 	// shared chunks are rebuilt from them on every build.
 	SharedScopes []renderer.SharedScope

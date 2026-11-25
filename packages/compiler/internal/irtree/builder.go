@@ -37,6 +37,11 @@ const contextPropPrefix = "__krate_ctx_"
 
 // BuildOptions configures IR construction.
 type BuildOptions struct {
+	// SourcePositions records where each statement a client component's
+	// hydration scope replays (body declarations, effects) is in the source,
+	// in ComponentNode.BodyPos, so a dev or source-mapped build can map the
+	// generated code back to its lines.
+	SourcePositions bool
 	// PageParams are the dynamic-route params of the entry page (name ->
 	// value, or the placeholder a template carries for it). The page's own
 	// props include them as `params`, so a wrapper that forwards `{...props}`
@@ -188,6 +193,7 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		transformIcon:    opts.TransformIcon,
 		transformImage:   opts.TransformImage,
 		routeHooks:       routeHookValues(opts.RoutePath, opts.PageParams),
+		sourcePositions:  opts.SourcePositions,
 	}
 	for name := range b.moduleDeclOnly {
 		// Declared here, assigned by a module statement: shared mutable state.
@@ -394,6 +400,9 @@ func (b *builder) popComponentCtx() {
 type builder struct {
 	componentCtx
 	ctxStack []componentCtx
+
+	// sourcePositions records ComponentNode.BodyPos (BuildOptions).
+	sourcePositions bool
 
 	// basePath is the site base path <Link> adds to a root-relative href.
 	basePath string
