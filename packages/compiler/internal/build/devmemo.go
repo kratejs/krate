@@ -78,12 +78,29 @@ func metafileAllInputs(root, metafile string) []string {
 	}
 	out := make([]string, 0, len(meta.Inputs))
 	for in := range meta.Inputs {
-		if strings.Contains(in, ":") {
-			continue
+		if p, ok := metafileInputPath(root, in); ok {
+			out = append(out, p)
 		}
-		out = append(out, filepath.Clean(filepath.Join(root, filepath.FromSlash(in))))
 	}
 	return out
+}
+
+// metafileInputPath is the file a metafile input names, as an absolute path.
+// A module of a plugin namespace is a file when the plugin serves one under
+// its own namespace (the stylesheets of an island: "krate-island-css:/abs/x.css"),
+// and is left out when the namespace names something generated.
+func metafileInputPath(root, in string) (string, bool) {
+	if ns, rest, ok := strings.Cut(in, ":"); ok {
+		// A one-letter prefix is a Windows drive, not a namespace.
+		if len(ns) == 1 && filepath.IsAbs(filepath.FromSlash(in)) {
+			return filepath.Clean(filepath.FromSlash(in)), true
+		}
+		if len(ns) > 1 && filepath.IsAbs(filepath.FromSlash(rest)) {
+			return filepath.Clean(filepath.FromSlash(rest)), true
+		}
+		return "", false
+	}
+	return filepath.Clean(filepath.Join(root, filepath.FromSlash(in))), true
 }
 
 // projectConfigStamp stamps the files a build's module resolution depends on
