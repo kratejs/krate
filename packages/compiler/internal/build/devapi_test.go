@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 // devAPIProject is a small app built in dev mode: a layout, a static page,
@@ -495,6 +496,10 @@ func TestLogLevel(t *testing.T) {
 		{false, "(node:1) DeprecationWarning: Buffer()", "warn"},
 		{true, "plain stderr text", "error"},
 		{false, "a terror alert", "info"},
+		{true, "  + SSR renderer restarted", "info"},
+		{false, "  * Go API sidecar restarted (3 routes)", "info"},
+		{true, "  ! SSR renderer restart failed: boom", "warn"},
+		{true, "  + x failed to restart", "error"},
 	} {
 		if got := logLevel(c.stderr, c.text); got != c.want {
 			t.Errorf("logLevel(%v, %q) = %s, want %s", c.stderr, c.text, got, c.want)
@@ -630,5 +635,39 @@ func TestBuildCrashErrorFields(t *testing.T) {
 	}
 	if c := exitCodeOf(errors.New("killed")); c != nil {
 		t.Errorf("exit code of a non-exit error = %v", *c)
+	}
+}
+
+// An API route failure of the embedded runtime is printed by krate itself,
+// but the Logs panel attributes it (and its stack) to the API.
+func TestAPIFailureIsAttributedToAPI(t *testing.T) {
+	// Not parallel: it swaps os.Stdout and os.Stderr.
+	termR, termW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origOut, origErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = termW, termW
+	stop := teeStdioLines(func(teeLine) {})
+	devLogsOn.Add(1)
+	seq, _ := DevLogsSince(0)
+	rec := httptest.NewRecorder()
+	writeAPIFailure(rec, httptest.NewRequest("GET", "/api/boom", nil), &jsruntime.APIFailure{Status: 500, Message: "database exploded", Stack: "Error: database exploded\n    at GET (src/api/boom.ts:2:9)"}, true)
+	devLogsOn.Add(-1)
+	stop()
+	os.Stdout, os.Stderr = origOut, origErr
+	_ = termW.Close()
+	term, _ := io.ReadAll(termR)
+	if !strings.Contains(string(term), "API error") || !strings.Contains(string(term), "boom.ts:2:9") {
+		t.Errorf("terminal = %q", term)
+	}
+	_, lines := DevLogsSince(seq)
+	if len(lines) < 2 {
+		t.Fatalf("ring = %+v", lines)
+	}
+	for _, l := range lines {
+		if l.Src != LogSrcAPI || l.Lvl != "error" {
+			t.Errorf("line %+v, want src api, lvl error", l)
+		}
 	}
 }

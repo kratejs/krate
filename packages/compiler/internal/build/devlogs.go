@@ -100,7 +100,8 @@ var (
 )
 
 // logLevel classifies a line: krate's own markers ("x " errors, "! "
-// warnings) first, then error and warning words; anything else on stderr is
+// warnings) first, then warning and error words, then the progress markers
+// ("+ ", "* ", "> ") as information; anything else on stderr is
 // an error, on stdout information.
 func logLevel(stderr bool, text string) string {
 	t := strings.TrimSpace(text)
@@ -113,10 +114,39 @@ func logLevel(stderr bool, text string) string {
 		return "warn"
 	case logErrorRe.MatchString(t):
 		return "error"
+	case strings.HasPrefix(t, "+ "), strings.HasPrefix(t, "* "), strings.HasPrefix(t, "> "):
+		// krate's progress markers ("+ SSR renderer restarted") are
+		// information, whichever stream they went to.
+		return "info"
 	case stderr:
 		return "error"
 	}
 	return "info"
+}
+
+// printAttributed prints text (whole lines) to stdout or stderr as the krate
+// process would, but while a dev server runs the overlay's Logs panel gets
+// each line with src instead of "krate": krate prints some lines on behalf of
+// a sidecar (API route failures of the embedded runtime). The terminal and
+// .krate/dev.log see the same bytes either way.
+func printAttributed(src string, stderr bool, text string) {
+	if devLogsOn.Load() <= 0 {
+		out := os.Stdout
+		if stderr {
+			out = os.Stderr
+		}
+		_, _ = io.WriteString(out, text)
+		return
+	}
+	for text != "" {
+		i := strings.IndexByte(text, '\n')
+		if i < 0 {
+			writeConsoleLine(src, stderr, []byte(text+"\n"))
+			return
+		}
+		writeConsoleLine(src, stderr, []byte(text[:i+1]))
+		text = text[i+1:]
+	}
 }
 
 // attachSidecarOutput points cmd's stdout and stderr at the console. While a
