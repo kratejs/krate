@@ -126,13 +126,14 @@ developer tools are disabled.
 
 The shell records host traffic in dev: calls (function, duration, error code
 and message), stream open and end, signal subscriptions and updates, the newest
-500. The overlay toolbar has a "Host" button with the list; the raw feed is
+500. The dev panel (click the route in the dock) has a **Host** tab with the
+list; the raw feed is
 `GET /__krate/dev/events` (add `?follow=1` to stream). Arguments and returned
 values are not recorded.
 
 ## Memory panel
 
-The toolbar also has a "Memory" button. Its panel shows PSS and private dirty
+The dev panel also has a **Memory** tab. It shows PSS and private dirty
 per process (from `GET /__krate/dev/memory`), the DOM node count and, where the
 engine exposes it, the JS heap. It samples every 2 seconds while open and not at
 all when closed. See [Memory](/docs/native/memory/#the-dev-memory-panel).
@@ -244,7 +245,10 @@ shows which shell was found and whether the webview it needs is installed.
 - A debugger attached with `--debug-go` has to attach again after each Go edit (see [Debugging](#debugging)).
 - On Windows the Go host binary cannot be replaced while it runs; a Go edit reports that.
 - Page edits reload the page; there is no component-level state-preserving HMR.
-- The "Open in editor" button of the web overlay is not available.
+- The "Open in editor" button of the web overlay is not available, nor are the
+  parts of the dev panel that need the web dev server's `/__krate/dev` endpoints
+  (the Activity tab, the dev server's log lines, route sizes, and the routes and
+  dev actions of the command menu).
 
 ## Plugins
 

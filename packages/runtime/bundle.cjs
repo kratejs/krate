@@ -186,7 +186,8 @@ const liteRouterPlugin = {
 // from whichever router the page loaded.
 const ROUTER_GLOBALS = ['getNavigationState', 'subscribeNavigation', 'krateRouter'];
 
-// Dev-only overlay + toolbar. Loaded by `krate dev` only, never in production.
+// Dev-only overlay (dock, panel, error overlay, command menu, component
+// inspector; src/dev/). Loaded by `krate dev` only, never in production.
 const DEV_ENTRY = `import './src/dev-overlay';`;
 
 // Island-preserving router swaps. The compiler appends this file to the island
@@ -277,7 +278,7 @@ async function main() {
   await buildBundle('krate-hydrate-lite.js', LITE_ENTRY, true, [liteRouterPlugin]);
   await buildBundle('krate-suspense.js', SUSPENSE_ENTRY, true, [sharedGlobalsPlugin]);
   await buildSplitRuntime();
-  await buildBundle('krate-dev.js', DEV_ENTRY, false);
+  await buildBundle('krate-dev.js', DEV_ENTRY);
   await buildIslandSwap();
   // Opt-in typing bridge (@krate/runtime/react-types): a hand-written .d.ts
   // that tsc does not emit, plus an empty module for the "default" condition.

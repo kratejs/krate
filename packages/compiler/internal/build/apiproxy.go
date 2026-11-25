@@ -143,7 +143,12 @@ func (s *apiSidecar) supervise() {
 		s.cmd = cmd
 		s.mu.Unlock()
 
-		err := cmd.Run()
+		after := attachSidecarOutput(cmd, LogSrcServer)
+		err := cmd.Start()
+		after()
+		if err == nil {
+			err = cmd.Wait()
+		}
 
 		select {
 		case <-s.stopCh:
@@ -178,8 +183,6 @@ func (s *apiSidecar) newCmd() *exec.Cmd {
 		env = append(env, k+"="+v)
 	}
 	cmd.Env = env
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	return cmd
 }
 

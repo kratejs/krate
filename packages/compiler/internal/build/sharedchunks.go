@@ -226,7 +226,7 @@ func (b *Builder) writeSharedChunks(results []*PageResult) error {
 		js := neutralizeClientEnv(src.String())
 		inputMap, mapJSON := "", ""
 		if len(marks) > 0 {
-			js, inputMap = buildHydrationMap(js, marks, dir)
+			js, inputMap = buildHydrationMap(js, marks, b.hydrationMapDir(dir))
 		}
 		if b.shouldMinifyJS() {
 			if b.Cfg.Sourcemap && inputMap != "" {
@@ -251,6 +251,11 @@ func (b *Builder) writeSharedChunks(results []*PageResult) error {
 				mapJSON = generateSourcemap(js, "krate-components.js", js)
 			}
 			if err := writeOutput(filepath.Join(dir, name+".map"), []byte(mapJSON)); err != nil {
+				return err
+			}
+			js = appendSourceMappingURL(js, name+".map")
+		} else if b.devOnlyMaps() && inputMap != "" {
+			if err := writeOutput(filepath.Join(dir, name+".map"), []byte(inputMap)); err != nil {
 				return err
 			}
 			js = appendSourceMappingURL(js, name+".map")
@@ -292,7 +297,7 @@ func (b *Builder) writeSharedChunks(results []*PageResult) error {
 // script whose name it embeds (import.meta.url) or that has a source map
 // keeps them in a chunk of its own instead.
 func (b *Builder) mergeIntoPageScript(r *PageResult, js string) bool {
-	if b.Cfg.Sourcemap || r.JSFile == "" || r.HydrationJS == "" || strings.Contains(r.HydrationJS, r.JSFile) {
+	if b.hydrationMaps() || r.JSFile == "" || r.HydrationJS == "" || strings.Contains(r.HydrationJS, r.JSFile) {
 		return false
 	}
 	pageDir := b.Cfg.OutDir

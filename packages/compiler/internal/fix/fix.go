@@ -476,3 +476,60 @@ func jsonInt(v any) int {
 		return -1
 	}
 }
+
+// PlanFile returns the rewritten source of one project file (rel, relative
+// to root, slash separated) and the safe fixes it holds, restricted to codes
+// when any are given. A file with nothing to fix returns no changes.
+func PlanFile(root, rel string, codes []string) (string, []Change, error) {
+	allow := map[string]bool{}
+	for _, code := range codes {
+		if code = strings.TrimSpace(code); code != "" {
+			allow[code] = true
+		}
+	}
+	if len(allow) == 0 {
+		allow = nil
+	}
+	rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
+	if rel == "tsconfig.json" {
+		out, changes, ok := fixTSConfig(root)
+		if !ok || (allow != nil && !allow[string(diag.CodeTSConfigBaseURL)]) {
+			return "", nil, nil
+		}
+		return out, changes, nil
+	}
+	abs := filepath.Join(root, filepath.FromSlash(rel))
+	if !fixableFile(abs) {
+		return "", nil, nil
+	}
+	src, err := os.ReadFile(abs)
+	if err != nil {
+		return "", nil, err
+	}
+	out, changes, err := fixSourceFiltered(string(src), allow)
+	if err != nil {
+		return "", nil, err
+	}
+	for i := range changes {
+		changes[i].File = rel
+	}
+	return out, changes, nil
+}
+
+// ApplyFile writes the safe fixes of one project file (see PlanFile)
+// atomically, keeping its permissions, and returns what it changed.
+func ApplyFile(root, rel string, codes []string) ([]Change, error) {
+	out, changes, err := PlanFile(root, rel, codes)
+	if err != nil || len(changes) == 0 {
+		return changes, err
+	}
+	file := filepath.Join(root, filepath.FromSlash(filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))))
+	mode := os.FileMode(0644)
+	if info, statErr := os.Stat(file); statErr == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := fsutil.WriteFileAtomic(file, []byte(out), mode); err != nil {
+		return nil, fmt.Errorf("writing %s: %w", rel, err)
+	}
+	return changes, nil
+}

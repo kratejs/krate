@@ -1,8 +1,11 @@
 package build
 
 import (
+	"context"
 	"fmt"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -76,12 +79,23 @@ func setDevCrashHub(hub *DevHub, root string) func() {
 // last console lines, and records it for `krate dev` state readers. It stays
 // on screen for tabs that connect later until clearServerCrash(source).
 func reportServerCrash(source, detail, stack string) {
+	reportServerCrashExit(source, detail, stack, nil)
+}
+
+// reportServerCrashExit is reportServerCrash for a process that exited with
+// code (nil when unknown).
+func reportServerCrashExit(source, detail, stack string, code *int) {
 	hub := devCrashHub.Load()
 	if hub == nil {
 		return
 	}
+	restarts := noteCrash(source, time.Now())
 	publish := func() {
-		hub.PublishServerError(source, buildCrashError(source, detail, stack, RecentLogLines(crashLogLines)))
+		ce := buildCrashError(source, detail, stack, RecentLogLines(crashLogLines))
+		ce.ExitCode = code
+		ce.Restarts = restarts
+		ce.Runtime = sidecarRuntimeLabel(source)
+		hub.PublishServerError(source, ce)
 	}
 	if crashTailDelay <= 0 {
 		publish()
@@ -144,5 +158,129 @@ func buildCrashError(source, detail, stack string, tail []string) ClientError {
 	if loc, _ := devLogLocation.Load().(string); loc != "" {
 		fmt.Fprintf(&b, "\nFull output: %s", loc)
 	}
-	return ClientError{Message: msg, Stack: strings.TrimRight(b.String(), "\n"), Kind: "server"}
+	return ClientError{
+		Message: msg,
+		Stack:   strings.TrimRight(b.String(), "\n"),
+		Kind:    "server",
+		Source:  source,
+		Detail:  detail,
+		Log:     append([]string{}, tail...),
+		Restart: crashRestartTarget(source),
+	}
+}
+
+// crashRestartTarget is the sidecar id the overlay can restart for a failed
+// source, "" when restarting it would not help.
+func crashRestartTarget(source string) string {
+	switch source {
+	case "Node API sidecar":
+		return "api"
+	case "SSR renderer":
+		return "ssr"
+	case "Go API sidecar":
+		return "go"
+	}
+	return ""
+}
+
+// exitCodeOf returns the exit code of a finished process, nil when it did
+// not exit normally (killed by a signal) or err is not an exit.
+func exitCodeOf(err error) *int {
+	code := exitStatus(err)
+	if code < 0 {
+		if err == nil {
+			code = 0
+			return &code
+		}
+		return nil
+	}
+	return &code
+}
+
+// crashWindow is the period the overlay counts a part's restarts over.
+const crashWindow = time.Minute
+
+// crashTimes holds the recent failures of each source.
+var crashTimes struct {
+	sync.Mutex
+	bySource map[string][]time.Time
+}
+
+// noteCrash records a failure of source at now and returns how many it had
+// within crashWindow, this one included.
+func noteCrash(source string, now time.Time) int {
+	crashTimes.Lock()
+	defer crashTimes.Unlock()
+	if crashTimes.bySource == nil {
+		crashTimes.bySource = map[string][]time.Time{}
+	}
+	var keep []time.Time
+	for _, t := range crashTimes.bySource[source] {
+		if now.Sub(t) < crashWindow {
+			keep = append(keep, t)
+		}
+	}
+	keep = append(keep, now)
+	crashTimes.bySource[source] = keep
+	return len(keep)
+}
+
+// sidecarBins names the program each sidecar source runs ("node", "bun",
+// "deno", a path to one, or "go" for the Go API sidecar).
+var sidecarBins sync.Map // source -> program
+
+// noteSidecarRuntime records the program a sidecar runs on, for the crash
+// report's subtitle.
+func noteSidecarRuntime(source, program string) {
+	if program != "" {
+		sidecarBins.Store(source, program)
+	}
+}
+
+// runtimeLabels memoizes the version label of each program.
+var runtimeLabels sync.Map // program -> label
+
+var runtimeVersionRe = regexp.MustCompile(`(\d+)\.(\d+)(?:\.\d+)?`)
+
+// sidecarRuntimeLabel is "node 22.11", "bun 1.1", "deno 2.0" or "go 1.26" for
+// the program source runs on, "" when unknown. The version is asked once per
+// program and cached.
+func sidecarRuntimeLabel(source string) string {
+	v, ok := sidecarBins.Load(source)
+	if !ok {
+		return ""
+	}
+	program := v.(string)
+	if l, ok := runtimeLabels.Load(program); ok {
+		return l.(string)
+	}
+	label := runtimeVersionLabel(program)
+	runtimeLabels.Store(program, label)
+	return label
+}
+
+func runtimeVersionLabel(program string) string {
+	name := strings.TrimSuffix(filepath.Base(program), filepath.Ext(program))
+	args := []string{"--version"}
+	if name == "go" {
+		args = []string{"env", "GOVERSION"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, program, args...).Output()
+	if err != nil {
+		return name
+	}
+	return formatRuntimeLabel(name, string(out))
+}
+
+// formatRuntimeLabel turns a program's version output ("v22.11.0", "1.1.30",
+// "deno 2.0.0 (...)", "go1.26.1") into "<name> <major>.<minor>".
+func formatRuntimeLabel(name, out string) string {
+	first, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	m := runtimeVersionRe.FindStringSubmatch(first)
+	if m == nil {
+		return name
+	}
+	return name + " " + m[1] + "." + m[2]
 }

@@ -427,11 +427,22 @@ type SignalDecl struct {
 }
 
 // ComponentNode - a single component instance in the tree
+// BodyPos is where a statement of a hydration scope is in the source.
+type BodyPos struct {
+	File string
+	Line int
+	Col  int
+}
+
 type ComponentNode struct {
-	ID   SlotID
-	Name string
-	Tier ComponentTier
-	Fn   *ast.FnDecl
+	// BodyPos maps the generated JS of the hydration body statements
+	// (ExtraVars, PreSignalVars, Effects) to their source positions; only
+	// with BuildOptions.SourcePositions.
+	BodyPos map[string]BodyPos
+	ID      SlotID
+	Name    string
+	Tier    ComponentTier
+	Fn      *ast.FnDecl
 	// Lazy marks an instance of a React.lazy() component (see LazyComponent).
 	// LazyLoader is set when its loader is not a static import.
 	Lazy       bool
@@ -590,6 +601,9 @@ type ComponentTree struct {
 	Pages        map[string]*ComponentNode
 	RuntimeStore *RuntimePropStore
 	Functions    map[string]*ast.FnDecl
+	// ComponentSources maps component function names to the files that
+	// define them (the dev component inspector reads it).
+	ComponentSources map[string]string
 	// CVAFactories holds module-wide `const X = cva(...)` specs so the emitter
 	// can fold variant calls in prop-driven (SSREval) components.
 	CVAFactories map[string]*CVASpec
@@ -658,6 +672,8 @@ func NewRuntimePropStore() *RuntimePropStore {
 
 // ComponentSignature - serializable metadata for SPA reconciliation
 type ComponentSignature struct {
+	// BodyPos is ComponentNode.BodyPos.
+	BodyPos         map[string]BodyPos
 	ComponentID     SlotID
 	Tier            ComponentTier
 	Signals         []SignalDecl

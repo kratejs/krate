@@ -64,6 +64,8 @@ type diskPageEntry struct {
 	RuntimeRefs []string
 	JSFile      string
 	JSBytes     []byte
+	// MapBytes is the page script's source map of a dev build.
+	MapBytes []byte
 	// SharedScopes are the component templates the page script calls; the
 	// shared chunks are rebuilt from them on every build.
 	SharedScopes []renderer.SharedScope
@@ -151,7 +153,7 @@ func (c *buildDiskCache) setEnvHash(envHash string) {
 // diskCacheSchema is bumped whenever the shape or the semantics of cached page
 // output change (e.g. new emit passes such as DCE or source maps) so entries
 // written by an older pipeline can never be replayed.
-var diskCacheSchema = "6"
+var diskCacheSchema = "7"
 
 var (
 	buildStampOnce  sync.Once

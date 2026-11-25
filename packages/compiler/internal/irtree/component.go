@@ -184,7 +184,7 @@ func (b *builder) collectHydrationBody(fn *ast.FnDecl, node *ComponentNode) hydr
 		return body
 	}
 	node.InstanceID = deriveInstanceID(string(node.ID))
-	node.Effects = b.collectEffectJS(fn.Body)
+	node.Effects = b.collectEffectJS(fn.Body, node)
 	node.Memos = b.collectMemoJS(fn.Body)
 	body.pre, body.post = b.collectExtraVarJS(fn.Body, body.order, paramBindingSet(fn))
 	body.post = append(body.post, b.collectResourceJS(fn.Body, body.order)...)
@@ -192,6 +192,7 @@ func (b *builder) collectHydrationBody(fn *ast.FnDecl, node *ComponentNode) hydr
 	body.pre = append(body.pre, factoryPre...)
 	body.post = append(body.post, factoryPost...)
 	body.pre, body.post = promoteTransitive(body.pre, body.post)
+	b.noteBodyPos(node, body.order, body.pre, body.post)
 	node.PreSignalVars = mergeBodyJS(body.pre)
 	node.ExtraVars = mergeBodyJS(body.post)
 	return body
@@ -366,6 +367,7 @@ func (b *builder) foldComponentLocals(fn *ast.FnDecl, node *ComponentNode, isPag
 	if client {
 		pre, post := promoteTransitive(append(append([]bodyJS(nil), body.pre...), preLocals...),
 			append(append([]bodyJS(nil), body.post...), postLocals...))
+		b.noteBodyPos(node, body.order, pre, post)
 		node.PreSignalVars = mergeBodyJS(pre)
 		node.ExtraVars = append(useIdVars, mergeBodyJS(post)...)
 		if len(funcPropAliases) > 0 {
@@ -762,6 +764,7 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 			if fnJS := b.reactifier().renderFnDeclJS(fnDecl, b.sigMap()); fnJS != "" {
 				node.ExtraVars = append(node.ExtraVars, fnJS)
 				node.addPureDecl(fnJS, fnDecl.Name)
+				b.noteFnPos(node, fn, fnDecl, fnJS)
 			}
 		}
 	}

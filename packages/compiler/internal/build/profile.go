@@ -19,6 +19,11 @@ import (
 type Profiler struct {
 	mu      sync.Mutex
 	enabled bool
+	// groups, when set on a disabled profiler, records only the phases of
+	// these groups (see newCoarseProfiler). Enabled stays false, so nothing
+	// is reported and no extra work runs.
+	groups  map[string]bool
+	order   []string
 	start   time.Time
 	totals  map[string]time.Duration
 	counts  map[string]int
@@ -35,13 +40,42 @@ func NewProfiler(enabled bool) *Profiler {
 	}
 }
 
+// newCoarseProfiler returns a profiler that records only the phases of the
+// given groups, for the dev overlay's build activity. It reports as disabled.
+func newCoarseProfiler(groups ...string) *Profiler {
+	p := NewProfiler(false)
+	p.groups = make(map[string]bool, len(groups))
+	for _, g := range groups {
+		p.groups[g] = true
+	}
+	return p
+}
+
 // Enabled reports whether phase timings are being recorded.
 func (p *Profiler) Enabled() bool { return p != nil && p.enabled }
+
+// records reports whether a phase name is recorded.
+func (p *Profiler) records(name string) bool {
+	if p == nil {
+		return false
+	}
+	if p.enabled {
+		return true
+	}
+	if p.groups == nil {
+		return false
+	}
+	g := name
+	if i := strings.IndexByte(name, ':'); i >= 0 {
+		g = name[:i]
+	}
+	return p.groups[g]
+}
 
 // Phase begins a phase and returns a function that ends it. When profiling is
 // disabled (or p is nil) the returned function is a no-op.
 func (p *Profiler) Phase(name string) func() {
-	if p == nil || !p.enabled {
+	if !p.records(name) {
 		return func() {}
 	}
 	t0 := time.Now()
@@ -50,13 +84,30 @@ func (p *Profiler) Phase(name string) func() {
 
 // Add records a duration directly (for phases measured elsewhere).
 func (p *Profiler) Add(name string, d time.Duration) {
-	if p == nil || !p.enabled {
+	if !p.records(name) {
 		return
 	}
 	p.mu.Lock()
+	if _, seen := p.totals[name]; !seen {
+		p.order = append(p.order, name)
+	}
 	p.totals[name] += d
 	p.counts[name]++
 	p.mu.Unlock()
+}
+
+// Totals returns the recorded phases in the order they were first seen.
+func (p *Profiler) Totals() []BuildPhase {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]BuildPhase, 0, len(p.order))
+	for _, name := range p.order {
+		out = append(out, BuildPhase{Name: name, Ms: durationMs(p.totals[name])})
+	}
+	return out
 }
 
 // Laps times consecutive steps of one run of a phase. Each Lap call records the
@@ -70,7 +121,7 @@ type Laps struct {
 
 // Laps starts timing the steps of one run of the phases named prefix+step.
 func (p *Profiler) Laps(prefix string) *Laps {
-	if p == nil || !p.enabled {
+	if !p.records(prefix) {
 		return nil
 	}
 	return &Laps{p: p, prefix: prefix, last: time.Now()}

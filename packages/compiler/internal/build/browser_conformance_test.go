@@ -18,6 +18,17 @@ func TestBrowserConformance(t *testing.T) {
 	runBrowserConformance(t, false)
 }
 
+// TestBrowserConformanceDev runs the corpus on a dev build, whose pages carry
+// the component inspector's markers (data-kd, the component table, the
+// signal registration): they must not change what any page does. Chromium
+// only: the markers are browser-neutral.
+func TestBrowserConformanceDev(t *testing.T) {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER"))) != "chromium" {
+		t.Skip("set KRATE_BROWSER=chromium to run dev-build browser conformance")
+	}
+	runBrowserConformanceMode(t, false, true)
+}
+
 // TestBrowserConformanceSharedScopes runs the corpus with every client
 // component hydrating from shared chunks (page-local ones included, and
 // without the sourcemaps that keep scopes in the page script), so the shared
@@ -30,6 +41,10 @@ func TestBrowserConformanceSharedScopes(t *testing.T) {
 }
 
 func runBrowserConformance(t *testing.T, shared bool) {
+	runBrowserConformanceMode(t, shared, false)
+}
+
+func runBrowserConformanceMode(t *testing.T, shared, dev bool) {
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
 		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser conformance")
@@ -62,10 +77,21 @@ func runBrowserConformance(t *testing.T, shared bool) {
 		cfg.Sourcemap = false
 		cfg.OutDir = filepath.Join(t.TempDir(), "dist")
 	}
+	if dev {
+		// The overlay and its dock stay on: they must not cover the controls
+		// the corpus clicks, also without a dev server behind them.
+		cfg.OutDir = filepath.Join(t.TempDir(), "dist")
+	}
 	b := New(projectRoot, cfg)
 	b.shareAllScopes = shared
+	b.DevMode = dev
 	if err := b.BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
+	}
+	if dev {
+		if html, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html")); err != nil || !strings.Contains(string(html), devComponentsID) {
+			t.Fatalf("the dev build carries no component table (%v)", err)
+		}
 	}
 	if shared {
 		chunks, _ := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "c", "*.js"))
@@ -78,8 +104,8 @@ func runBrowserConformance(t *testing.T, shared bool) {
 	// the Node sidecar), so /react-actions/ is visited on an in-process
 	// Serve; the rest of the corpus is served statically.
 	actionsBase := ""
-	if shared {
-		t.Log("skipping /react-actions/: the shared-scope build is served statically")
+	if shared || dev {
+		t.Log("skipping /react-actions/: this build is served statically")
 	} else if canStopInProcessServer {
 		base, err := startKrateServer(t, projectRoot, cfg)
 		if err != nil {
@@ -95,6 +121,9 @@ func runBrowserConformance(t *testing.T, shared bool) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("node", script, cfg.OutDir, browser, actionsBase)
+	if dev {
+		cmd.Env = append(os.Environ(), "KRATE_CONFORMANCE_DEV=1")
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "Executable doesn't exist") ||

@@ -50,6 +50,9 @@ func (b *Builder) irBuildOptions() irtree.BuildOptions {
 		EvalJS:         b.jsExprEvaluator(),
 		BasePath:       b.Cfg.BaseURLPath(),
 		TransformImage: b.lowerImageLate,
+		// Dev and source-mapped builds map the hydration scopes' statements
+		// back to their lines.
+		SourcePositions: b.hydrationMaps(),
 	}
 }
 

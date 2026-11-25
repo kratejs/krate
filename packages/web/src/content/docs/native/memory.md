@@ -262,8 +262,8 @@ of its header, all of which are real.
 
 ### The dev Memory panel
 
-`krate native dev` adds a **Memory** button to the dev toolbar (the strip at
-the bottom edge of the window). It opens a panel with:
+`krate native dev` adds a **Memory** tab to the dev panel (click the route in
+the dev dock in a corner of the window). It shows:
 
 - PSS and private dirty per process (shell, Go host child, host children, the
   web, network and GPU processes of the webview), and the total, read from the

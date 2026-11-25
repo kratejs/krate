@@ -814,6 +814,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		}
 		injectStaticParams(tree, spp.Params)
 		emitter := renderer.NewEmitter()
+		emitter.DevInspect = b.DevMode
 		emitter.IconResolver = b.iconResolver
 		emitter.EvalJS = b.jsExprEvaluator()
 		emitter.BasePath = b.Cfg.BaseURLPath()

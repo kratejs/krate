@@ -32,7 +32,25 @@ const mime = {
   ".woff2": "font/woff2",
 };
 
+// KRATE_CONFORMANCE_DEV=1 serves a dev build: the dev overlay's endpoints
+// answer 204 (there is no dev server). What the overlay reports as a client
+// error is listed in the output; the corpus throws some errors on purpose,
+// and the console checks below already decide which ones are failures.
+const devBuild = process.env.KRATE_CONFORMANCE_DEV === "1";
+const devReports = [];
+
 const server = http.createServer((req, res) => {
+  if (devBuild && req.url.startsWith("/__krate/")) {
+    if (req.url.startsWith("/__krate/client-error")) {
+      let body = "";
+      req.on("data", (c) => { body += c; });
+      req.on("end", () => { devReports.push(body); res.statusCode = 204; res.end(); });
+      return;
+    }
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
   let p = decodeURIComponent(req.url.split("?")[0]);
   if (p.endsWith("/")) p += "index.html";
   else if (!path.extname(p)) p += "/index.html";
@@ -88,6 +106,8 @@ try {
     if (response.status() < 400) return;
     const url = response.url();
     if (url.endsWith("/analytics.js") || url.endsWith("/favicon.ico")) return;
+    // Dev builds name source maps the static server does not have.
+    if (devBuild && url.endsWith(".js.map")) return;
     errors.push(`${response.status()} ${url}`);
   });
 
@@ -838,7 +858,7 @@ try {
   }
   if (errors.length) fail("console errors: " + errors.join(" | "));
 
-  console.log(JSON.stringify({ browser: browserName, hydration, before, after, tooltip, tooltipDebug, checkboxBefore, checkboxAfter, localModule, fragileText, formResult, suspense, actions, errors, failures }, null, 2));
+  console.log(JSON.stringify({ browser: browserName, hydration, before, after, tooltip, tooltipDebug, checkboxBefore, checkboxAfter, localModule, fragileText, formResult, suspense, actions, errors, failures, ...(devBuild ? { devReports } : {}) }, null, 2));
   if (failures.length) process.exitCode = 1;
 } catch (err) {
   console.error(err?.stack || String(err));

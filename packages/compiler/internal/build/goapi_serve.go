@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -292,6 +293,7 @@ type goAPISupervisor struct {
 
 	mu      sync.Mutex
 	cmd     *exec.Cmd
+	exited  chan struct{} // closed when cmd has exited
 	routes  []goAPIRouteEntry
 	lastMod time.Time
 	// regionCache memoizes Go region renders that declare a revalidate window.
@@ -584,22 +586,27 @@ func (g *goAPISupervisor) spawn() error {
 	g.stop()
 
 	cmd := exec.Command(g.binPath)
+	noteSidecarRuntime("Go API sidecar", "go")
 	execx.ConfigureTree(cmd)
 	cmd.Env = append(os.Environ(), g.env...)
 	if g.socket != "" {
 		cmd.Env = append(cmd.Env, "KRATE_GOAPI_SOCKET="+g.socket)
 	}
 	cmd.Env = append(cmd.Env, fmt.Sprintf("KRATE_GOAPI_PORT=%d", g.port))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
+	after := attachSidecarOutput(cmd, LogSrcGo)
+	err := cmd.Start()
+	after()
+	if err != nil {
 		return fmt.Errorf("starting Go API sidecar: %w", err)
 	}
+	exited := make(chan struct{})
 	g.mu.Lock()
 	g.cmd = cmd
+	g.exited = exited
 	g.mu.Unlock()
 	go func(c *exec.Cmd) {
 		err := c.Wait()
+		close(exited)
 		g.mu.Lock()
 		current := g.cmd == c
 		if current {
@@ -614,7 +621,7 @@ func (g *goAPISupervisor) spawn() error {
 		g.mu.Unlock()
 		if current && err != nil {
 			fmt.Fprintf(os.Stderr, "  %sGo API sidecar exited unexpectedly:%s %v\n", cRed, cReset, err)
-			reportServerCrash("Go API sidecar", fmt.Sprintf("exited unexpectedly: %v", err), "")
+			reportServerCrashExit("Go API sidecar", fmt.Sprintf("exited unexpectedly: %v", err), "", exitCodeOf(err))
 		}
 	}(cmd)
 	// Wait for the host to accept connections so the first proxied request does
@@ -669,11 +676,23 @@ func (g *goAPISupervisor) waitReady(timeout time.Duration) bool {
 
 func (g *goAPISupervisor) stop() {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.cmd != nil && g.cmd.Process != nil {
-		execx.KillTree(g.cmd)
-		g.cmd = nil
+	cmd, exited := g.cmd, g.exited
+	g.cmd, g.exited = nil, nil
+	g.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		execx.KillTree(cmd)
+		// Wait for the exit: until then the old process still holds the
+		// port or socket, and a new one started right away fails to bind
+		// while the readiness check reaches the old one.
+		if exited != nil {
+			select {
+			case <-exited:
+			case <-time.After(5 * time.Second):
+			}
+		}
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	// The killed child cannot unlink its own socket; remove it here so the next
 	// spawn can bind cleanly.
 	if g.socket != "" {
@@ -724,4 +743,26 @@ func (g *goAPISupervisor) watch() {
 			}()
 		}
 	}
+}
+
+// Restart stops the Go API sidecar and starts it again from the current
+// route manifest (also after it crashed and stopped routing). It fails when
+// the manifest lists no routes.
+func (g *goAPISupervisor) Restart() error {
+	routes, modTime, err := loadGoAPIManifest(g.manifestPath)
+	if err != nil {
+		return err
+	}
+	if len(routes) == 0 {
+		return errors.New("no Go API routes")
+	}
+	g.mu.Lock()
+	g.routes = routes
+	g.lastMod = modTime
+	g.mu.Unlock()
+	if err := g.spawn(); err != nil {
+		return err
+	}
+	printf("  %s*%s Go API sidecar restarted (%d routes)\n", cCyan, cReset, len(routes))
+	return nil
 }

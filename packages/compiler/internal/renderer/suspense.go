@@ -41,6 +41,21 @@ func (e *Emitter) emitSuspenseSlot(s *irtree.SuspenseSlot) SlotOutput {
 			mergeSlotOutput(&out, e.emitSlotNode(child))
 		}
 		out.HTML = open + out.HTML + close
+		if e.DevInspect && s.Mode == irtree.SuspenseModeRegion && s.Primary != nil {
+			region := s.StreamID
+			if region == "" {
+				region = "region-" + string(s.ID)
+			}
+			out.HTML = devComment(DevComponent{
+				Key:    string(s.Primary.ID),
+				Name:   s.Primary.Name,
+				Tier:   irtree.TierRuntime.String(),
+				File:   s.Primary.SourceFile,
+				Line:   s.Primary.Line,
+				Parent: e.devParent(),
+				Region: region,
+			}) + out.HTML
+		}
 		return out
 	}
 

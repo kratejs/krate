@@ -269,7 +269,7 @@ func writeAPIFailure(w http.ResponseWriter, r *http.Request, f *jsruntime.APIFai
 		if dev && f.Stack != "" {
 			msg += indentStack(f.Stack)
 		}
-		fmt.Fprint(os.Stderr, msg)
+		printAttributed(LogSrcAPI, true, msg)
 	}
 	if f.Started {
 		return

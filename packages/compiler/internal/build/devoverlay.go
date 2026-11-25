@@ -14,21 +14,33 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
+	"github.com/kratejs/krate/packages/compiler/internal/version"
 )
 
 // writeBuildError serialises a build-error event (structured diagnostics) as an
 // SSE frame. The client overlay renders the diagnostics with source + caret.
 func writeBuildError(w io.Writer, ev DevEvent) {
 	payload := struct {
-		Diagnostics []interface{} `json:"diagnostics"`
-		BuildOK     bool          `json:"buildOk"`
-	}{BuildOK: len(ev.Diagnostics) == 0}
+		Diagnostics []interface{}     `json:"diagnostics"`
+		BuildOK     bool              `json:"buildOk"`
+		Warnings    []diag.Diagnostic `json:"warnings,omitempty"`
+	}{BuildOK: len(ev.Diagnostics) == 0, Warnings: ev.Warnings}
 	for _, d := range ev.Diagnostics {
 		payload.Diagnostics = append(payload.Diagnostics, d)
 	}
 	data, _ := json.Marshal(payload)
 	fmt.Fprintf(w, "event: build-error\ndata: %s\n\n", data)
+}
+
+// writeBuildWarnings tells a tab that connects after a build which warnings
+// that build left (build-end carries them for the tabs already connected).
+func writeBuildWarnings(w io.Writer, warnings []diag.Diagnostic) {
+	data, _ := json.Marshal(struct {
+		Warnings []diag.Diagnostic `json:"warnings"`
+	}{warnings})
+	fmt.Fprintf(w, "event: build-warnings\ndata: %s\n\n", data)
 }
 
 // safeProjectPath resolves a client-supplied file path (absolute or relative)
@@ -122,7 +134,16 @@ func openInEditor(editor, file, line string) error {
 // build shows the diagnostics (and recovers on the next good build) instead of
 // a directory listing or a bare 404.
 func devErrorShell(hub *DevHub, root, outDir string, next http.Handler) http.Handler {
-	bootstrap := `{"sse":"/__krate/hotreload","errors":"/__krate/client-error","open":"/__krate/open","overlay":true,"toolbar":true}`
+	shell, _ := json.Marshal(map[string]any{
+		"sse":     "/__krate/hotreload",
+		"errors":  "/__krate/client-error",
+		"open":    "/__krate/open",
+		"api":     devAPIBase,
+		"version": version.Value,
+		"overlay": true,
+		"toolbar": true,
+	})
+	bootstrap := string(shell)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/__krate/dev.js" {
 			js := loadDevBundleFromDisk(root)

@@ -25,6 +25,13 @@ type SSREval struct {
 	functions map[string]*ast.FnDecl
 	depth     int
 
+	// devMark marks the output of each component this evaluator renders
+	// itself for the dev component inspector (nil outside dev builds);
+	// devStack holds the keys of the instances being rendered.
+	devMark  func(fn *ast.FnDecl, parent, key, html string) string
+	devStack []string
+	devSeq   int
+
 	in *jsvalue.Interp
 	// module holds module-level bindings (constants evaluated lazily from
 	// moduleInits, and module functions). Component frames are child scopes
@@ -1904,7 +1911,19 @@ func (e *SSREval) evalComponentFn(fn *ast.FnDecl, el *ast.JSXElement) string {
 		e.childrenRawText = savedRaw
 		e.tagAliases = savedAliases
 	}()
-	return e.EvalComponentBody(fn)
+	if e.devMark == nil {
+		return e.EvalComponentBody(fn)
+	}
+	parent := ""
+	if len(e.devStack) > 0 {
+		parent = e.devStack[len(e.devStack)-1]
+	}
+	e.devSeq++
+	key := parent + "/" + fn.Name + "#" + strconv.Itoa(e.devSeq)
+	e.devStack = append(e.devStack, key)
+	html := e.EvalComponentBody(fn)
+	e.devStack = e.devStack[:len(e.devStack)-1]
+	return e.devMark(fn, parent, key, html)
 }
 
 // evalComponentValue renders a component held in a variable (a closure).

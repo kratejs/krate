@@ -22,10 +22,12 @@ type bodyOrder struct {
 	ords      map[any]int
 	firstDecl map[string]int
 	next      int
+	// pos holds the source position of each ordinal.
+	pos map[int]ast.Pos
 }
 
 func newBodyOrder(body []ast.Stmt) *bodyOrder {
-	o := &bodyOrder{ords: make(map[any]int), firstDecl: make(map[string]int)}
+	o := &bodyOrder{ords: make(map[any]int), firstDecl: make(map[string]int), pos: make(map[int]ast.Pos)}
 	o.stmts(body)
 	return o
 }
@@ -41,11 +43,17 @@ func (o *bodyOrder) stmt(stmt ast.Stmt) {
 		return
 	}
 	o.ords[stmt] = o.next
+	o.pos[o.next] = stmt.Pos()
 	o.next++
 	switch s := stmt.(type) {
 	case *ast.VarStmt:
 		for _, d := range s.Decls {
 			o.ords[d] = o.next
+			if n, ok := any(d).(ast.Node); ok && n != nil {
+				o.pos[o.next] = n.Pos()
+			} else {
+				o.pos[o.next] = stmt.Pos()
+			}
 			for _, name := range varDeclBindingNames(d) {
 				if _, seen := o.firstDecl[name]; !seen {
 					o.firstDecl[name] = o.next
@@ -479,4 +487,91 @@ func promoteTransitive(pre, post []bodyJS) ([]bodyJS, []bodyJS) {
 		pre = kept
 	}
 	return pre, post
+}
+
+// noteBodyPos records the source position of each fragment in node.BodyPos
+// (BuildOptions.SourcePositions).
+func (b *builder) noteBodyPos(node *ComponentNode, order *bodyOrder, groups ...[]bodyJS) {
+	if !b.sourcePositions || order == nil {
+		return
+	}
+	file := b.nodeFile(node)
+	for _, g := range groups {
+		for _, f := range g {
+			p, ok := order.pos[f.ord]
+			if !ok || p.Line == 0 || f.js == "" {
+				continue
+			}
+			if node.BodyPos == nil {
+				node.BodyPos = map[string]BodyPos{}
+			}
+			if _, dup := node.BodyPos[f.js]; !dup {
+				node.BodyPos[f.js] = BodyPos{File: file, Line: p.Line, Col: p.Col}
+			}
+		}
+	}
+}
+
+// noteStmtPos records the source position of one generated statement.
+func (b *builder) noteStmtPos(node *ComponentNode, js string, p ast.Pos) {
+	if !b.sourcePositions || node == nil || p.Line == 0 || js == "" {
+		return
+	}
+	if node.BodyPos == nil {
+		node.BodyPos = map[string]BodyPos{}
+	}
+	if _, dup := node.BodyPos[js]; !dup {
+		node.BodyPos[js] = BodyPos{File: b.nodeFile(node), Line: p.Line, Col: p.Col}
+	}
+}
+
+// noteFnPos records where a function the hydration scope declares is: in
+// the component's own body (its file) or in a module the annotator knows the
+// file of. A function from elsewhere is left unmapped.
+func (b *builder) noteFnPos(node *ComponentNode, owner, fnDecl *ast.FnDecl, js string) {
+	if !b.sourcePositions || fnDecl == nil || fnDecl.Position.Line == 0 {
+		return
+	}
+	file := ""
+	if b.ann != nil {
+		file = b.ann.ComponentSources[fnDecl.Name]
+	}
+	if file == "" && owner != nil && declaresFn(owner.Body, fnDecl) {
+		file = b.nodeFile(node)
+	}
+	if file == "" {
+		return
+	}
+	if node.BodyPos == nil {
+		node.BodyPos = map[string]BodyPos{}
+	}
+	if _, dup := node.BodyPos[js]; !dup {
+		node.BodyPos[js] = BodyPos{File: file, Line: fnDecl.Position.Line, Col: fnDecl.Position.Col}
+	}
+}
+
+// declaresFn reports whether fn is declared among stmts (nested blocks
+// included).
+func declaresFn(stmts []ast.Stmt, fn *ast.FnDecl) bool {
+	for _, s := range stmts {
+		switch v := s.(type) {
+		case *ast.FnDecl:
+			if v == fn {
+				return true
+			}
+		case *ast.BlockStmt:
+			if declaresFn(v.Body, fn) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// nodeFile is the file that defines node's component.
+func (b *builder) nodeFile(node *ComponentNode) string {
+	if node != nil && node.Module != "" {
+		return node.Module
+	}
+	return b.sourceLoc()
 }

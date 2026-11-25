@@ -35,6 +35,8 @@ type SSRServer struct {
 	cmd             *exec.Cmd
 	done            chan struct{} // closed when the sidecar process exits
 	startedAt       time.Time     // when the current process was launched
+	lastExit        *int          // exit code of the last process, nil when killed
+	restarting      bool          // the exit was asked for by Restart
 	mu              sync.Mutex
 	running         bool
 	closed          bool // set by Shutdown: Start refuses to launch again
@@ -334,12 +336,13 @@ func (s *SSRServer) Start() error {
 	}
 
 	s.cmd = exec.Command(runtimeCmd, runtimeArgs...)
+	noteSidecarRuntime("SSR renderer", runtimeCmd)
 	execx.ConfigureTree(s.cmd)
 	s.cmd.Env = env
-	s.cmd.Stdout = os.Stdout
-	s.cmd.Stderr = os.Stderr
-
-	if err := s.cmd.Start(); err != nil {
+	after := attachSidecarOutput(s.cmd, LogSrcSSR)
+	err = s.cmd.Start()
+	after()
+	if err != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("starting SSR renderer: %w", err)
 	}
@@ -353,10 +356,11 @@ func (s *SSRServer) Start() error {
 	// it must only clear the running flag when it is still the current process.
 	cmd := s.cmd
 	go func() {
-		_ = cmd.Wait()
+		werr := cmd.Wait()
 		s.mu.Lock()
 		if s.cmd == cmd {
 			s.running = false
+			s.lastExit = exitCodeOf(werr)
 		}
 		s.mu.Unlock()
 		close(done)
@@ -457,11 +461,19 @@ func (s *SSRServer) Supervise(stop <-chan struct{}) {
 			return
 		default:
 		}
-		if time.Since(started) > 10*time.Second {
+		s.mu.Lock()
+		asked, code := s.restarting, s.lastExit
+		s.restarting = false
+		s.mu.Unlock()
+		if time.Since(started) > 10*time.Second || asked {
 			delay = 100 * time.Millisecond
 		}
-		fmt.Fprintf(os.Stderr, "  %s! SSR renderer exited unexpectedly; restarting in %s%s\n", cYellow, delay, cReset)
-		reportServerCrash("SSR renderer", "exited unexpectedly", "")
+		if asked {
+			printf("  %s*%s SSR renderer restarting\n", cCyan, cReset)
+		} else {
+			fmt.Fprintf(os.Stderr, "  %s! SSR renderer exited unexpectedly; restarting in %s%s\n", cYellow, delay, cReset)
+			reportServerCrashExit("SSR renderer", "exited unexpectedly", "", code)
+		}
 		for {
 			select {
 			case <-stop:
@@ -486,6 +498,20 @@ func (s *SSRServer) Supervise(stop <-chan struct{}) {
 			reportServerCrash("SSR renderer", "restart failed: "+err.Error(), "")
 		}
 	}
+}
+
+// Restart stops the running renderer so Supervise starts it again, without
+// reporting a crash. It returns false when no renderer runs.
+func (s *SSRServer) Restart() bool {
+	s.mu.Lock()
+	if s.closed || !s.running || s.cmd == nil {
+		s.mu.Unlock()
+		return false
+	}
+	s.restarting = true
+	s.mu.Unlock()
+	s.Stop()
+	return true
 }
 
 // IsRunning returns whether the SSR server process is alive.

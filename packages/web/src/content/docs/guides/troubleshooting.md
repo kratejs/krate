@@ -56,6 +56,12 @@ renderer).
 - The watcher ignores `dist`, `.krate` (which holds the dev server's own output, `.krate/dev-out`), `node_modules`, and `_`-prefixed files.
 - If you renamed a page, wait for the rebuild banner; a compile error blocks the
   reload (the browser shows a build-error overlay).
+- The dev dock shows the state: `Rebuilding ...` while the watcher builds, the
+  rebuild time when it is done, and `Reconnecting to dev server` when the page
+  lost the dev server. Its Activity tab lists every rebuild and what it changed,
+  and its Logs tab shows the dev server's output without switching to the
+  terminal. `Alt+K` and **Restart dev server** or **Clear .krate cache and
+  rebuild** fix most stuck states.
 - Check the terminal for `Watching ... for changes`.
 
 ## `krate check` fails on an intentional pattern

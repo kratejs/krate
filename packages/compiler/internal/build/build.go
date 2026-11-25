@@ -47,6 +47,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
+	"github.com/kratejs/krate/packages/compiler/internal/version"
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
@@ -189,6 +190,9 @@ type Builder struct {
 	metadataCache sync.Map
 	// warned holds the warnings this builder printed in its current build.
 	warned warningSet
+	// devWarnings are the warnings of each page's latest dev build, for the
+	// dev overlay (see devwarnings.go).
+	devWarnings devWarningStore
 	// hintsSt is the real-React resource hints state (see hints).
 	hintsSt   *realHintsState
 	hintsOnce sync.Once
@@ -355,6 +359,11 @@ type Builder struct {
 	// Safe for concurrent use from parallel page goroutines.
 	Prof *Profiler
 
+	// devAct and devTimer record the dev build in progress for the overlay's
+	// activity panel (see devactivity.go). Owned by the watch loop.
+	devAct   *BuildActivity
+	devTimer *devBuildTimer
+
 	// moduleCache shares parsed modules across every Bundler in the build so
 	// shared theme/component/runtime modules are parsed once, not once per page.
 	moduleCache *bundler.ModuleCache
@@ -444,6 +453,30 @@ func (b *Builder) shouldMinifyJS() bool {
 	return b.Cfg.ShouldMinifyJS() && !b.DevMode
 }
 
+// hydrationMaps reports whether page and component scripts carry source maps
+// back to the .tsx files: when the config asks for them, and always in dev,
+// where the overlay maps runtime errors to the original files and lines. Dev
+// output is not minified, so its map is the one the source markers give.
+func (b *Builder) hydrationMaps() bool {
+	return b.Cfg.Sourcemap || b.DevMode
+}
+
+// devOnlyMaps reports whether source maps are written only because this is a
+// dev build (the config does not ask for them).
+func (b *Builder) devOnlyMaps() bool {
+	return b.DevMode && !b.Cfg.Sourcemap
+}
+
+// hydrationMapDir is the directory a page or component map names its
+// sources relative to: the project root in dev and native builds (the
+// overlay and the terminal print project paths), else the script's own.
+func (b *Builder) hydrationMapDir(scriptDir string) string {
+	if b.NativeTarget || b.DevMode {
+		return b.Root
+	}
+	return scriptDir
+}
+
 // viewTransitionsOff reports whether View Transitions are disabled. A native
 // app is a single window, not a set of documents: unless the config asks for
 // them, they stay off (a cross-document transition aborts the WebKitGTK web
@@ -513,16 +546,29 @@ func (b *Builder) runtimeCommonHead() string {
 }
 
 // devBootstrapJSON is the config the dev overlay bundle reads from
-// window.__KRATE_DEV__ (endpoints + feature toggles).
-func (b *Builder) devBootstrapJSON() string {
+// window.__KRATE_DEV__ (endpoints + feature toggles). r, when given, is the
+// page the document belongs to: its route pattern, source file and render
+// mode.
+func (b *Builder) devBootstrapJSON(r *PageResult) string {
 	cfg := map[string]interface{}{
 		"sse":     "/__krate/hotreload",
 		"errors":  "/__krate/client-error",
 		"open":    "/__krate/open",
+		"api":     devAPIBase,
+		"version": version.Value,
 		"overlay": b.Cfg.DevServer.OverlayEnabled(),
 		"toolbar": b.Cfg.DevServer.ToolbarEnabled(),
 	}
+	if r != nil {
+		cfg["page"] = map[string]string{
+			"route":  b.devPageRoute(r),
+			"source": filepath.ToSlash(r.SourcePath),
+			"mode":   r.Mode.String(),
+		}
+	}
 	if b.NativeTarget {
+		// The native host does not serve the dev API.
+		delete(cfg, "api")
 		// The native shell serves HMR as a frame stream on the app origin.
 		cfg["frames"] = "/__krate/hmr"
 		cfg["events"] = "/__krate/dev/events"
@@ -972,6 +1018,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 		result.HTML = afterPageCtx.HTML
 		result.HeadHTML = afterPageCtx.HeadHTML
 	}
+	b.recordDevWarnings(results, pages, false)
 
 	dl.Lap("2-pages")
 	if len(results) == 0 {
@@ -1428,6 +1475,8 @@ func (b *Builder) BuildAll() error {
 			result.HeadHTML = afterPageCtx.HeadHTML
 		}
 	}
+
+	b.recordDevWarnings(results, nil, true)
 
 	// Static-only dynamic routes: drop their canonical `[param]` fallback
 	// template so the output contains only the concrete pages baked from
@@ -2264,7 +2313,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			}
 			devBootstrap := ""
 			if b.DevMode {
-				devBootstrap = b.devBootstrapJSON()
+				devBootstrap = b.devBootstrapJSON(r)
 			}
 			runtimeHead := b.runtimeCommonHead()
 			if im := b.islandImportMapHTML(); im != "" {
@@ -2372,6 +2421,10 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				}
 				b.warnPublicStylesheets(h)
 				h = b.prefixHeadURLs(h)
+				// 2c. The dev component inspector's table (see devcomponents.go).
+				if b.DevMode {
+					h = finishDevComponents(h, b.Root)
+				}
 				// 3. Minify code in memory
 				if b.Cfg.ShouldMinifyHTML() {
 					h = minifyHTMLWith(h, b.linkedWhiteSpaceRules(h))
@@ -2896,6 +2949,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 			injectDynamicRoutePlaceholders(tree, extractParamNames(page, b.Cfg.PagesDir))
 		}
 		emitter := renderer.NewEmitter()
+		emitter.DevInspect = b.DevMode
 		emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 		emitter.IconResolver = b.iconResolver
 		emitter.EvalJS = b.jsExprEvaluator()
@@ -2908,6 +2962,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 				injectDynamicRoutePlaceholders(t, extractParamNames(page, b.Cfg.PagesDir))
 			}
 			em := renderer.NewEmitter()
+			em.DevInspect = b.DevMode
 			em.CodeTheme = b.Cfg.Markdown.CodeTheme
 			em.IconResolver = b.iconResolver
 			em.EvalJS = b.jsExprEvaluator()
@@ -3148,6 +3203,8 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	hydrationJS := ""
 	runtimeRefs := []string{}
 	var jsBytes []byte
+	// devMap is the page script's source map in a dev build (cached with it).
+	var devMap []byte
 	hasJS := false
 	var pageProviders *islandProviders
 	pageIslands := tree.ExternalComponents
@@ -3199,7 +3256,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries, bundle.CSSModules)...)
 	var sharedScopes []renderer.SharedScope
 	if needsHydrate {
-		emitResult.TrackSources = b.Cfg.Sourcemap
+		emitResult.TrackSources = b.hydrationMaps()
 		// npm functions called by client code are bundled into the script.
 		vendor := collectVendorImports(bundle)
 		for _, rb := range b.routeStack(page) {
@@ -3241,13 +3298,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 			// original .tsx positions.
 			inputMap := ""
 			if len(emitResult.SrcMarks) > 0 {
-				mapDir := pageDir
-				if b.NativeTarget {
-					// The terminal prints these paths: project-relative reads
-					// better than a path out of the build directory.
-					mapDir = b.Root
-				}
-				rawJS, inputMap = buildHydrationMap(rawJS, emitResult.SrcMarks, mapDir)
+				rawJS, inputMap = buildHydrationMap(rawJS, emitResult.SrcMarks, b.hydrationMapDir(pageDir))
 			}
 			finalJS := rawJS
 			mapJSON := ""
@@ -3276,6 +3327,12 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 			jsFile = "index." + jsHash + ".js"
 			finalJS = substituteImportMetaURL(finalJS, outName, jsFile, b.Cfg.BaseURLPath())
 			jsPath := filepath.Join(pageDir, jsFile)
+			if b.devOnlyMaps() && inputMap != "" {
+				// Dev: a map from the page script to the .tsx files, for the
+				// overlay's runtime errors. A script without markers gets none.
+				devMap = []byte(inputMap)
+				finalJS = appendSourceMappingURL(finalJS, jsFile+".map")
+			}
 			if err := writeOutput(jsPath, []byte(finalJS)); err != nil {
 				return nil, "", err
 			}
@@ -3295,6 +3352,10 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 				}
 				finalJS = appendSourceMappingURL(finalJS, jsFile+".map")
 				if err := writeOutput(jsPath, []byte(finalJS)); err != nil {
+					return nil, "", err
+				}
+			} else if devMap != nil {
+				if err := writeOutput(jsPath+".map", devMap); err != nil {
 					return nil, "", err
 				}
 			}
@@ -3372,7 +3433,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	if renderMode != RenderSSG {
 		result.IslandStubs = newIslandServerStubs(entryModule.Program, tree.ExternalComponents, islandSSR)
 	}
-	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes)
+	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes, devMap)
 	return result, bundle.CSS, nil
 }
 
@@ -3413,6 +3474,12 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		if err := writeOutput(filepath.Join(pageDir, e.JSFile), e.JSBytes); err != nil {
 			c.markMiss()
 			return nil, "", false
+		}
+		if len(e.MapBytes) > 0 {
+			if err := writeOutput(filepath.Join(pageDir, e.JSFile+".map"), e.MapBytes); err != nil {
+				c.markMiss()
+				return nil, "", false
+			}
 		}
 	}
 	if len(e.AssetFiles) > 0 {
@@ -3463,7 +3530,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 
 // maybeStoreDiskPage persists a freshly built page result when caching is
 // enabled and the page is a plain SSG page.
-func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, bundle *bundler.Bundle, jsBytes []byte) {
+func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, bundle *bundler.Bundle, jsBytes, mapBytes []byte) {
 	c := b.diskCache
 	if c == nil || !c.enabled || bundle == nil {
 		return
@@ -3496,6 +3563,7 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		RuntimeRefs:   r.RuntimeRefs,
 		JSFile:        r.JSFile,
 		JSBytes:       jsBytes,
+		MapBytes:      mapBytes,
 		SharedScopes:  r.SharedScopes,
 		CSS:           r.CSS,
 		HasJS:         r.HasJS,
@@ -3911,6 +3979,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	}
 	layoutIslandCache.Store(layoutPath, hosted)
 	emitter := renderer.NewEmitter()
+	emitter.DevInspect = b.DevMode
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()
@@ -4041,6 +4110,7 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 		return nil, renderErrors(page, tree.Errors)
 	}
 	emitter := renderer.NewEmitter()
+	emitter.DevInspect = b.DevMode
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.BasePath = b.Cfg.BaseURLPath()
 	result := emitter.Emit(tree)
@@ -4182,6 +4252,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 		return ""
 	}
 	emitter := renderer.NewEmitter()
+	emitter.DevInspect = b.DevMode
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.EvalJS = b.jsExprEvaluator()
 	emitter.BasePath = b.Cfg.BaseURLPath()
