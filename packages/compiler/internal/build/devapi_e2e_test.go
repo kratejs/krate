@@ -96,8 +96,12 @@ func TestDevAPIRestartsSidecars(t *testing.T) {
 	answers("after the SSR restart", "/dash/", "dash")
 	answers("after the API restart", "/api/hello", "api-source-marker")
 	time.Sleep(crashTailDelay * 2)
-	if errs := hub.ServerErrors(); len(errs) != 0 {
-		t.Errorf("an asked-for restart was reported as a crash: %+v", errs)
+	// Crash reports go to the process's one dev hub, so a parallel test's Go
+	// sidecar can land here too; only the two restarted sidecars count.
+	for _, e := range hub.ServerErrors() {
+		if e.Source == "SSR renderer" || e.Source == "Node API sidecar" {
+			t.Errorf("an asked-for restart was reported as a crash: %+v", e)
+		}
 	}
 	if code := postDevAction(t, base, `{"action":"restart-sidecar","target":"go"}`); code != http.StatusConflict {
 		t.Errorf("restart of a missing Go sidecar = %d, want 409", code)
