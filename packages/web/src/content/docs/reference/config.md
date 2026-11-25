@@ -160,6 +160,10 @@ page script, and so does the code of an imported component only one page uses
 at request time keep every component in the page script. Set it to `false` to
 put every component's code in the page script.
 
+`krate dev` writes source maps for page scripts whether `sourcemap` is set or
+not (with project-relative sources), so the dev overlay shows runtime errors at
+their `.tsx` line; `sourcemap` decides only what `krate build` writes.
+
 React syntax is always transpiled to Krate signals and effects; no config is
 required.
 

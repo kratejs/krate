@@ -63,8 +63,9 @@ styles do not reach it.
 A small dock sits in a corner of the page (bottom left by default). It shows
 the route pattern of the page (`/blog/[slug]`), how it renders (`SSG`, `SSR`,
 `ISR`, `STREAMING`) and how long the last rebuild took. While the watcher
-builds, it says what it is rebuilding; with errors it shows their count, and
-when the dev server goes away it says it is reconnecting. A stylesheet-only
+builds, it says what it is rebuilding; with errors it shows their count, with
+only build warnings an amber **N warnings** badge, and when the dev server goes
+away it says it is reconnecting. A stylesheet-only
 edit swaps the CSS in place and a short toast confirms it. Drag the dock to
 another corner, or click the Krate mark to collapse it (a red dot then means
 there are issues).
@@ -72,7 +73,10 @@ there are issues).
 Click the route to open the panel:
 
 - **Route**: the page's source file, params, render mode, layouts, what it
-  ships (HTML, gzipped JS against `checks.budget.js`, CSS, hydration time), its
+  ships (HTML, gzipped JS split into runtime, islands and page code, CSS,
+  hydration time), the [`checks.budget`](/docs/reference/config/) limits next to
+  the page measured the way `krate check` measures them (raw bytes; a dev build
+  is not minified, so production is smaller), its
   islands with their signals and hydration time, a head check (title,
   description, `og:image`, canonical, `<html lang>`), and actions: open the
   page source, view the built HTML, rebuild the page, copy the URL.
@@ -85,8 +89,9 @@ Click the route to open the panel:
   the tab is open.
 - **Settings**: dock corner, theme (System, Dark, Light), the editor used by
   **Open in editor** (from the editors found on your `PATH`), whether runtime
-  errors open the overlay, whether `console.error` counts as an issue, and
-  whether the dock starts collapsed. Settings are stored in the browser.
+  errors open the overlay, whether `console.error` counts as an issue, whether
+  build warnings are listed (**Show build warnings**), and whether the dock
+  starts collapsed. Settings are stored in the browser.
 
 In Krate Native, the panel also has the **Host** and **Memory** tabs (see
 [Native dev](/docs/native/dev/#host-inspector)).
@@ -96,22 +101,32 @@ In Krate Native, the panel also has the **Host** and **Memory** tabs (see
 The error overlay pages through the current issues (a rail on the left, the
 arrow keys or the pager):
 
-- **Build errors** show the diagnostic code with a link to its
-  [reference entry](/docs/reference/diagnostics/), the message, a code frame with
-  line numbers and the column underlined, and the hint. When `krate fix` knows
-  the rewrite, a **Safe fix** box previews the change; **Apply fix** (`F`)
+- **Build errors and warnings** show the diagnostic code and its category;
+  **What this means** explains the code, with a link to its
+  [reference entry](/docs/reference/diagnostics/). Then the message, a code frame
+  with line numbers and the column underlined, and the hint. When `krate fix`
+  knows the rewrite, a **Safe fix** box previews the change; **Apply fix** (`F`)
   applies it to that file and **Fix all** applies every safe fix, exactly as
-  [`krate fix --apply`](/docs/guides/safe-fixes/) does. The overlay closes when
-  the next build passes.
+  [`krate fix --apply`](/docs/guides/safe-fixes/) does. Warnings (amber, such as
+  [KR5002](/docs/reference/diagnostics/#kr5002)) are listed with the errors but
+  never open the overlay by themselves; they clear when a rebuild no longer
+  reports them. The overlay closes when the next build passes; **Show last
+  good page** closes it earlier and the dock notes that the page is the last
+  build that passed.
 - **Runtime errors** (uncaught exceptions, unhandled rejections, failed
   resources, and `console.error` unless turned off) show the source frame, the
   stack split into your frames and folded framework frames, and the component
-  that was rendering when it is known. They are forwarded to the dev server and
+  that was rendering when it is known. Dev builds write source maps for the page
+  scripts, so frames point at the `.tsx` file and line, not the built code. The
+  **Requests** tab lists the page's failed `fetch` and XHR requests (status or
+  network error, duration) from shortly before the error. They are forwarded to the dev server and
   logged to the terminal as `[browser] ...`. **Ignore this error for the
   session** hides one that you expect.
 - **Server crashes** (the SSR renderer, the Node or Go API sidecar, the
-  middleware) show what failed, its exit code, the last console lines with
-  their source, and a **Restart sidecar** button.
+  middleware) show what failed, the runtime it runs on (`node 22.11`, `bun`,
+  `deno`, the Go version), its exit code, how often it was restarted in the last
+  minute, the last console lines with their source, and a **Restart sidecar**
+  button.
 
 Every issue has **Open in editor** (`O`) and **Copy for AI**, which copies a
 Markdown summary (message, code, location, code frame, hint and stack) to paste
@@ -126,7 +141,8 @@ shows the error - fix the file and save to recover.
 Press `Alt+I` (Option+I on macOS) to outline every component on the page,
 colored by [tier](/docs/core-concepts/component-tiers/): static, server, client,
 runtime, and Preact or React islands. Hover one for its source file, live signal
-values, shipped size and hydration time; click to open it in the editor,
+values, shipped size, and how long it took to hydrate and when (milliseconds
+after the page started loading); click to open it in the editor,
 Shift-click to copy its path, `Esc` to stop.
 
 ### Command menu and shortcuts
