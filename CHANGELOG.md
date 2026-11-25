@@ -524,6 +524,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `krate build` checks client boundary chunks in fewer esbuild calls. When a page needs the exact check of a
+  chunk from a code-split batch (its stateful hooks, the files it reads, its CSS classes), the check now joins
+  the build round like the other client chunk jobs and runs in one unsplit batch with the others, instead of one
+  esbuild call per chunk. On a 114-page app, 72 separate checks (87-103 s of esbuild CPU) became 3-6 batched
+  calls plus 4-5 single ones (8-10 s); esbuild CPU fell about 40% and the build went from 110 s to 99 s.
 - `@krate/base-docs-theme`: `DocsSearch` is a button that opens a modal search dialog instead of an
   inline box with a dropdown. The dialog highlights the query in titles and excerpts, shows each result's
   section and an excerpt around the first match, lists recently opened results when the query is empty,
