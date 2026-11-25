@@ -1,5 +1,6 @@
 import "../styles/site.css";
 import { SiteHeader, SiteFooter, ThemeToggle, ThemePrePaint } from "@krate/base-docs-theme/shell";
+import { DocsSearch } from "@krate/base-docs-theme/search";
 
 const site = {
   brand: { text: "krate", href: "/", logoUrl: "/logo.svg" },
@@ -63,13 +64,7 @@ export default function SiteLayout(props: { children: any }) {
         Skip to content
       </a>
       <SiteHeader site={site}>
-        <a class="site-search" href="/docs/" aria-label="Search the documentation" aria-keyshortcuts="Control+K Meta+K">
-          <span>Search</span>
-          <kbd aria-hidden="true">
-            <span class="kbd-mac">{"\u2318"}</span>
-            <span class="kbd-other">Ctrl</span> K
-          </kbd>
-        </a>
+        <DocsSearch placeholder="Search docs" />
         <ThemeToggle />
       </SiteHeader>
       <main id="main">{props.children}</main>

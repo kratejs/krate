@@ -1926,50 +1926,6 @@ body .chroma .w {
     border: 0;
 }
 
-/* Header entry into the docs search (opens /docs/, where the palette lives). */
-.site-search {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    height: 32px;
-    padding: 0 0.6rem;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    color: var(--color-muted);
-    background: var(--color-bg-subtle);
-    font-size: 0.875rem;
-    text-decoration: none;
-}
-
-.site-search:hover {
-    border-color: var(--color-border-strong);
-    color: var(--color-fg);
-}
-
-.site-search kbd {
-    font-family: var(--font-mono);
-    font-size: 0.72rem;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--color-muted);
-}
-
-/* The shortcut names the platform's modifier: Cmd on Apple devices, Ctrl
-   elsewhere. ThemePrePaint sets data-platform before paint; with no script the
-   label reads Ctrl. */
-.site-search .kbd-mac {
-    display: none;
-}
-
-:root[data-platform="mac"] .site-search .kbd-mac {
-    display: inline;
-}
-
-:root[data-platform="mac"] .site-search .kbd-other {
-    display: none;
-}
-
 /* Bundled variable fonts. The build preloads the sans face on every page and
    the mono face on pages with <pre> or <code>. */
 @font-face {

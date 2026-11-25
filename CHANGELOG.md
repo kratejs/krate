@@ -524,6 +524,18 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `@krate/base-docs-theme`: `DocsSearch` is a button that opens a modal search dialog instead of an
+  inline box with a dropdown. The dialog highlights the query in titles and excerpts, shows each result's
+  section and an excerpt around the first match, lists recently opened results when the query is empty,
+  and fills the screen on phones. `mod+k` (or the configured `search.hotkey`) toggles it. It works on any
+  page of the site, not only docs pages: where a page does not carry the search module's meta tag, the
+  component reads it from `/docs/` (the new `docsUrl` prop). It is exported as
+  `@krate/base-docs-theme/search` and brings its own stylesheet (`search.css`). Themes that styled the
+  old `.krate-docs-search-input` or `.krate-docs-search-results` popover need updating.
+- `@krate/base-docs-theme`: sidebar folders animate open and closed, and the toggle uses a chevron icon
+  that rotates instead of a text character. A restored open or closed state does not animate on page
+  load.
+
 - `krate dev` rebuilds faster on a large app. The island chunks, the client boundary checks, the combined
   server render modules and each scanned file's Tailwind classes are kept between rebuilds and reused while
   the files they read have not changed. A page's server bundle is compiled as soon as the page is built
@@ -633,6 +645,9 @@ host code runs in the native process. Names and options may change between relea
   the JSON report has an `info` list.
 
 ### Fixed
+
+- Docs search with Pagefind: result titles and excerpts kept the page's HTML entities, so code in an
+  excerpt read `&lt;Link href&gt;` instead of `<Link href>`.
 
 - `krate dev`: after the first edit, a change to a client component reached the server HTML but not its
   island chunk, which kept the old code under the same name, so the page hydrated old code over new markup

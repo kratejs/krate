@@ -22,6 +22,7 @@
     "./layout": "./src/layout.tsx",
     "./chrome": "./src/chrome.tsx",
     "./shell": "./src/shell.tsx",
+    "./search": "./src/search.tsx",
     "./theme.css": "./src/theme.css"
   },
   "files": [

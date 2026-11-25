@@ -81,14 +81,18 @@ function SidebarSection(props: SidebarSectionProps) {
             aria-label={`Toggle ${item.title}`}
             aria-expanded={open ? 'true' : 'false'}
           >
-            <span class="sidebar-chevron">&rsaquo;</span>
+            <span class="sidebar-chevron" aria-hidden="true">
+              <Icon name="tabler:chevron-right" width="16" height="16" />
+            </span>
           </button>
         )}
       </div>
       <div class="sidebar-section-children">
-        {item.children && item.children.map((child) => (
-          <SidebarSection item={child} currentPath={currentPath} parentKey={navKey} />
-        ))}
+        <div class="sidebar-section-children-inner">
+          {item.children && item.children.map((child) => (
+            <SidebarSection item={child} currentPath={currentPath} parentKey={navKey} />
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -202,6 +206,13 @@ export function SidebarNav(props: SidebarNavProps) {
     el.addEventListener("click", onClick);
     refreshActive();
     restoreNavState();
+    // Animate folders only after the restored state has painted, so a page
+    // load does not play every open and close.
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        el.classList.add("sidebar-nav-animated");
+      });
+    });
   });
 
   return (
