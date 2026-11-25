@@ -63,7 +63,9 @@ type BuildActivity struct {
 	kind   string
 	pages  int
 	phases func() []BuildPhase
-	done   bool
+	// warnings reports the build warnings once the build finished.
+	warnings func() []diag.Diagnostic
+	done     bool
 }
 
 // SetKind records what the build turned out to rebuild.
@@ -105,6 +107,16 @@ func (a *BuildActivity) setPhases(fn func() []BuildPhase) {
 	}
 	a.mu.Lock()
 	a.phases = fn
+	a.mu.Unlock()
+}
+
+// setWarnings installs the function that reports the build warnings.
+func (a *BuildActivity) setWarnings(fn func() []diag.Diagnostic) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.warnings = fn
 	a.mu.Unlock()
 }
 
@@ -156,7 +168,7 @@ func (h *DevHub) finishActivityLocked(a *BuildActivity, routes []string, diags i
 		return
 	}
 	a.done = true
-	kind, pages, phases := a.kind, a.pages, a.phases
+	kind, pages, phases, warnings := a.kind, a.pages, a.phases, a.warnings
 	a.mu.Unlock()
 	if h.activity == a {
 		h.activity = nil
@@ -193,8 +205,17 @@ func (h *DevHub) finishActivityLocked(a *BuildActivity, routes []string, diags i
 		if rec.OK {
 			h.lastGoodAt = time.Now()
 		}
+		if warnings != nil {
+			// The slice is shared by the events that carry it; it is never
+			// modified after this.
+			h.warnings = warnings()
+		}
 	}
-	h.fanOutLocked(DevEvent{Type: "build-end", Build: &rec})
+	end := DevEvent{Type: "build-end", Build: &rec}
+	if kind != BuildKindNoop {
+		end.Warnings = h.warnings
+	}
+	h.fanOutLocked(end)
 }
 
 // BuildActivitySnapshot is the payload of GET /__krate/dev/activity.
@@ -313,6 +334,7 @@ func (b *Builder) beginDevActivity(hub *DevHub, files []string) (*BuildActivity,
 	}
 	timer := &devBuildTimer{}
 	b.devAct, b.devTimer = act, timer
+	act.setWarnings(b.DevWarnings)
 	act.setPhases(func() []BuildPhase {
 		// The builder may have swapped in its own profiler (KRATE_DEV_PROFILE).
 		p := prof

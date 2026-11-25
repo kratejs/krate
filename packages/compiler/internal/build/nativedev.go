@@ -99,10 +99,16 @@ func NativeHMRMessage(ev DevEvent) []byte {
 		msg = map[string]any{"type": "build-start", "files": append([]string{}, ev.Files...)}
 	case ev.Type == "build-end" && ev.Build != nil:
 		msg = map[string]any{"type": "build-end", "build": ev.Build}
+		if len(ev.Warnings) > 0 {
+			msg["warnings"] = ev.Warnings
+		}
 	case ev.Type == "client-error" && ev.ClientError != nil:
 		msg = map[string]any{"type": "client-error", "clientError": ev.ClientError}
 	case len(ev.Diagnostics) > 0:
 		msg = map[string]any{"type": "build-error", "diagnostics": ev.Diagnostics, "buildOk": false}
+		if len(ev.Warnings) > 0 {
+			msg["warnings"] = ev.Warnings
+		}
 	case len(ev.Routes) > 0:
 		msg = map[string]any{"type": "reload", "pages": ev.Routes, "cssOnly": ev.CSSOnly}
 	default:

@@ -26,6 +26,9 @@ type DevEvent struct {
 	Files []string `json:"files,omitempty"`
 	// Build is the finished build of a build-end event.
 	Build *BuildRecord `json:"build,omitempty"`
+	// Warnings are the current build warnings (deduplicated, capped), sent
+	// with build-end and build-error so the overlay lists them.
+	Warnings []diag.Diagnostic `json:"warnings,omitempty"`
 }
 
 // isActivityEvent reports whether ev only reports build progress: it does not
@@ -93,6 +96,8 @@ type DevHub struct {
 	lastServerErr map[string]time.Time
 
 	// Build activity (see devactivity.go), guarded by mu.
+	// warnings are the build warnings as of the last finished build.
+	warnings   []diag.Diagnostic
 	activity   *BuildActivity
 	history    []BuildRecord
 	buildSeq   int
@@ -215,6 +220,9 @@ func (h *DevHub) Publish(ev DevEvent) {
 	if ev.Type == "reload" && h.activity != nil {
 		h.finishActivityLocked(h.activity, ev.Routes, len(ev.Diagnostics), true)
 	}
+	if ev.Type == "reload" {
+		ev.Warnings = h.warnings
+	}
 	h.last = &ev
 	h.lastEventAt = time.Now()
 	h.rebuilds++
@@ -230,6 +238,13 @@ func (h *DevHub) fanOutLocked(ev DevEvent) {
 		default:
 		}
 	}
+}
+
+// Warnings returns the build warnings as of the last finished build.
+func (h *DevHub) Warnings() []diag.Diagnostic {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.warnings
 }
 
 // Current returns the most recently published event, if any. Used to catch up

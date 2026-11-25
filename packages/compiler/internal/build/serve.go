@@ -2213,8 +2213,13 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 
 			// Catch a late subscriber up with the current build state, so a tab
 			// opened after a failed initial build still shows the error.
+			warnings := hub.Warnings()
 			if cur, ok := hub.Current(); ok && len(cur.Diagnostics) > 0 {
+				cur.Warnings = warnings
 				writeBuildError(w, cur)
+				flusher.Flush()
+			} else if len(warnings) > 0 {
+				writeBuildWarnings(w, warnings)
 				flusher.Flush()
 			}
 			// A sidecar or the middleware that is still down stays on screen
@@ -2245,8 +2250,9 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 						fmt.Fprintf(w, "event: build-start\ndata: %s\n\n", data)
 					case ev.Type == "build-end" && ev.Build != nil:
 						data, _ := json.Marshal(struct {
-							Build *BuildRecord `json:"build"`
-						}{ev.Build})
+							Build    *BuildRecord      `json:"build"`
+							Warnings []diag.Diagnostic `json:"warnings,omitempty"`
+						}{ev.Build, ev.Warnings})
 						fmt.Fprintf(w, "event: build-end\ndata: %s\n\n", data)
 					case ev.Type == "client-error" && ev.ClientError != nil:
 						data, _ := json.Marshal(ev)

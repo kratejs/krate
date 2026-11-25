@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
 	"github.com/kratejs/krate/packages/compiler/internal/version"
 )
@@ -22,14 +23,24 @@ import (
 // SSE frame. The client overlay renders the diagnostics with source + caret.
 func writeBuildError(w io.Writer, ev DevEvent) {
 	payload := struct {
-		Diagnostics []interface{} `json:"diagnostics"`
-		BuildOK     bool          `json:"buildOk"`
-	}{BuildOK: len(ev.Diagnostics) == 0}
+		Diagnostics []interface{}     `json:"diagnostics"`
+		BuildOK     bool              `json:"buildOk"`
+		Warnings    []diag.Diagnostic `json:"warnings,omitempty"`
+	}{BuildOK: len(ev.Diagnostics) == 0, Warnings: ev.Warnings}
 	for _, d := range ev.Diagnostics {
 		payload.Diagnostics = append(payload.Diagnostics, d)
 	}
 	data, _ := json.Marshal(payload)
 	fmt.Fprintf(w, "event: build-error\ndata: %s\n\n", data)
+}
+
+// writeBuildWarnings tells a tab that connects after a build which warnings
+// that build left (build-end carries them for the tabs already connected).
+func writeBuildWarnings(w io.Writer, warnings []diag.Diagnostic) {
+	data, _ := json.Marshal(struct {
+		Warnings []diag.Diagnostic `json:"warnings"`
+	}{warnings})
+	fmt.Fprintf(w, "event: build-warnings\ndata: %s\n\n", data)
 }
 
 // safeProjectPath resolves a client-supplied file path (absolute or relative)

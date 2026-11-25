@@ -190,6 +190,9 @@ type Builder struct {
 	metadataCache sync.Map
 	// warned holds the warnings this builder printed in its current build.
 	warned warningSet
+	// devWarnings are the warnings of each page's latest dev build, for the
+	// dev overlay (see devwarnings.go).
+	devWarnings devWarningStore
 	// hintsSt is the real-React resource hints state (see hints).
 	hintsSt   *realHintsState
 	hintsOnce sync.Once
@@ -991,6 +994,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 		result.HTML = afterPageCtx.HTML
 		result.HeadHTML = afterPageCtx.HeadHTML
 	}
+	b.recordDevWarnings(results, pages, false)
 
 	dl.Lap("2-pages")
 	if len(results) == 0 {
@@ -1447,6 +1451,8 @@ func (b *Builder) BuildAll() error {
 			result.HeadHTML = afterPageCtx.HeadHTML
 		}
 	}
+
+	b.recordDevWarnings(results, nil, true)
 
 	// Static-only dynamic routes: drop their canonical `[param]` fallback
 	// template so the output contains only the concrete pages baked from
