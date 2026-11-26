@@ -53,7 +53,7 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 		// into the page hydration bundle: they are not valid Krate codegen input
 		// (e.g. hyphenated object keys), and they would duplicate the island.
 		// Workspace @krate packages are Krate source and stay eligible.
-		if src := filepath.ToSlash(b.ann.ComponentSources[name]); resolver.IsCompiledDependency(src) {
+		if isCompiledSource(b, name) {
 			continue
 		}
 		if fn.Name != name {
@@ -71,22 +71,67 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 			rendererRegs = append(rendererRegs, ev)
 		}
 	}
-	if len(candidates) == 0 && len(rendererRegs) == 0 {
+	if len(candidates) == 0 && len(rendererRegs) == 0 && len(b.functions) == 0 {
 		return nil
 	}
 
 	referenced := make(map[string]bool)
 	var queue []string
+	// Dynamic list slot expressions (e.g. {items().map(x => <Item onSelect={fn}/>)})
+	// reference local functions too; without hoisting them the runtime re-render
+	// of the list would throw ReferenceError. The ListSlot may be nested inside
+	// a signal-less child wrapper's call-site slots (e.g. <ToastViewport>{list}</ToastViewport>),
+	// so walk the built slot tree transitively.
+	// A component reached only from renderer children is declared in its
+	// renderer form (see rendererModeFn); one a DOM list renders too keeps the
+	// DOM form.
+	const scannedRenderer, scannedDOM = 1, 2
+	scannedComponents := map[string]int{}
+	var scanComponentBodyAs func(name string, mode int)
+	scanComponentBodyAs = func(name string, mode int) {
+		fn := b.functions[name]
+		if fn == nil || scannedComponents[name] >= mode {
+			return
+		}
+		scannedComponents[name] = mode
+		// Declare the component in this scope (its body then resolves this
+		// scope's helpers); the queue below scans its body transitively.
+		if mode == scannedRenderer && !IsRendererFn(fn) {
+			candidates[name] = rendererModeFn(fn)
+		} else {
+			candidates[name] = fn
+		}
+		if !referenced[name] {
+			referenced[name] = true
+			queue = append(queue, name)
+		}
+		code := renderStmtJS(fn, nil)
+		scanJSIdents(code, func(id string) {
+			if id != name && isComponentName(id) && b.functions[id] != nil {
+				scanComponentBodyAs(id, mode)
+			}
+		})
+	}
+	scanComponentBody := func(name string) { scanComponentBodyAs(name, scannedDOM) }
 	// Tokenize each code fragment once; string literals, comments and
-	// property names (`obj.helper`) never count as references.
+	// property names (`obj.helper`) never count as references. A same-module
+	// component that hydration code calls directly (h(Glyph,..), or a recursive
+	// h(Tree,..)) is not a candidate; declare it on first use.
+	pullComponents := true
 	scan := func(code string) {
 		if code == "" {
 			return
 		}
 		scanJSIdents(code, func(name string) {
-			if _, ok := candidates[name]; ok && !referenced[name] {
-				referenced[name] = true
-				queue = append(queue, name)
+			if _, ok := candidates[name]; ok {
+				if !referenced[name] {
+					referenced[name] = true
+					queue = append(queue, name)
+				}
+				return
+			}
+			if pullComponents && isComponentName(name) && b.functions[name] != nil && !isCompiledSource(b, name) {
+				scanComponentBody(name)
 			}
 		})
 	}
@@ -141,49 +186,16 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	// Props registrations (__krate_props["<id>"]={onClick:clear,...}) reference
 	// local functions from the parent scope; hoist them so the child's forwarded
 	// handlers resolve at runtime.
+	// Renderer registrations declare their components in renderer form below.
 	for _, ev := range node.ExtraVars {
+		pullComponents = !b.rendererRegs[ev]
 		scan(ev)
 	}
+	pullComponents = true
 	// Replayed body statements (e.g. a custom hook call `useTitle("x")`).
 	for _, ev := range node.PreSignalVars {
 		scan(ev)
 	}
-	// Dynamic list slot expressions (e.g. {items().map(x => <Item onSelect={fn}/>)})
-	// reference local functions too; without hoisting them the runtime re-render
-	// of the list would throw ReferenceError. The ListSlot may be nested inside
-	// a signal-less child wrapper's call-site slots (e.g. <ToastViewport>{list}</ToastViewport>),
-	// so walk the built slot tree transitively.
-	// A component reached only from renderer children is declared in its
-	// renderer form (see rendererModeFn); one a DOM list renders too keeps the
-	// DOM form.
-	const scannedRenderer, scannedDOM = 1, 2
-	scannedComponents := map[string]int{}
-	var scanComponentBodyAs func(name string, mode int)
-	scanComponentBodyAs = func(name string, mode int) {
-		fn := b.functions[name]
-		if fn == nil || scannedComponents[name] >= mode {
-			return
-		}
-		scannedComponents[name] = mode
-		// Declare the component in this scope (its body then resolves this
-		// scope's helpers); the queue below scans its body transitively.
-		if mode == scannedRenderer && !IsRendererFn(fn) {
-			candidates[name] = rendererModeFn(fn)
-		} else {
-			candidates[name] = fn
-		}
-		if !referenced[name] {
-			referenced[name] = true
-			queue = append(queue, name)
-		}
-		code := renderStmtJS(fn, nil)
-		scanJSIdents(code, func(id string) {
-			if id != name && isComponentName(id) && b.functions[id] != nil {
-				scanComponentBodyAs(id, mode)
-			}
-		})
-	}
-	scanComponentBody := func(name string) { scanComponentBodyAs(name, scannedDOM) }
 	// Components rendered by renderer children registered in this scope.
 	for _, reg := range rendererRegs {
 		scanJSIdents(reg, func(id string) {
@@ -248,6 +260,10 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 		result = append(result, candidates[name])
 	}
 	return result
+}
+
+func isCompiledSource(b *builder, name string) bool {
+	return resolver.IsCompiledDependency(filepath.ToSlash(b.ann.ComponentSources[name]))
 }
 
 // codeContainsIdent reports whether JS code references name as an identifier.

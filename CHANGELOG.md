@@ -655,6 +655,8 @@ host code runs in the native process. Names and options may change between relea
   (after `title.template`), as Next.js does: a page `title: "Home page"` under a layout
   `openGraph: { siteName }` gets `og:title` and `twitter:title` instead of none. `twitter` follows
   `openGraph`'s title and description first. Static and SSR pages agree.
+- A component that hydrates on the client and renders a same-module component from a text, conditional or list expression no longer throws `<Name> is not defined` in the browser. The component's declaration is now emitted into the client chunk, including a recursive component that renders itself (for example a tree that maps nested items to itself).
+
 - MDX: a component's closing tag on the line right after a paragraph (`<Note>`, text, `</Note>`) no
   longer lands inside the paragraph and fails with "closing Note tag does not match opening p"; a
   component tag alone on its line ends the paragraph, as in MDX. Inline tags (`see <Badge>x` with the

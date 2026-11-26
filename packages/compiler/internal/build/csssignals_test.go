@@ -102,3 +102,72 @@ func readAllCSS(t *testing.T, outDir string) string {
 	})
 	return sb.String()
 }
+
+// A same-module helper component called from hydration code (a conditional,
+// a runtime-rendered list row, a recursive self call) must be declared in the
+// client chunk; otherwise the browser throws "<Name> is not defined".
+func TestClientChunkDeclaresSameModuleHelpers(t *testing.T) {
+	t.Parallel()
+	const recursiveOnly = `import { useState } from "react";
+type Node = { name: string; kids?: Node[] };
+function Tree(props: { items: Node[] }) {
+	const [open, setOpen] = useState(true);
+	return (
+		<ul>
+			<button onClick={() => setOpen(!open)}>toggle</button>
+			{open ? props.items.map((i) => <li class="row">{i.name}{i.kids ? <Tree items={i.kids} /> : null}</li>) : null}
+		</ul>
+	);
+}
+export default function Page() { return <main><Tree items={[{ name: "a", kids: [{ name: "b" }] }]} /></main>; }`
+	const withHelper = `import { useState } from "react";
+type Node = { name: string; kids?: Node[] };
+function Glyph(props: { name: string }) { return <svg class="glyph"><title>{props.name}</title></svg>; }
+function Tree(props: { items: Node[] }) {
+	const [open, setOpen] = useState(true);
+	return (
+		<ul>
+			<button onClick={() => setOpen(!open)}>toggle</button>
+			{open ? <Glyph name="down" /> : <Glyph name="right" />}
+			{open ? props.items.map((i) => <li><Glyph name={i.name} />{i.kids ? <Tree items={i.kids} /> : null}</li>) : null}
+		</ul>
+	);
+}
+export default function Page() { return <main><Tree items={[{ name: "a", kids: [{ name: "b" }] }]} /></main>; }`
+	for name, src := range map[string]string{"helper": withHelper, "recursive-only": recursiveOnly} {
+		t.Run(name, func(t *testing.T) { checkClientChunkDeclares(t, src, name == "helper") })
+	}
+}
+
+func checkClientChunkDeclares(t *testing.T, src string, wantHelper bool) {
+	t.Helper()
+	_, outDir, err := buildPageSrc(t, src)
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	files, _ := filepath.Glob(filepath.Join(outDir, "*.js"))
+	more, _ := filepath.Glob(filepath.Join(outDir, "*", "*.js"))
+	files = append(files, more...)
+	var js string
+	for _, f := range files {
+		if strings.Contains(f, "runtime") {
+			continue
+		}
+		data, _ := os.ReadFile(f)
+		js += string(data)
+	}
+	if js == "" {
+		t.Fatal("no page script emitted")
+	}
+	if !wantHelper && !strings.Contains(js, `class:"row"`) {
+		t.Errorf("recursive component not declared in client JS:\n%.1500s", js)
+	}
+	for _, name := range []string{"Tree", "Glyph"} {
+		if regexp.MustCompile(`\bh\(` + name + `\b`).MatchString(js) {
+			t.Errorf("client JS calls undeclared %s:\n%.1500s", name, js)
+		}
+	}
+	if wantHelper && !strings.Contains(js, `class:"glyph"`) {
+		t.Errorf("helper body not declared in client JS:\n%.1500s", js)
+	}
+}
