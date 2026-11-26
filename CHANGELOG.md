@@ -651,6 +651,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `openGraph` and `twitter` metadata without their own title now take the resolved top-level title
+  (after `title.template`), as Next.js does: a page `title: "Home page"` under a layout
+  `openGraph: { siteName }` gets `og:title` and `twitter:title` instead of none. `twitter` follows
+  `openGraph`'s title and description first. Static and SSR pages agree.
+- A list key that is a DOM node or another object (`key={someJSX}`) no longer becomes
+  `[object HTMLSpanElement]` for every row. Object keys are matched by identity, so rows stay distinct and
+  keep their state across updates, and one console error says to use a string or number.
 - Tailwind now emits utilities written in project files outside `src/` (a top-level `components/`
   folder imported through a `@/*` alias, for example): with no `content`/`scanDirs`, the modules the
   build compiles are scanned too, in `krate dev` rebuilds as well. `@source` globs (`dir/**/*.tsx`)

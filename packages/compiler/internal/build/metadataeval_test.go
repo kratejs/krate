@@ -229,3 +229,33 @@ export default function L({ children }: any) { return <div><Field label="Name" /
 		t.Errorf("the layout's metadata is missing:\n%s", head)
 	}
 }
+
+// An openGraph or twitter object without a title or description takes the
+// page's resolved ones, the way Next.js fills them.
+func TestOpenGraphInheritsResolvedTitle(t *testing.T) {
+	t.Parallel()
+	b, root := hooksProject(t, map[string]string{
+		"src/pages/_layout.tsx": `export const metadata = { title: { default: "Site", template: "%s | Site" }, openGraph: { siteName: "Site" }, twitter: { card: "summary" } };
+export default function L({ children }: any) { return <div>{children}</div>; }`,
+		"src/pages/index.tsx": `export const metadata = { title: "Home page", description: "About home" };
+export default function Home() { return <p>home</p>; }`,
+	})
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	head := headOf(readMetaDist(t, root, "index.html"))
+	for _, w := range []string{
+		"<title>Home page | Site</title>",
+		"og:title content=Home page | Site",
+		"og:site_name",
+		"twitter:title content=Home page | Site",
+	} {
+		if !strings.Contains(head, w) {
+			t.Errorf("head lacks %q:\n%s", w, head)
+		}
+	}
+	// A description is not copied: a <Head> override would leave it stale.
+	if strings.Contains(head, "og:description") || strings.Contains(head, "twitter:description") {
+		t.Errorf("og/twitter description copied from the page description:\n%s", head)
+	}
+}

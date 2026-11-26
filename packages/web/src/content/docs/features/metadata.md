@@ -90,7 +90,10 @@ rules are Next.js's:
   the layout's own `default`).
 - `openGraph.title` and `twitter.title` have their own templates, declared as
   `openGraph: { title: { default, template } }`; the page `title.template` does not
-  apply to them.
+  apply to them. An `openGraph` or `twitter` object without its own `title` takes the
+  page's resolved title (after `title.template`), as in Next.js; `twitter` takes
+  `openGraph`'s title and description first. The page `description` is not copied into
+  them, so set `openGraph.description` to get `og:description`.
 - `metadataBase` resolves relative URLs in `alternates`, `openGraph`, `twitter`,
   `icons` and `manifest`; its path is a prefix.
 - An explicit `<Head>` on the page still wins over its metadata for the same tag, and
