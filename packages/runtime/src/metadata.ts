@@ -15,7 +15,7 @@
 // itunes, appLinks, archives, assets, bookmarks and other. metadataBase resolves
 // relative URLs. Anything else is ignored.
 
-import { httpFallbackStatus, redirectTarget, thenableRecord } from './request-context.js';
+import { httpFallbackStatus, isDynamicUsageError, redirectTarget, thenableRecord } from './request-context.js';
 
 export interface TemplateString {
   default?: string;
@@ -264,7 +264,7 @@ export async function resolveMetadata(segments: MetadataSegment[], rawProps: Met
         // notFound(), forbidden(), unauthorized() and redirect() in
         // generateMetadata answer the request; any other error costs only the
         // segment's metadata.
-        if (httpFallbackStatus(error) || redirectTarget(error)) throw error;
+        if (httpFallbackStatus(error) || redirectTarget(error) || isDynamicUsageError(error)) throw error;
         errors.push({ file: seg.file || '', error });
         own = undefined;
       }

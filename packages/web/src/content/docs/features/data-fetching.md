@@ -25,9 +25,11 @@ export default function ServerTime() {
 
 A synchronous server component sees what the build can compute, including the
 time of the build. A server component that is `async` (it `await`s a `fetch`, a
-database call) is rendered per request by the SSR sidecar and streamed into the
-static shell (`KR7104`, informational); use it for data that changes, and
-`output: "static"` rejects it (`KR7103`).
+database call) renders via the SSR renderer; an async child of a synchronous
+page streams per request (`KR7104`, informational) and `output: "static"`
+rejects it (`KR7103`), while an async page with `generateStaticParams` (or a
+non-dynamic async page under `output: "static"`) is prerendered at build time
+unless it uses request-only APIs or opts into `force-dynamic`.
 
 ### Dates and times at build time
 
@@ -161,7 +163,13 @@ export function generateStaticParams() {
 
 Each `{ id: ... }` set is expanded into a static page (`/video/abc-123`,
 `/video/def-456`) whose component renders with `params.id` set to the matching
-value. Directly destructured params (`{ id }`) work the same way.
+value. Directly destructured params (`{ id }`) work the same way. Async pages
+with `generateStaticParams` (and `generateMetadata`) are also prerendered at
+build time for every returned param set (with `params` readable both as
+`params.id` and `await params`) and marked **SSG**, including with
+`output: "static"`. Pages that export `dynamic = "force-dynamic"` or read
+`headers()`, `cookies()`, or `searchParams` stay request-time (or report
+`KR7103` under `output: "static"`).
 
 ## Client-side data (`createResource`)
 

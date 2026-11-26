@@ -17,6 +17,8 @@ export interface RequestContext {
   cookies: Map<string, string>;
   params: Record<string, string>;
   searchParams: Record<string, string>;
+  /** True during build-time prerendering, where request-only APIs bail out. */
+  prerender?: boolean;
 }
 
 interface RequestStore {
@@ -202,4 +204,34 @@ export function redirectTarget(err: unknown): string {
     if (parts.length >= 3) return parts[2];
   }
   return '';
+}
+
+/** Thrown when a request-only API is read during build-time prerendering. */
+export interface DynamicUsageError extends Error {
+  __krateDynamicUsage: string;
+  digest: string;
+}
+
+export function dynamicUsageError(api: string): DynamicUsageError {
+  const err = new Error(
+    `Dynamic server usage: ${api} cannot be used while prerendering a static page`,
+  ) as DynamicUsageError;
+  err.__krateDynamicUsage = api;
+  err.digest = 'DYNAMIC_SERVER_USAGE';
+  return err;
+}
+
+export function isDynamicUsageError(err: unknown): err is DynamicUsageError {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as Record<string, unknown>;
+  if (typeof e.__krateDynamicUsage === 'string' && e.__krateDynamicUsage !== '') return true;
+  return e.digest === 'DYNAMIC_SERVER_USAGE';
+}
+
+export function dynamicUsageReason(err: unknown): string {
+  if (!err || typeof err !== 'object') return 'dynamic server usage';
+  const e = err as Record<string, unknown>;
+  if (typeof e.__krateDynamicUsage === 'string' && e.__krateDynamicUsage !== '') return e.__krateDynamicUsage;
+  if (typeof e.message === 'string' && e.message !== '') return e.message;
+  return 'dynamic server usage';
 }

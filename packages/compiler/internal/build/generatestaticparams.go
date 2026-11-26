@@ -539,7 +539,17 @@ func (b *Builder) resolveStaticParamsPage(page string) staticParamsResolution {
 	res.expanded = pages
 
 	// The metadata of every entry resolves in one run (see metadataeval.go).
-	b.prefetchMetadata(page, paramSets, bnd)
+	// Async pages with generateMetadata resolve metadata through the staged SSR
+	// driver alongside their body, so skip the separate build-time eval for them.
+	skipMetaPrefetch := false
+	if prog, perr := parseSourceFile(page, data); perr == nil && entryIsAsync(prog) {
+		if _, hasFn := moduleMetadataExports(string(data)); hasFn {
+			skipMetaPrefetch = true
+		}
+	}
+	if !skipMetaPrefetch {
+		b.prefetchMetadata(page, paramSets, bnd)
+	}
 	return res
 }
 
@@ -734,7 +744,8 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
 		return nil, "", err
 	}
-	renderMode, revalidate, _ := b.resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules, b.importResolver().Resolve)
+	renderMode, revalidate, dataUsage := b.resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules, b.importResolver().Resolve)
+	pageCfg := parsePageConfig(entryModule.Program)
 
 	// Global streaming override: if configured, all *static* pages stream.
 	// Explicit ssr/isr opts win - forcing them to streaming would silently
@@ -742,6 +753,11 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if b.Cfg.SSR.Streaming && renderMode == RenderSSG {
 		renderMode = RenderStreaming
 		fmt.Fprintf(b.stderr(), "  %s*%s %s -> streaming (global override)\n", cCyan, cReset, filepath.Base(spp.PagePath))
+	}
+
+	staticMode := strings.EqualFold(b.Cfg.Output, "static")
+	if staticMode && renderMode != RenderSSG {
+		renderMode = RenderSSG
 	}
 
 	// Bind route params (e.g. slug) to their concrete values, then inline
@@ -758,7 +774,17 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	serverPage, serverErr := b.applyServerComponentMode(spp.PagePath, entryModule, ann, strings.EqualFold(b.Cfg.Output, "static"), layoutCut, &renderMode, &revalidate)
+	scPlan, serverErr := b.applyServerComponentMode(spp.PagePath, entryModule, ann, serverComponentOpts{
+		staticMode: staticMode,
+		isDynRoute: true,
+		hasGSP:     true,
+		staticOnly: !dynamicParamsAllowed(entryModule.Program, staticMode),
+		isExpanded: true,
+		cfg:        pageCfg,
+		dataUsage:  dataUsage,
+		cut:        layoutCut,
+	}, &renderMode, &revalidate)
+	serverPage := scPlan.serverPage
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}
@@ -1046,6 +1072,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		GoBaked:      goBaked,
 
 		ServerPage:        serverPage,
+		Params:            spp.Params,
+		Prerender:         scPlan.prerender,
+		PrerenderRequired: scPlan.prerenderRequired,
+		PrerenderSeedISR:  scPlan.prerenderSeedISR,
 		ServerExports:     serverExportsOf(regions),
 		MetadataSegments:  metaSegs,
 		MetadataPageFiles: metaPageFiles,

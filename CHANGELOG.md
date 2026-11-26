@@ -250,6 +250,15 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- Build-time prerendering for async pages with `generateStaticParams` (and non-dynamic async pages
+  under `output: "static"`): each param set is rendered once through the staged SSR driver with
+  thenable `params`, resolved `<Suspense>` boundaries, `"use client"` island hydration chunks, and
+  merged `generateMetadata`/`metadata` head tags, then written as SSG HTML. Under `output: "static"`,
+  prerenderable async pages succeed with no SSR server in `dist/`, while pages that require
+  request-time APIs (`headers()`, `cookies()`, `searchParams`, `dynamic = "force-dynamic"`, or
+  dynamic async routes without `generateStaticParams`) still report `KR7103`. In non-static mode,
+  pages that read request-only APIs during prerendering fall back to request-time SSR with a note,
+  and ISR pages (`revalidate`) keep ISR while seeding their initial HTML.
 - Experimental `ssr.apiRuntime: "scriptc"` (production only): `krate build` compiles the TypeScript API
   routes that scriptc accepts, from their original sources, into one native executable
   (`.krate/api-scriptc-server`), and `krate serve` runs it as a sidecar behind the same secret,

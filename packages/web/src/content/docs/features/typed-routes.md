@@ -284,7 +284,11 @@ This does two things:
    `dynamicParams = false` unless it opts back in with
    `export const dynamicParams = true`.
 2. **Request-time rendering is disabled** - pages that would have been SSR, ISR,
-   or streaming are built as plain static pages.
+   or streaming are built as plain static pages. Async pages without dynamic
+   segments and dynamic async pages with `generateStaticParams` are prerendered
+   at build time (with no SSR server in the output); pages that genuinely need a
+   server (`dynamic = "force-dynamic"`, `headers()`, `cookies()`, `searchParams`,
+   or dynamic async routes without `generateStaticParams`) fail with `[KR7103]`.
 
 `output: "static"` is the way to guarantee that *only* statically renderable
 routes exist in the build.

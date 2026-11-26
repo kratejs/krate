@@ -52,7 +52,7 @@ export default async function Post({ params }: { params: Promise<{ slug: string 
 | Page | `generateMetadata` runs | Tags are |
 |------|-------------------------|----------|
 | Static (SSG) | once at build time | baked into `index.html` |
-| Static from `generateStaticParams` | once per generated entry (one run for all entries) | baked into each entry's HTML |
+| Static from `generateStaticParams` (sync or async) | once per generated entry | baked into each entry's HTML |
 | Dynamic route that stays a template | at build time, with the route's placeholders; the server fills in each request's value | baked into the template |
 | SSR, ISR, async page | on every render, next to the page, in the same request and cache scope | sent in the head of the response; an ISR entry stores them with the body |
 

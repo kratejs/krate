@@ -36,16 +36,31 @@ async function Comments({ id }) {
 
 ## Async pages
 
-When the page component itself is async, the whole page body renders per
-request:
+When the page component itself is async:
 
-- The page is **SSR**, or **ISR** when it sets `export const revalidate = 60`
-  (or `export const config = { isr: true, revalidate: 60 }`).
-- The static shell contains the layout around an empty page region; there is
-  no build-time body and no hydration script.
+- A dynamic async page with `generateStaticParams` is **prerendered at build
+  time** for every param set returned by `generateStaticParams`, including its
+  layouts and `generateMetadata`/`metadata` head tags, and marked **SSG** in
+  the route manifest. With `output: "static"`, non-dynamic async pages are
+  prerendered the same way and no SSR server is emitted.
+- Pages that opt out (`export const dynamic = "force-dynamic"`,
+  `export const config = { ssr: true }`, `revalidate = 0`, or uncached
+  `no-store` fetches) or read request-only APIs (`headers()`, `cookies()`,
+  `searchParams`) keep **SSR** per-request rendering (or fail with `[KR7103]`
+  when `output: "static"` is set). If a page throws a dynamic-usage bailout
+  during prerendering in non-static mode, Krate falls back to request-time SSR
+  with a note instead of failing the build.
+- Pages with `export const revalidate = 60` (or
+  `export const config = { isr: true, revalidate: 60 }`) keep **ISR**
+  revalidation at request time, and `generateStaticParams` entries seed their
+  initial HTML with the prerendered page instead of an empty shell.
+- Other async pages (dynamic routes without `generateStaticParams`, or
+  non-dynamic async pages without `output: "static"` / `dynamic = "force-static"`)
+  render per request (**SSR**): the static shell contains the layout around an
+  empty page region, with no build-time body and no hydration script.
 - Async children render at any depth. Siblings resolve in parallel and
-  `<Suspense>` renders its resolved children (the response is sent when the
-  page has rendered).
+  `<Suspense>` renders its resolved children (in prerendered pages, every
+  Suspense boundary is resolved in the baked HTML).
 
 ## Async children of a static page
 
@@ -390,7 +405,7 @@ export default async function Post({ params }) {
 | Pattern | Result |
 |---------|--------|
 | `template.tsx` or `error.tsx` below an async layout | Build error `[KR7101]` |
-| Server components with `output: "static"` | Build error `[KR7103]` |
+| Server components that require request-time rendering with `output: "static"` | Build error `[KR7103]` (prerenderable async pages with `generateStaticParams` or without dynamic segments succeed) |
 | Module-level `await` in a page rendered at build time | Build error `[KR7102]` |
 | `async` components in a `"use client"` module | Build error `[KR7113]` |
 | `export * from` in a `"use client"` module | Build error `[KR7114]` |

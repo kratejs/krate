@@ -9,6 +9,9 @@ import { jsx, renderToStringAsync } from "./server.js";
 import { sha256Hex as portableSha256Hex } from "./sha256.js";
 import {
   isNotFoundSignal,
+  isDynamicUsageError,
+  dynamicUsageError,
+  dynamicUsageReason,
   accessDeniedStatus,
   parseCookieHeader,
   redirectTarget,
@@ -88,6 +91,10 @@ export interface RenderRequest {
   // baked shell, in document order. kind is "component" (default) for a
   // runtime/Suspense region or "page" for a coarse whole-page region (SSR/ISR).
   regions?: { id: string; kind?: "component" | "page" }[];
+  // prerender is true during build-time prerendering: request-only APIs
+  // (headers(), cookies(), searchParams) bail out with dynamicUsage instead of
+  // returning empty values, and ISR caching is bypassed.
+  prerender?: boolean;
 }
 
 export type CacheStatus = "hit" | "stale" | "miss";
@@ -99,6 +106,8 @@ export interface RenderResponse {
   notFound?: boolean;
   /** 401 or 403 when the render called unauthorized() or forbidden(). */
   denied?: 401 | 403;
+  /** Request-only API that bailed out a build-time prerender. */
+  dynamicUsage?: string;
   cached?: boolean;
   cacheStatus?: CacheStatus;
   error?: string;
@@ -565,7 +574,8 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
       headers: h,
       cookies: parseCookieHeader(h.get("cookie")),
       params: { ...req.params },
-      searchParams: tracker ? trackedQuery(req.query, tracker) : { ...req.query },
+      searchParams: req.prerender ? {} : tracker ? trackedQuery(req.query, tracker) : { ...req.query },
+      prerender: !!req.prerender,
     };
   }
 
@@ -573,14 +583,47 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     return requestStore.run(requestContextFor(req, tracker), fn);
   }
 
-  // renderSignal maps notFound()/redirect() thrown during a render to a response.
+  // renderSignal maps notFound()/redirect()/dynamic-usage thrown during a render to a response.
   function renderSignal(err: unknown): RenderResponse | null {
+    if (isDynamicUsageError(err)) return { html: "", status: 200, dynamicUsage: dynamicUsageReason(err) };
     if (isNotFoundSignal(err)) return { html: "", status: 404, notFound: true };
     const denied = accessDeniedStatus(err);
     if (denied) return { html: "", status: denied, denied };
     const to = redirectTarget(err);
     if (to) return { html: "", status: redirectStatus(err), redirect: to };
     return null;
+  }
+
+  // prerenderSearchParams returns a thenable Proxy that throws a dynamic-usage
+  // error if page or generateMetadata code reads any key or enumerates it,
+  // while letting pages that merely receive props without reading searchParams
+  // prerender cleanly.
+  function prerenderSearchParams(): Record<string, string> & PromiseLike<Record<string, string>> {
+    const makeProxy = (): Record<string, string> =>
+      new Proxy({} as Record<string, string>, {
+        get(obj, prop, recv) {
+          if (typeof prop === "string" && prop !== "then" && prop !== "toJSON" && prop !== "constructor") {
+            throw dynamicUsageError("searchParams");
+          }
+          return Reflect.get(obj, prop, recv);
+        },
+        has(_obj, prop) {
+          if (typeof prop === "string" && prop !== "then" && prop !== "toJSON" && prop !== "constructor") {
+            throw dynamicUsageError("searchParams");
+          }
+          return false;
+        },
+        ownKeys() {
+          throw dynamicUsageError("searchParams");
+        },
+        getOwnPropertyDescriptor(obj, prop) {
+          if (typeof prop === "string" && prop !== "then" && prop !== "toJSON" && prop !== "constructor") {
+            throw dynamicUsageError("searchParams");
+          }
+          return Reflect.getOwnPropertyDescriptor(obj, prop);
+        },
+      });
+    return thenable(makeProxy(), makeProxy);
   }
 
   function buildProps(req: RenderRequest, tracker?: QueryTracker): Record<string, any> {
@@ -595,6 +638,10 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     // request without them keeps params undefined, as before.
     const props: Record<string, any> = {};
     if (req.params) props.params = thenableRecord(req.params);
+    if (req.prerender) {
+      props.searchParams = prerenderSearchParams();
+      return props;
+    }
     if (tracker) {
       // Reads through the view are recorded; awaiting it resolves to another
       // tracked view so `const { page } = await searchParams` records "page".
@@ -660,7 +707,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
 
       // An uncacheable read (no-store) keeps the render out of the ISR cache, and
       // a revalidation that landed mid-render means the HTML may be stale.
-      if (page.mode === "isr" && !scope.noStore && !invalidated) {
+      if (!req.prerender && page.mode === "isr" && !scope.noStore && !invalidated) {
         recordQueryReads(req, tracker);
         await isrStore.set(pageKey(req) as string, {
           html,
@@ -757,7 +804,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     }
 
     // ISR: serve from cache with stale-while-revalidate.
-    if (page.mode === "isr") {
+    if (!req.prerender && page.mode === "isr") {
       const interval = page.revalidate || 60;
       pageIntervals.set(page.route, interval);
       const key = pageKey(req);
@@ -1085,6 +1132,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     if (result.cacheStatus) frame.cacheStatus = result.cacheStatus;
     if (result.notFound) frame.notFound = true;
     if (result.denied) frame.denied = result.denied;
+    if (result.dynamicUsage) frame.dynamicUsage = result.dynamicUsage;
     if (result.redirect) frame.redirect = result.redirect;
     if (result.error) frame.error = result.error;
     if (result.digest) frame.digest = result.digest;

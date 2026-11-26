@@ -135,6 +135,18 @@ type PageResult struct {
 	// ServerPage is true when the page component itself is async: the whole
 	// page body renders per request in the SSR sidecar (no build-time body).
 	ServerPage bool
+	// Params holds the concrete route params of an expanded generateStaticParams
+	// page.
+	Params map[string]string
+	// Prerender marks an async page to render once through the staged SSR
+	// driver at build time and bake into its HTML output.
+	Prerender bool
+	// PrerenderRequired forbids falling back to request-time rendering when
+	// prerendering encounters request-only APIs (for example output: "static").
+	PrerenderRequired bool
+	// PrerenderSeedISR keeps RenderISR at runtime while seeding the initial
+	// baked HTML inside the coarse page region.
+	PrerenderSeedISR bool
 	// ServerExports lists the async server components rendered as regions of
 	// this page; the page server bundle exports each one (serverbundle.go).
 	ServerExports []ServerExport
@@ -1080,6 +1092,19 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	}
 	dl.Lap("7-shared-chunks")
 
+	// Prerender async pages that have concrete params (or static output) before
+	// writing HTML so their baked files carry the rendered body and metadata.
+	if hasPrerenderPages(results) {
+		preBundles := b.rebuildClientSSRModules(ssrBundlePages(results))
+		if err := b.writeHighlightTables(preBundles); err != nil {
+			return results, err
+		}
+		for _, perr := range b.prerenderAsyncPages(results, preBundles) {
+			fmt.Fprintf(b.stderr(), "\n  %sx Error:%s %v\n", cRed, cReset, perr)
+			pageErrs = append(pageErrs, perr)
+		}
+	}
+
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, globalCSS, runtimeJS)
 	dl.Lap("8-html")
@@ -1593,6 +1618,31 @@ func (b *Builder) BuildAll() error {
 	}
 	wl.Lap("shared-chunks")
 
+	// Prerender eligible async pages (generateStaticParams entries and static
+	// output async pages) through the staged SSR driver before writing HTML, so
+	// head merging, SEO/CSP, minification, content-hashing and chunk checks all
+	// run on the final prerendered documents.
+	implsWaited := false
+	highlightsWritten := false
+	if hasPrerenderPages(results) {
+		<-implsDone
+		implsWaited = true
+		if err := b.writeHighlightTables(serverBundles); err != nil {
+			failOutput(err)
+		}
+		highlightsWritten = true
+		if len(serverBundleErrs) == 0 {
+			for _, perr := range b.prerenderAsyncPages(results, serverBundles) {
+				detail := errWithHint(perr)
+				fmt.Fprintf(b.stderr(), "\n  %sx Error:%s %s\n", cRed, cReset, detail)
+				failureMessages = append(failureMessages, "  "+detail)
+				failureErrs = append(failureErrs, perr)
+			}
+			serverBundles = b.pruneUnusedServerArtifacts(results, serverBundles)
+		}
+		wl.Lap("prerender")
+	}
+
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, globalCSS, runtimeJS)
 	wl.Lap("html")
@@ -1713,10 +1763,14 @@ func (b *Builder) BuildAll() error {
 	tl.Lap("manifest")
 
 	// Compile server bundles for SSR/ISR/streaming pages
-	<-implsDone
+	if !implsWaited {
+		<-implsDone
+	}
 	tl.Lap("server-bundles-wait")
-	if err := b.writeHighlightTables(serverBundles); err != nil {
-		failOutput(err)
+	if !highlightsWritten {
+		if err := b.writeHighlightTables(serverBundles); err != nil {
+			failOutput(err)
+		}
 	}
 	for _, err := range serverBundleErrs {
 		failureMessages = append(failureMessages, "  "+err.Error())
@@ -2847,7 +2901,18 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	serverPage, serverErr := b.applyServerComponentMode(page, entryModule, ann, staticMode, layoutCut, &renderMode, &revalidate)
+	hasGSP := isDynRoute && (hasGenerateStaticParams(entryModule.Program) || gspExportRe.MatchString(entryModule.SourceCode))
+	scPlan, serverErr := b.applyServerComponentMode(page, entryModule, ann, serverComponentOpts{
+		staticMode: staticMode,
+		isDynRoute: isDynRoute,
+		hasGSP:     hasGSP,
+		staticOnly: staticOnly,
+		isExpanded: false,
+		cfg:        parsePageConfig(entryModule.Program),
+		dataUsage:  dataUsage,
+		cut:        layoutCut,
+	}, &renderMode, &revalidate)
+	serverPage := scPlan.serverPage
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}
@@ -3443,6 +3508,9 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		Program:           entryModule.Program,
 		GoBaked:           goBaked,
 		ServerPage:        serverPage,
+		Prerender:         scPlan.prerender,
+		PrerenderRequired: scPlan.prerenderRequired,
+		PrerenderSeedISR:  scPlan.prerenderSeedISR,
 		ServerExports:     serverExportsOf(regions),
 		MetadataSegments:  metaSegs,
 		MetadataPageFiles: metaPageFiles,

@@ -34,16 +34,26 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 	return compileServerBundlesWith(impls, results, root, outDir, sourcemap, actionModules, actionBasePath, nil)
 }
 
-// ssrBundlePages returns the non-SSG pages that need the Node renderer. A
-// streaming page whose regions are all Go (or that has no dynamic regions at
-// all) is rendered by the Go server + Go host alone, so its page bundle is
-// never loaded.
+// ssrBundlePages returns one representative non-SSG page per unique SourcePath
+// that needs the Node renderer. Expanded generateStaticParams pages share a
+// single source file and therefore a single compiled server bundle. A streaming
+// page whose regions are all Go (or that has no dynamic regions at all) is
+// rendered by the Go server + Go host alone, so its page bundle is never loaded.
 func ssrBundlePages(results []*PageResult) []*PageResult {
+	bySource := make(map[string]int)
 	var ssrPages []*PageResult
 	for _, r := range results {
-		if r.Mode != RenderSSG && r.SourcePath != "" && pageNeedsNodeServerBundle(r) {
-			ssrPages = append(ssrPages, r)
+		if r == nil || r.Mode == RenderSSG || r.SourcePath == "" || !pageNeedsNodeServerBundle(r) {
+			continue
 		}
+		if idx, seen := bySource[r.SourcePath]; seen {
+			if r.IsDynamicTemplate && !ssrPages[idx].IsDynamicTemplate {
+				ssrPages[idx] = r
+			}
+			continue
+		}
+		bySource[r.SourcePath] = len(ssrPages)
+		ssrPages = append(ssrPages, r)
 	}
 	return ssrPages
 }

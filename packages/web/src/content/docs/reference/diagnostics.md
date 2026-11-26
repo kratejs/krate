@@ -318,7 +318,7 @@ Only async components (server components) can await: they render per request in 
 
 **Server components need request-time rendering**
 
-An async component renders per request, but `output: "static"` disables the SSR sidecar, so the page cannot render it. Remove `output: "static"` or make the component synchronous.
+With `output: "static"`, async pages without dynamic segments and dynamic async pages with `generateStaticParams` are prerendered at build time. Pages that require a server at request time (dynamic routes without `generateStaticParams`, `export const dynamic = "force-dynamic"`, `headers()`, `cookies()`, `searchParams`, or async child components of a synchronous page) cannot be prerendered statically. Remove `output: "static"`, add `generateStaticParams`, stop reading request-only APIs, or make the component synchronous.
 
 ### KR7104
 
