@@ -464,6 +464,12 @@ An `opengraph-image` or `twitter-image` file inside a dynamic segment (`blog/[sl
 
 A `sitemap.ts`, `robots.ts` or `manifest.ts` that exports `dynamic = "force-dynamic"` or a `revalidate` runs per request on the server. This one sits in a dynamic segment (`blog/[slug]/`), where a per-request route has no URL to answer, so it still runs once at build time and the export is ignored. Move the file to a static directory or remove the export. This is a warning.
 
+### KR7135
+
+**Static route handler failed or needs request-time execution**
+
+A build-time route handler (`src/pages/**/route.ts`, or a `src/api/**` route under `output: "static"` or with `export const dynamic = "force-static"` or `generateStaticParams`) runs at build time and writes its GET response to `dist/`. It must export `GET` only (no POST, PUT, PATCH, DELETE or default handler), provide `generateStaticParams` for any dynamic segment, return a 2xx Response or ImageResponse, and avoid reading request-only APIs (`headers()`, `cookies()`, `request.headers`, `request.cookies`, `searchParams`). For request-time handlers, place the file in `src/api/` without `output: "static"` or `dynamic = "force-static"`.
+
 ### KR7140
 
 **Tailwind input found but Tailwind is not enabled**

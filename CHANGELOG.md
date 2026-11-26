@@ -250,6 +250,16 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- Build-time (static) route handlers: GET-only route handlers under `src/pages/**/route.{ts,tsx,js,jsx}`
+  (mapped directly to their public URL, route groups stripped) and `src/api/**` routes under
+  `output: "static"`, with `export const dynamic = "force-static"`, or with `generateStaticParams` now
+  run at build time and write their responses directly to `dist/` with no runtime API sidecar. Dynamic
+  segments (`[slug]`, `[...slug]`, `[[...slug]]`) expand via `generateStaticParams()`, `ImageResponse`
+  handlers render PNGs in pure Go, parent-directory collisions write `<url>/index.<ext>` with a `200`
+  rewrite, and extensionless outputs record their `Content-Type` in `dist/.krate/static-routes.json` for
+  `krate serve` and static deploy adapters (`_headers`, `_redirects`, `vercel.json`). Non-GET handlers,
+  `dynamic = "force-dynamic"`, missing `generateStaticParams`, and request-dependent reads (`headers()`,
+  `cookies()`, `request.headers`, `request.cookies`, `searchParams`) fail with `KR7135`.
 - Build-time prerendering for async pages with `generateStaticParams` (and non-dynamic async pages
   under `output: "static"`): each param set is rendered once through the staged SSR driver with
   thenable `params`, resolved `<Suspense>` boundaries, `"use client"` island hydration chunks, and
@@ -660,6 +670,17 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate migrate nextjs` now translates `output: 'export'` to `output: "static"` in `krate.config.ts`
+  and migrates static GET-only route handlers (under `output: 'export'` or with
+  `export const dynamic = "force-static"`) directly to build-time static routes at their original URL
+  (`src/pages/**/route.*` for routes outside `app/api`, `src/api/**` under `app/api`) with no `/api/`
+  rewrite while keeping `generateStaticParams` and leaving request-time route handlers unchanged.
+- Metadata routes (`sitemap.ts`, `robots.ts`, `manifest.ts`, `opengraph-image.tsx`, `twitter-image.tsx`)
+  and `generateStaticParams` / prerendered endpoints now execute with `process.cwd()` set to the project
+  root instead of `src/pages/`, run after `BeforeBuild` and `prepareContent()` so `krate/content` and
+  generated pages are available, allow dynamic image routes to supply their own `generateStaticParams()`,
+  recognize root-level route-group convention files in plugin override checks, and diagnose per-request
+  metadata routes (`force-dynamic` / `revalidate`) under `output: "static"`.
 - Build-time evaluation now supports JavaScript regular expressions (literals and `new RegExp(...)`),
   stored in locals, module constants, or objects and used with `exec`, `test`, `lastIndex`,
   `String.prototype.match`, `matchAll`, `replace`, `replaceAll` (string and callback replacers),

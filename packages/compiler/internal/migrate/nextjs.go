@@ -30,9 +30,12 @@ const nextFramework = "nextjs"
 type FileKind string
 
 const (
-	KindPage         FileKind = "page"
-	KindLayout       FileKind = "layout"
-	KindAPI          FileKind = "api"
+	KindPage   FileKind = "page"
+	KindLayout FileKind = "layout"
+	KindAPI    FileKind = "api"
+	// KindStaticRoute is a GET-only route handler migrated for build-time
+	// static generation (under src/pages/**/route.* or src/api/**).
+	KindStaticRoute  FileKind = "static-route"
 	KindLoading      FileKind = "loading"
 	KindNotFound     FileKind = "not-found"
 	KindForbidden    FileKind = "forbidden"
@@ -269,7 +272,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	}
 	if hasApp {
 		rep.Detected = append(rep.Detected, appPrefix+"/")
-		if err := scanNextApp(abs, appDir, appPrefix, rep); err != nil {
+		if err := scanNextApp(abs, appDir, appPrefix, nextCfg.Output == "static", rep); err != nil {
 			return nil, err
 		}
 	}
@@ -455,7 +458,7 @@ func scopedAppDirs(appDir string) map[string]bool {
 	return out
 }
 
-func scanNextApp(root, appDir, prefix string, rep *Report) error {
+func scanNextApp(root, appDir, prefix string, staticExport bool, rep *Report) error {
 	scoped := scopedAppDirs(appDir)
 	return filepath.WalkDir(appDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -506,6 +509,49 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 			rep.Files = append(rep.Files, planned(root, source, layoutFile("src/pages", fsRoute, ext), KindLayout, ext, rep))
 		case "route":
 			apiPath := strings.TrimPrefix(route, "api/")
+			raw, _ := os.ReadFile(path)
+			rh := classifyNextRouteHandler(string(raw))
+			isStatic := rh.hasGET && !rh.hasNonGET && !rh.forceDynamic && (staticExport || rh.forceStatic)
+			if isStatic {
+				if apiPath == route {
+					if fsRoute == "." || fsRoute == "" || route == "." {
+						rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "route handler at the app root cannot become a static route at /", Hint: "a static file at / would shadow the home page; move it to a named path or into src/api"})
+						return nil
+					}
+					target := segmentFile("src/pages", fsRoute, "route", ext)
+					pf := planned(root, source, target, KindStaticRoute, ext, rep)
+					note := "migrated as a build-time static route at /" + route + " (no /api rewrite)"
+					if rh.hasGSP {
+						note += " with generateStaticParams"
+					}
+					pf.Rewrites = append(pf.Rewrites, note)
+					rep.Files = append(rep.Files, pf)
+					rep.Info = append(rep.Info, source+": migrated GET route handler as a build-time static route ("+target+") at /"+route)
+					return nil
+				}
+				if apiPath == "." || apiPath == "" {
+					apiPath = "index"
+				}
+				target := routeFile("src/api", apiPath, ext)
+				pf := planned(root, source, target, KindStaticRoute, ext, rep)
+				pf.Rewrites = append(pf.Rewrites, "build-time static GET API route at /api/"+apiPath)
+				rep.Files = append(rep.Files, pf)
+				rep.Info = append(rep.Info, source+": migrated GET API route handler ("+target+") for build-time static generation at /api/"+apiPath)
+				return nil
+			}
+			if staticExport && (rh.hasNonGET || rh.forceDynamic || !rh.hasGET) {
+				reason := "route handler is not a static GET-only handler under output: 'export'"
+				if rh.forceDynamic {
+					reason = "route handler exports dynamic = \"force-dynamic\" under output: 'export'"
+				} else if rh.hasNonGET {
+					reason = "route handler exports non-GET HTTP methods under output: 'export'"
+				}
+				rep.Manual = append(rep.Manual, ManualItem{
+					Source: source,
+					Reason: reason,
+					Hint:   "output: \"static\" cannot run request-time API handlers; remove output: \"static\" or convert to a static GET handler",
+				})
+			}
 			if apiPath == route {
 				apiPath = route
 				if rw, ok := routeRewrite(route, apiPath); ok {
@@ -648,7 +694,7 @@ func planned(root, source, target string, kind FileKind, ext string, rep *Report
 		return f
 	}
 	body, rewrites, manual := rewriteNextSource(string(data), kind)
-	if kind == KindAPI {
+	if kind == KindAPI || kind == KindStaticRoute {
 		var apiRewrites, apiManual []string
 		body, apiRewrites, apiManual = rewriteAPIServerSource(body)
 		rewrites = append(rewrites, apiRewrites...)
@@ -682,7 +728,7 @@ func applyManual(src string, kind FileKind) []string {
 			out = append(out, c.reason)
 		}
 	}
-	if kind != KindAPI && kind != KindModule && (strings.Contains(src, "from 'next/server'") || strings.Contains(src, `from "next/server"`)) {
+	if kind != KindAPI && kind != KindStaticRoute && kind != KindModule && (strings.Contains(src, "from 'next/server'") || strings.Contains(src, `from "next/server"`)) {
 		out = append(out, "next/server request/response helpers need a Request/Response migration")
 	}
 	for _, m := range segmentConfigExport.FindAllStringSubmatch(src, -1) {
@@ -917,6 +963,12 @@ func routeInventory(rep *Report) []Route {
 			route = pageRoute(f.Target)
 		case KindAPI:
 			route = apiRoute(f.Target)
+		case KindStaticRoute:
+			if strings.HasPrefix(filepath.ToSlash(f.Target), "src/api/") {
+				route = apiRoute(f.Target)
+			} else {
+				route = staticHandlerRoute(f.Target)
+			}
 		}
 		if route == "" {
 			continue
@@ -1419,7 +1471,7 @@ func linkRelativeImports(rep *Report) {
 	g := newLocalGraph(rep, assets)
 	for i := range rep.Files {
 		f := &rep.Files[i]
-		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindMetadataRoute && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError && f.Kind != KindAsset && f.Kind != KindLoading && f.Kind != KindMiddleware) {
+		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindStaticRoute && f.Kind != KindMetadataRoute && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError && f.Kind != KindAsset && f.Kind != KindLoading && f.Kind != KindMiddleware) {
 			continue
 		}
 		body, rewrites, unresolved, deps := rewriteRelativeImportsWith(string(f.Content), f.Source, f.Target, assets, g.resolveRelative)

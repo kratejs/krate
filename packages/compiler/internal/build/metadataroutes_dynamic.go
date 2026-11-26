@@ -233,10 +233,11 @@ export async function GET(request: Request, ctx?: { params?: unknown }) {
 
 // dynamicMetaRoute reports whether f runs per request, with its cache window.
 // A route in a dynamic segment cannot be served this way and stays static.
-func (b *Builder) dynamicMetaRoute(f metaRouteFile) (bool, int) {
+// Under output: "static", a per-request metadata route fails the build.
+func (b *Builder) dynamicMetaRoute(f metaRouteFile) (bool, int, error) {
 	src, err := os.ReadFile(f.Path)
 	if err != nil {
-		return false, 0
+		return false, 0, nil
 	}
 	dynamic, revalidate := metaRouteSchedule(string(src))
 	if dynamic && strings.Contains(f.URLDir, "[") {
@@ -245,9 +246,14 @@ func (b *Builder) dynamicMetaRoute(f metaRouteFile) (bool, int) {
 			Message: filepath.Base(f.Path) + " exports dynamic or revalidate, but it is in a dynamic segment (" + f.URLDir + "), so it still runs once at build time",
 			Hint:    "move it to a static directory, or remove the export",
 		}})
-		return false, 0
+		return false, 0, nil
 	}
-	return dynamic, revalidate
+	if dynamic && b.Cfg != nil && strings.EqualFold(b.Cfg.Output, "static") {
+		return false, 0, b.routeErr(f,
+			filepath.Base(f.Path)+" exports dynamic = \"force-dynamic\" or revalidate, which needs request-time rendering, but output is \"static\"",
+			"remove `output: \"static\"` from the config, or export `dynamic = \"force-static\"` (and remove `revalidate`) so it builds at build time")
+	}
+	return dynamic, revalidate, nil
 }
 
 // buildDynamicDataRoute compiles a per-request sitemap, robots or manifest

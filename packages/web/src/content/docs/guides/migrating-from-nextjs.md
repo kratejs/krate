@@ -166,7 +166,8 @@ The first pass:
   same name (see [Self-hosting](/docs/guides/self-hosting/)); computed ones get an item.
   `output: 'standalone'` becomes `deploy: { target: "node" }`; in the package update
   the `build` script becomes `krate deploy` (it builds first, then bundles the
-  server) and `start` becomes `node dist/.krate/server/server.mjs`. A static
+  server) and `start` becomes `node dist/.krate/server/server.mjs`. `output: 'export'`
+  becomes `output: "static"` in `krate.config.ts`. A static
   `outputFileTracingRoot` (`path.resolve(import.meta.dirname, '../..')` and the
   `__dirname`, `process.cwd()` and `fileURLToPath` forms) becomes the
   `outputFileTracingRoot` key, `start` points at
@@ -203,12 +204,17 @@ The first pass:
   (`<link rel="icon">`, `<link rel="apple-touch-icon">`). Icons inside a
   segment are copied but need their `<link>` added by hand. Dynamic `icon.tsx`
   and `apple-icon.tsx` are manual items;
-- keeps the public URL of route handlers outside `app/api`: they move under
+- migrates static GET-only route handlers (`output: 'export'` in `next.config`,
+  or a handler exporting `export const dynamic = "force-static"`) directly to
+  build-time static route handlers at their original URL (`src/pages/<path>/route.*`
+  for routes outside `app/api`, or `src/api/<path>.*` for routes under `app/api`),
+  preserving `generateStaticParams` and adding no `/api/` rewrite. Request-time
+  route handlers outside `app/api` keep the previous behavior: they move under
   `/api/`, and the plan adds a `rewrites` entry from the old path (`/r/[code]`
   becomes `/r/:code` to `/api/r/:code`; catch-alls use `:path+` and `:path*`).
   `krate serve` and `krate dev` answer such a rewrite from the API handler. A
-  handler at the app root (`app/route.ts`) is a manual item, because a rewrite
-  for `/` would shadow the home page. Deploy targets that do not run the Krate
+  handler at the app root (`app/route.ts`) is a manual item, because a route or
+  rewrite for `/` would shadow the home page. Deploy targets that do not run the Krate
   server may not apply the rewrite;
 - leaves inline `"use server"` functions (a directive inside a function body, the
   Auth.js `signOut` pattern) as they are: the build hoists them into server

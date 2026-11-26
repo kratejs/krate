@@ -275,7 +275,11 @@ func (b *Builder) runGSPBundle(abs, target string, bnd *bundler.Bundler, virtual
 		return nil, fmt.Errorf("unsupported runtime %q for generateStaticParams (want node, bun, or deno)", runtime)
 	}
 	cmd := execx.Command(ctx, cmdName, args...)
-	cmd.Dir = filepath.Dir(abs)
+	if b.Root != "" {
+		cmd.Dir = b.Root
+	} else {
+		cmd.Dir = filepath.Dir(abs)
+	}
 	if len(b.Env) > 0 {
 		cmd.Env = append(os.Environ(), environ.KVList(b.Env)...)
 	}

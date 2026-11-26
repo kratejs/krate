@@ -310,7 +310,11 @@ func (b *Builder) runBootstrapBundle(abs, source, prefix string, bnd *bundler.Bu
 		cmdName, args = "deno", []string{"run", "--allow-net", "--allow-read", "--allow-env", "--allow-sys", path}
 	}
 	cmd := execx.Command(ctx, cmdName, args...)
-	cmd.Dir = filepath.Dir(abs)
+	if b.Root != "" {
+		cmd.Dir = b.Root
+	} else {
+		cmd.Dir = filepath.Dir(abs)
+	}
 	if len(b.Env) > 0 {
 		cmd.Env = append(os.Environ(), environ.KVList(b.Env)...)
 	}
@@ -326,7 +330,7 @@ func (b *Builder) runBootstrapBundle(abs, source, prefix string, bnd *bundler.Bu
 		return nil, err
 	}
 	// The module may print before the result; the result is the last line.
-	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
 	return []byte(lines[len(lines)-1]), nil
 }
 

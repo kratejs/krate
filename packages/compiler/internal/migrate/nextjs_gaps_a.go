@@ -303,7 +303,7 @@ func addAPIRewrites(next *nextConfigData, rep *Report) {
 func flagInlineUseServer(rep *Report) {
 	for _, f := range rep.Files {
 		switch f.Kind {
-		case KindPage, KindLayout, KindLoading, KindAsset, KindModule, KindAPI, KindNotFound, KindForbidden, KindUnauthorized, KindError, KindMetadataRoute:
+		case KindPage, KindLayout, KindLoading, KindAsset, KindModule, KindAPI, KindStaticRoute, KindNotFound, KindForbidden, KindUnauthorized, KindError, KindMetadataRoute:
 		default:
 			continue
 		}
@@ -345,7 +345,7 @@ func rewriteTestImports(rep *Report) {
 	routes := map[string]string{}
 	for _, f := range rep.Files {
 		switch f.Kind {
-		case KindPage, KindLayout, KindAPI, KindNotFound, KindError:
+		case KindPage, KindLayout, KindAPI, KindStaticRoute, KindNotFound, KindError:
 			if f.Source != "" {
 				routes[f.Source] = f.Target
 			}

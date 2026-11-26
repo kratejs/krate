@@ -7,7 +7,8 @@ order: 7
 # Metadata routes
 
 The Next.js metadata file conventions work as files in the pages directory. By
-default they run once at build time (on Node, with your project's environment)
+default they run once at build time (on Node, with your project's environment,
+`process.cwd()` set to the project root, and `krate/content` available)
 and write static files, so they work on every deploy target. A `sitemap.ts`,
 `robots.ts` or `manifest.ts` can instead run per request (see
 [Per-request routes](#per-request-routes)).
@@ -84,6 +85,8 @@ export default async function robots() {
   sidecar when the first per-request route is added.
 - Static-only deploy targets (`gh-pages` and others without a server) refuse the
   project and name these routes; `--static-only` publishes the pages without them.
+  Under `output: "static"`, a `sitemap.ts`, `robots.ts` or `manifest.ts`
+  exporting `dynamic = "force-dynamic"` or `revalidate` fails the build (`KR7130`).
 - A file in a dynamic segment (`blog/[slug]/sitemap.ts`) cannot answer a URL
   per request and keeps running at build time (`KR7134`).
 
@@ -110,8 +113,8 @@ export default async function Image({ params }: { params: Promise<{ slug: string
 ```
 
 - In a dynamic segment the file runs once per `generateStaticParams` entry of the
-  segment's page. Without a matching page or `generateStaticParams` nothing is
-  built and you get a `KR7132` warning.
+  segment's page, or of the image route itself when it exports `generateStaticParams`.
+  Without either, nothing is built and you get a `KR7132` warning.
 - `alt`, `size` and `contentType` exports set `og:image:alt`, the width/height
   tags and `og:image:type`. `generateImageMetadata({ params })` returns a list of
   `{ id, alt, size, contentType }` for several images per segment; the default

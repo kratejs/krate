@@ -108,9 +108,18 @@ func Emit(target string, cfg *config.Config, root, outDir string, opts ...Option
 		return emitDocker(cfg, root, outDir)
 	}
 	// Read the manifest before the server-only .krate directory is removed.
+	staticRoutes := LoadStaticRoutes(outDir)
 	auto := immutableRules(cfg, outDir, LoadHashedAssets(outDir))
+	if srHeaders := staticRouteHeaderRules(cfg, outDir, staticRoutes); len(srHeaders) > 0 {
+		auto.rules = append(srHeaders, auto.rules...)
+	}
 	if target == "cloudflare" {
 		auto = auto.capped(outDir, len(cfg.Headers), cloudflareMaxHeaderRules)
+	}
+	if srRewrites := staticRouteRewrites(staticRoutes); len(srRewrites) > 0 {
+		cfgCopy := *cfg
+		cfgCopy.Rewrites = append(append([]config.Rewrite(nil), srRewrites...), cfg.Rewrites...)
+		cfg = &cfgCopy
 	}
 	features := ServerFeatures(root, outDir)
 	if WantsServer(target, features, opt.StaticOnly) {

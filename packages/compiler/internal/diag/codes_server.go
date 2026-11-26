@@ -37,6 +37,8 @@ const (
 	CodePagesEndpoint Code = "KR7121"
 	// CodeMetadataNotStatic: a page's metadata export has no build-time value.
 	CodeMetadataNotStatic Code = "KR7122"
+	// CodeStaticRouteHandler: a build-time (static) route handler failed or uses request-only APIs.
+	CodeStaticRouteHandler Code = "KR7135"
 )
 
 func init() {
@@ -67,6 +69,17 @@ func init() {
 				"The build fails when the module has no `GET` export, `GET` throws, answers a non-2xx status, or the " +
 				"name has a dynamic segment. Endpoints run on Node (or the configured runtime) with the " +
 				"project's environment. For a response that depends on the request, use an API route in `src/api`.",
+		},
+		CodeInfo{
+			Code:  CodeStaticRouteHandler,
+			Title: "Static route handler failed or needs request-time execution",
+			Explanation: "A build-time route handler (`src/pages/**/route.ts`, or a `src/api/**` route under " +
+				"`output: \"static\"` or with `export const dynamic = \"force-static\"` or `generateStaticParams`) " +
+				"runs at build time and writes its GET response to `dist/`. It must export `GET` only (no POST, " +
+				"PUT, PATCH, DELETE or default handler), provide `generateStaticParams` for any dynamic segment, " +
+				"return a 2xx Response or ImageResponse, and avoid reading request-only APIs (`headers()`, " +
+				"`cookies()`, `request.headers`, `request.cookies`, `searchParams`). For request-time handlers, " +
+				"place the file in `src/api/` without `output: \"static\"` or `dynamic = \"force-static\"`.",
 		},
 		CodeInfo{
 			Code:  CodeExportCollision,

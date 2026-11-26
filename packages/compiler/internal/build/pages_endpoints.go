@@ -77,7 +77,7 @@ func findPagesStrays(dir string) pagesStrays {
 		}
 		rel = filepath.ToSlash(rel)
 		base := filepath.Base(path)
-		if strings.HasPrefix(base, "_") {
+		if strings.HasPrefix(base, "_") || isPagesRouteHandler(path) {
 			return nil
 		}
 		switch {
@@ -253,7 +253,11 @@ func (b *Builder) runEndpointBundle(abs, route string, bnd *bundler.Bundler) ([]
 		cmdName, args = "deno", []string{"run", "--allow-net", "--allow-read", "--allow-env", "--allow-sys", path}
 	}
 	cmd := execx.Command(ctx, cmdName, args...)
-	cmd.Dir = filepath.Dir(abs)
+	if b.Root != "" {
+		cmd.Dir = b.Root
+	} else {
+		cmd.Dir = filepath.Dir(abs)
+	}
 	if len(b.Env) > 0 {
 		cmd.Env = append(os.Environ(), environ.KVList(b.Env)...)
 	}

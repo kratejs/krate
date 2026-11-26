@@ -1220,12 +1220,6 @@ func (b *Builder) BuildAll() error {
 	if err := validateRouteTree(pages, b.Cfg.PagesDir); err != nil {
 		return early.finish(err)
 	}
-	// Metadata routes (sitemap, robots, manifest, opengraph-image) run first:
-	// the pages' <head> carries the image URLs they produce. A failing route
-	// only leaves its own output (and image URLs) out.
-	for _, err := range b.buildMetadataRoutes(pages) {
-		early.add("Metadata route error", err)
-	}
 	// Intercepting slot pages are built as fragments the SPA router swaps
 	// into their slot (see parallel.go).
 	pages = append(pages, findInterceptPages(b.Cfg.PagesDir)...)
@@ -1345,6 +1339,13 @@ func (b *Builder) BuildAll() error {
 		return early.finish(&ContentValidationError{Errors: cres.Validation})
 	}
 
+	// Metadata routes (sitemap, robots, manifest, opengraph-image) run after
+	// BeforeBuild and prepareContent (so they see krate/content and generated
+	// pages) and before page builds (so page <head> tags carry their images).
+	for _, err := range b.buildMetadataRoutes(pages) {
+		early.add("Metadata route error", err)
+	}
+
 	// Build the Go host (API routes + components) before pages, so pages that
 	// import Go components can render them through the host at build time.
 	if err := b.BuildAllGoAPI(); err != nil {
@@ -1355,16 +1356,24 @@ func (b *Builder) BuildAll() error {
 	if err := b.contextErr(); err != nil {
 		return err
 	}
-	// JS API routes do not depend on the pages: compile them while the pages
-	// build. Every return below waits for them.
-	jsAPIDone := make(chan error, 1)
+	// JS API routes do not depend on the pages: compile request-time routes
+	// while the pages build, and collect static API routes for build-time
+	// evaluation after HTML pages are written. Every return below waits for them.
+	type jsAPIResult struct {
+		staticRoutes []staticRouteSource
+		err          error
+	}
+	jsAPIDone := make(chan jsAPIResult, 1)
 	go pprof.Do(context.Background(), pprof.Labels("phase", "api-routes"), func(context.Context) {
 		defer b.phase("parallel:api-routes")()
-		var err error
-		if perr := safe.Run(func() error { err = b.buildJSAPI(); return nil }); perr != nil {
-			err = perr
+		var res jsAPIResult
+		if perr := safe.Run(func() error {
+			res.staticRoutes, res.err = b.buildJSAPIWithStatic()
+			return nil
+		}); perr != nil {
+			res.err = perr
 		}
-		jsAPIDone <- err
+		jsAPIDone <- res
 	})
 	totalPages := len(pages) + len(routes)
 	resultsCh := make(chan pageBuildResult, totalPages)
@@ -1720,8 +1729,16 @@ func (b *Builder) BuildAll() error {
 		failureErrs = append(failureErrs, err)
 	}
 	tl.Lap("endpoints")
-	apiErr := <-jsAPIDone
+	jsAPIRes := <-jsAPIDone
+	apiErr := jsAPIRes.err
 	tl.Lap("api-wait")
+	staticRouteSources := append(findPagesRouteHandlers(b.Cfg.PagesDir), jsAPIRes.staticRoutes...)
+	for _, err := range b.buildStaticRoutes(staticRouteSources) {
+		fmt.Fprintf(b.stderr(), "  %sStatic route error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{err}), "\n", "\n    "))
+		failureMessages = append(failureMessages, "  static-route: "+err.Error())
+		failureErrs = append(failureErrs, err)
+	}
+	tl.Lap("static-routes")
 	if apiErr == nil {
 		apiErr = b.BuildAllGoAPI()
 	}
@@ -4254,6 +4271,9 @@ func findPages(dir string) ([]string, error) {
 		if isMetadataRouteFile(base) {
 			return nil // sitemap.ts, robots.ts, opengraph-image.tsx...: built by buildMetadataRoutes
 		}
+		if isPagesRouteHandler(path) {
+			return nil // route.ts / route.tsx: build-time static route handler, built by buildStaticRoutes
+		}
 		if !strings.HasPrefix(base, "_") && !isRouteConventionFile(base) && !isUseServerFile(path) {
 			pages = append(pages, path)
 		}
@@ -5663,23 +5683,56 @@ func apiRouteSourceFiles(apiSrcDir string) ([]string, error) {
 	return out, err
 }
 
-// buildJSAPI compiles the JS/TS API routes.
+// buildJSAPI compiles JS/TS API routes and evaluates any static ones at build time.
 func (b *Builder) buildJSAPI() error {
+	staticRoutes, err := b.buildJSAPIWithStatic()
+	if err != nil {
+		return err
+	}
+	if errs := b.buildStaticRoutes(staticRoutes); len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
+}
+
+// buildJSAPIWithStatic compiles request-time JS/TS API routes and returns any
+// routes that should be evaluated at build time as static route handlers.
+func (b *Builder) buildJSAPIWithStatic() ([]staticRouteSource, error) {
 	apiSrcDir := filepath.Join(b.Root, filepath.FromSlash(gohost.DefaultAPIDir))
 	if _, err := os.Stat(apiSrcDir); os.IsNotExist(err) {
-		return nil // No API directory present, skip silently
+		return nil, nil // No API directory present, skip silently
 	}
 
 	jsRoutes, err := apiRouteSourceFiles(apiSrcDir)
 	if err != nil {
-		return fmt.Errorf("scanning api routes: %w", err)
+		return nil, fmt.Errorf("scanning api routes: %w", err)
 	}
-	b.pruneRuntimeCompatWarnings(jsRoutes)
+	staticOutput := b.Cfg != nil && strings.EqualFold(b.Cfg.Output, "static")
+	var dynamicRoutes []string
+	var staticRoutes []staticRouteSource
+	for _, r := range jsRoutes {
+		if shouldBuildStaticAPIRoute(r, staticOutput) {
+			pat, perr := apiFileToURLPattern(apiSrcDir, r)
+			if perr != nil {
+				return nil, perr
+			}
+			staticRoutes = append(staticRoutes, staticRouteSource{
+				Path:       r,
+				URLPattern: pat,
+				FromAPI:    true,
+			})
+			continue
+		}
+		dynamicRoutes = append(dynamicRoutes, r)
+	}
+	b.pruneRuntimeCompatWarnings(dynamicRoutes)
 
-	if len(jsRoutes) > 0 {
-		return b.CompileAPIRoutes(jsRoutes)
+	if len(dynamicRoutes) > 0 {
+		if err := b.CompileAPIRoutes(dynamicRoutes); err != nil {
+			return staticRoutes, err
+		}
 	}
-	return nil
+	return staticRoutes, nil
 }
 
 // CompileAPIRoutes processes the specified list of API paths in parallel.

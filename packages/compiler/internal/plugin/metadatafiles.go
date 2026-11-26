@@ -10,12 +10,33 @@ import (
 )
 
 // conventionFile returns the sitemap.ts, robots.ts or manifest.ts file of the
-// pages directory (the Next.js file convention), when there is one.
+// pages directory (including root-level route groups such as (marketing)/),
+// when there is one.
 func conventionFile(cfg *config.Config, name string) (string, bool) {
-	for _, ext := range []string{".ts", ".js", ".mjs"} {
+	exts := []string{".ts", ".js", ".mjs"}
+	for _, ext := range exts {
 		p := filepath.Join(cfg.PagesDir, name+ext)
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 			return p, true
+		}
+	}
+	entries, err := os.ReadDir(cfg.PagesDir)
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		if len(n) < 3 || n[0] != '(' || n[len(n)-1] != ')' {
+			continue
+		}
+		for _, ext := range exts {
+			p := filepath.Join(cfg.PagesDir, n, name+ext)
+			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+				return p, true
+			}
 		}
 	}
 	return "", false
