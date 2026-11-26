@@ -1183,36 +1183,15 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 	return merged
 }
 
-// collectChildrenOrphans registers orphan bindings for conditional/list slots
-// among direct call-site children. These reference the CALLER's signals, so
-// the owner is the enclosing client component (or empty for the signal-based
-// fallback in findSignatureOwner).
+// collectChildrenOrphans registers orphan bindings for every dynamic slot kind
+// among call-site children of a signal-less component (text, expression,
+// conditional, list, and the slots nested in them). These reference the
+// CALLER's signals, so the owner is the enclosing client component (or empty
+// for the signal-based fallback in findSignatureOwner).
 func collectChildrenOrphans(children []irtree.SlotNode, owner irtree.SlotID) []orphanBinding {
 	var orphans []orphanBinding
-	for _, slot := range children {
-		if cs, ok := slot.(*irtree.ConditionalSlot); ok {
-			orphans = append(orphans, orphanBinding{
-				owner: owner,
-				bind: irtree.SlotBinding{
-					SlotID:  cs.ID,
-					Type:    bindingTypeOf(cs),
-					ExprJS:  cs.TestJS,
-					Signals: cs.Signals,
-				},
-			})
-		}
-		if ls, ok := slot.(*irtree.ListSlot); ok {
-			orphans = append(orphans, orphanBinding{
-				owner: owner,
-				bind: irtree.SlotBinding{
-					SlotID:  ls.ID,
-					Type:    "list",
-					ExprJS:  ls.ExprSource,
-					Signals: ls.Signals,
-					List:    ls.Bind,
-				},
-			})
-		}
+	for _, b := range collectSlotBindings(children) {
+		orphans = append(orphans, orphanBinding{owner: owner, bind: b})
 	}
 	return orphans
 }

@@ -3151,6 +3151,9 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 			if ok := b.isSignalName(id.Name); ok {
 				return true
 			}
+			if b.localFnReadsSignal(id.Name) {
+				return true
+			}
 		}
 		if b.referencesSignal(e.Callee) {
 			return true
@@ -3236,6 +3239,48 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 		return b.referencesSignal(e.Expr)
 	}
 	return false
+}
+
+// localFnReadsSignal reports whether name is an unshadowed plain local
+// function (arrow or declaration in the component body) whose body reads a
+// signal, so a call to it in a text or attribute expression must stay a live
+// binding. Results are cached per component; recursion counts as non-reactive.
+func (b *builder) localFnReadsSignal(name string) bool {
+	if name == "" || b.isShadowed(name) || len(b.localFnBody) == 0 {
+		return false
+	}
+	key := localFnKey{&b.localFnBody[0], name}
+	if v, ok := b.localFnReactive[key]; ok {
+		return v
+	}
+	var params []*ast.Param
+	var body []ast.Stmt
+	if fn := findLocalFunction(name, b.localFnBody); fn != nil {
+		params, body = fn.Params, fn.Body
+	} else if arrow := findLocalConstFn(name, b.localFnBody); arrow != nil {
+		params, body = arrow.Params, arrow.Body
+	} else {
+		return false
+	}
+	if b.localFnReactive == nil {
+		b.localFnReactive = map[localFnKey]bool{}
+	}
+	// Mark in-progress so a recursive call terminates.
+	b.localFnReactive[key] = false
+	// Analyze the body in its own scope, not the caller's.
+	saved := b.shadow
+	b.shadow = nil
+	b.shadow = b.shadow.with(functionScopeNames(params, body))
+	reads := false
+	for _, s := range body {
+		if stmtReferenceSignal(s, b) {
+			reads = true
+			break
+		}
+	}
+	b.shadow = saved
+	b.localFnReactive[key] = reads
+	return reads
 }
 
 // isLivePropRead reports whether e reads a getter-registered prop

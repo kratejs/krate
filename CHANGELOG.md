@@ -670,6 +670,15 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A signal read through a plain local function now stays reactive. `const cur = () => list[n()]` and
+  `const cls = (i) => (n() === i ? "on" : "")` used as `{cur().label}` or `class={cls(i)}` used to
+  freeze at their build-time value; the compiler now looks through unshadowed local arrow and
+  function declarations (transitively) and keeps the binding. A local function that reads no signal
+  still folds into static HTML.
+- Reactive text inside another component's children now updates. In
+  `<Panel>{open() ? "Open" : "Closed"}</Panel>`, where `Panel` is a stateless component, only the
+  attributes in the children were bound; text and expression children now bind too, for every
+  copy of the children the component renders.
 - A component that gets its state from a project hook now hydrates. A function that creates state
   (`createSignal`, `createMemo`, `createEffect`, `createResource`, ... in its body or in a hook it
   calls), defined in the component's module or imported, makes the components that call it client

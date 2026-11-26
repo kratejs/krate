@@ -353,6 +353,7 @@ type componentCtx struct {
 	// Render scope of the component body.
 	currentNode     *ComponentNode      // component whose slots are being built
 	localFnBody     []ast.Stmt          // body of current component function for handler resolution
+	localFnReactive map[localFnKey]bool // cache: local function (per component body) reads a signal
 	localJSXInits   map[string]ast.Expr // locals whose JSX value statements built up (see localexec.go)
 	localSignals    map[string]ast.Expr // component-local signal context (name -> initial expr)
 	signalSetters   map[string]bool     // component-local signal setter names
@@ -409,6 +410,12 @@ func (b *builder) popComponentCtx() {
 // the embedded componentCtx; the fields below are build-global: inputs shared
 // by every component, counters that keep IDs unique across the page, and the
 // collected output (CSS, externals, diagnostics).
+// localFnKey identifies a local function within one component body.
+type localFnKey struct {
+	body *ast.Stmt
+	name string
+}
+
 type builder struct {
 	componentCtx
 	ctxStack []componentCtx
