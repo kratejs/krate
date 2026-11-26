@@ -47,6 +47,10 @@ type BuildOptions struct {
 	// props include them as `params`, so a wrapper that forwards `{...props}`
 	// to the page body passes them on.
 	PageParams map[string]string
+	// PageParamsDynamic marks PageParams as build-time placeholders for a
+	// dynamic route template, so client hydration reads window.__KRATE_PARAMS__
+	// instead of baking the sentinel strings.
+	PageParamsDynamic bool
 	// RoutePath is the URL path of the entry page ("/blog/hello", or
 	// "/blog/__KRATE_PARAM_slug__" in a dynamic route's template). The router
 	// hooks (usePathname, useParams, ...) fold to it. Empty for a layout.
@@ -159,41 +163,43 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 	}
 	moduleConsts, moduleConstInits, moduleRun := mergedModuleConstants(prog, opts)
 	b := &builder{
-		functions:        normalizeComponentFns(ann.Functions),
-		ann:              ann,
-		idCounter:        make(map[string]int),
-		instanceCounts:   make(map[string]int),
-		elementCounts:    make(map[string]int),
-		slotIDMap:        make(map[string]SlotID),
-		slotCounts:       make(map[string]int),
-		moduleConsts:     typedModuleConsts(moduleConstInits, moduleConsts, moduleRun),
-		moduleRun:        moduleRun,
-		moduleConstInits: moduleConstInits,
-		moduleStmts:      append(append([]ast.Stmt(nil), opts.ModuleStmts...), collectModuleStmts(prog)...),
-		moduleLets:       collectModuleLets(prog),
-		moduleDeclOnly:   mergeDeclOnly(prog, opts),
-		moduleNS:         opts.ModuleNamespaces,
-		clientStmts:      opts.ClientModuleStmts,
-		clientStmtKeys:   clientStmtKeys(opts.ClientModuleStmts),
-		vendorLocals:     opts.VendorLocals,
-		entryProg:        prog,
-		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
-		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
-		codeTheme:        codeTheme,
-		idPrefix:         opts.IDPrefix,
-		basePath:         opts.BasePath,
-		aggressiveDCE:    opts.AggressiveDCE,
-		compat:           opts.Compat,
-		goComponents:     opts.GoComponents,
-		externalImports:  opts.ExternalImports,
-		localImports:     opts.LocalComponentImports,
-		actionURLs:       opts.ActionURLs,
-		boundaryThrows:   opts.BoundaryThrows,
-		evalJS:           opts.EvalJS,
-		transformIcon:    opts.TransformIcon,
-		transformImage:   opts.TransformImage,
-		routeHooks:       routeHookValues(opts.RoutePath, opts.PageParams),
-		sourcePositions:  opts.SourcePositions,
+		functions:         normalizeComponentFns(ann.Functions),
+		ann:               ann,
+		idCounter:         make(map[string]int),
+		instanceCounts:    make(map[string]int),
+		elementCounts:     make(map[string]int),
+		slotIDMap:         make(map[string]SlotID),
+		slotCounts:        make(map[string]int),
+		moduleConsts:      typedModuleConsts(moduleConstInits, moduleConsts, moduleRun),
+		moduleRun:         moduleRun,
+		moduleConstInits:  moduleConstInits,
+		moduleStmts:       append(append([]ast.Stmt(nil), opts.ModuleStmts...), collectModuleStmts(prog)...),
+		moduleLets:        collectModuleLets(prog),
+		moduleDeclOnly:    mergeDeclOnly(prog, opts),
+		moduleNS:          opts.ModuleNamespaces,
+		clientStmts:       opts.ClientModuleStmts,
+		clientStmtKeys:    clientStmtKeys(opts.ClientModuleStmts),
+		vendorLocals:      opts.VendorLocals,
+		entryProg:         prog,
+		cvaFactories:      mergeCVAFactories(ann.CVAFactories, prog),
+		contextDefaults:   mergeContextDefaults(ann.ContextDefaults, prog),
+		codeTheme:         codeTheme,
+		idPrefix:          opts.IDPrefix,
+		basePath:          opts.BasePath,
+		aggressiveDCE:     opts.AggressiveDCE,
+		compat:            opts.Compat,
+		goComponents:      opts.GoComponents,
+		externalImports:   opts.ExternalImports,
+		localImports:      opts.LocalComponentImports,
+		actionURLs:        opts.ActionURLs,
+		boundaryThrows:    opts.BoundaryThrows,
+		evalJS:            opts.EvalJS,
+		transformIcon:     opts.TransformIcon,
+		transformImage:    opts.TransformImage,
+		routeHooks:        routeHookValues(opts.RoutePath, opts.PageParams),
+		pageParams:        opts.PageParams,
+		pageParamsDynamic: opts.PageParamsDynamic,
+		sourcePositions:   opts.SourcePositions,
 	}
 	for name := range b.moduleDeclOnly {
 		// Declared here, assigned by a module statement: shared mutable state.
@@ -433,31 +439,34 @@ type builder struct {
 	// elementCounts is the per-parent tag counter for sibling disambiguation.
 	// A component's walk clears it on entry and restores the caller's counts
 	// on exit, so siblings after a child component keep unique IDs.
-	elementCounts    map[string]int
-	moduleConsts     valueMap            // module-level const values (name -> folded value)
-	moduleRun        *ModuleRun          // outcome of module-level statements that change bindings
-	routeHooks       valueMap            // router hooks folded to the page's route (see routehooks.go)
-	moduleConstInits map[string]ast.Expr // module-level const initializers (name -> expr)
-	moduleStmts      []ast.Stmt          // entry module top-level statements that run code
-	clientStmts      []ClientModuleStmt  // module setup code replayed in the page script
-	clientStmtKeys   map[ast.Stmt]string // replay key of each client module statement
-	vendorLocals     map[string]bool
-	moduleLets       map[string]bool // module-level let/var bindings (mutable, so shared)
-	moduleDeclOnly   map[string]bool // `var X;` bindings initialized by module statements
-	moduleNS         map[string]map[string]string
-	nsUse            map[string]map[string]bool
-	sharedModuleVars []string // hoisted declarations for moduleLets and their dependencies
-	sharedSeen       map[string]bool
-	entryProg        *ast.Program             // the entry module (imports for KR8302)
-	cvaFactories     map[string]*CVASpec      // module-level `const X = cva(...)` factories
-	contextDefaults  map[string]jsvalue.Value // module-level `const X = createContext(v)` defaults
-	codeTheme        string                   // chroma theme for compile-time <Code> highlighting
-	idPrefix         string                   // namespace for compact slot IDs (merged builds)
-	aggressiveDCE    bool                     // drop unreferenced local functions (opt-in)
-	suspenseCount    int                      // monotonic counter for stable StreamID generation
-	suspenseDepth    int                      // >0 while building <Suspense> content
-	pendingLazy      *LazyComponent           // lazy() instance being built (see finishClientComponent)
-	pendingLazyFn    *ast.FnDecl
+	elementCounts     map[string]int
+	moduleConsts      valueMap            // module-level const values (name -> folded value)
+	moduleRun         *ModuleRun          // outcome of module-level statements that change bindings
+	routeHooks        valueMap            // router hooks folded to the page's route (see routehooks.go)
+	pageParams        map[string]string   // entry page dynamic-route params
+	pageParamsDynamic bool                // true when pageParams hold template placeholders
+	pageParamValues   valueMap            // bound entry-page parameter values for client fallback
+	moduleConstInits  map[string]ast.Expr // module-level const initializers (name -> expr)
+	moduleStmts       []ast.Stmt          // entry module top-level statements that run code
+	clientStmts       []ClientModuleStmt  // module setup code replayed in the page script
+	clientStmtKeys    map[ast.Stmt]string // replay key of each client module statement
+	vendorLocals      map[string]bool
+	moduleLets        map[string]bool // module-level let/var bindings (mutable, so shared)
+	moduleDeclOnly    map[string]bool // `var X;` bindings initialized by module statements
+	moduleNS          map[string]map[string]string
+	nsUse             map[string]map[string]bool
+	sharedModuleVars  []string // hoisted declarations for moduleLets and their dependencies
+	sharedSeen        map[string]bool
+	entryProg         *ast.Program             // the entry module (imports for KR8302)
+	cvaFactories      map[string]*CVASpec      // module-level `const X = cva(...)` factories
+	contextDefaults   map[string]jsvalue.Value // module-level `const X = createContext(v)` defaults
+	codeTheme         string                   // chroma theme for compile-time <Code> highlighting
+	idPrefix          string                   // namespace for compact slot IDs (merged builds)
+	aggressiveDCE     bool                     // drop unreferenced local functions (opt-in)
+	suspenseCount     int                      // monotonic counter for stable StreamID generation
+	suspenseDepth     int                      // >0 while building <Suspense> content
+	pendingLazy       *LazyComponent           // lazy() instance being built (see finishClientComponent)
+	pendingLazyFn     *ast.FnDecl
 	// rendererKids holds the call-site children of the renderer component
 	// buildComponentSlot hands to buildClientComponentSlot.
 	rendererKids []ast.JSXChild

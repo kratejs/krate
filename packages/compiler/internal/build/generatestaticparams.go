@@ -66,6 +66,9 @@ func injectStaticParams(tree *irtree.ComponentTree, params map[string]string) {
 		paramsObj.Set(k, jsvalue.String(params[k]))
 	}
 	bindings["params"] = paramsObj
+	for k, v := range irtree.PageParamBindings(root.Fn, params) {
+		bindings[k] = v
+	}
 	if len(bindings) > 0 {
 		if len(root.SSREvalBindings) > 0 {
 			for k, v := range root.SSREvalBindings {
@@ -118,14 +121,18 @@ func injectDynamicRoutePlaceholders(tree *irtree.ComponentTree, paramNames []str
 	if irtree.HasClientComponent(root.Children) {
 		return
 	}
+	sentinels := dynamicRouteSentinels(paramNames)
 	bindings := make(map[string]jsvalue.Value, len(paramNames)+1)
 	paramsObj := jsvalue.NewObject()
 	for _, name := range paramNames {
-		sentinel := jsvalue.String(dynamicParamSentinel(name))
+		sentinel := jsvalue.String(sentinels[name])
 		bindings[name] = sentinel
 		paramsObj.Set(name, sentinel)
 	}
 	bindings["params"] = paramsObj
+	for k, v := range irtree.PageParamBindings(root.Fn, sentinels) {
+		bindings[k] = v
+	}
 	for k, v := range root.SSREvalBindings {
 		if _, ok := bindings[k]; !ok {
 			bindings[k] = v

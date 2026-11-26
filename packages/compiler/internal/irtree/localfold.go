@@ -68,7 +68,11 @@ func collectLocalVarsWithBuilder(body []ast.Stmt, sigMap map[string]ast.Expr, pr
 	for k, v := range props {
 		f.working[k] = v
 	}
-	f.in = newConstInterp(sigMap, f.working)
+	if owner != nil {
+		f.in = owner.constInterp(f.working)
+	} else {
+		f.in = newConstInterp(sigMap, f.working)
+	}
 	f.in.Volatile = owner != nil && owner.bakesOnly()
 	f.preloadFunctions(body)
 	f.stmts(body)

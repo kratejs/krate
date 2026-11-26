@@ -651,6 +651,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Dynamic-route pages with `generateStaticParams` that destructure `{ params }` (or nested/renamed/plain
+  props forms) and index module-level data (`const { slug } = params; const [first] = DATA[slug]`,
+  `DATA[params.slug]`, `DATA[slug].title`, or nested object destructuring) now fold those locals at build
+  time and promote to static HTML with zero client JS instead of emitting empty hydration slots. When a
+  dynamic-route page genuinely needs client hydration and references its route params, the page scope now
+  binds `params` (concrete values for `generateStaticParams` pages, or `window.__KRATE_PARAMS__ || {}`
+  for dynamic templates) instead of throwing `ReferenceError: params is not defined`.
 - A stateless client component with a `useRef` local and a DOM ref or event handler no longer drops its
   ref variable declaration during static-promotion checks (which threw `ReferenceError` at hydration
   both when rendered directly and inside mapped lists). Signal-less wrapper components with destructured

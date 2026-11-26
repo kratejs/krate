@@ -2943,6 +2943,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		pageOpts.ActionURLs = bundle.ActionImports
 		if isDynamicRoute(page, b.Cfg.PagesDir) {
 			pageOpts.PageParams = dynamicRouteSentinels(extractParamNames(page, b.Cfg.PagesDir))
+			pageOpts.PageParamsDynamic = true
 		}
 		if _, isSeg := segmentKindOfFile(page); !isSeg {
 			pageOpts.RoutePath = routePathFor(page, b.Cfg.PagesDir, pageOpts.PageParams)

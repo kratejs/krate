@@ -1071,6 +1071,9 @@ func slotsReadAny(slots []SlotNode, reads func(string) bool) bool {
 			if reads(v.ExprSource) {
 				return true
 			}
+			if v.Bind != nil && (reads(v.Bind.Source) || reads(v.Bind.Key) || reads(v.Bind.Render)) {
+				return true
+			}
 			for _, it := range v.Items {
 				if it != nil && slotsReadAny(it.Contents, reads) {
 					return true
