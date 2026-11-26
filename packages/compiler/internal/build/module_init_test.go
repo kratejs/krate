@@ -35,7 +35,8 @@ func TestModuleSetupStatementsReplay(t *testing.T) {
 		register(ghost);
 		export const b = 1;
 	`)
-	writeProjectFile(t, root, "src/lib/nothing-here.ts", `export class Holder {}`)
+	writeProjectFile(t, root, "src/lib/nothing-here.ts", `export class Holder {}
+export * from 'plug'`)
 	writeProjectFile(t, root, "src/components/Info.static.tsx", `
 		import { register } from 'plug';
 		register('static');

@@ -712,7 +712,8 @@ func generateJSXJS(el *ast.JSXElement, signals map[string]ast.Expr) string {
 	// Uppercase tag names are components - reference them as function refs so
 	// the runtime `h()` invokes the component rather than creating a DOM
 	// element with a bogus tag like <Toast>.
-	if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+	// A member tag (`<item.view/>`) is a reference whatever its case.
+	if len(name) > 0 && (name[0] >= 'A' && name[0] <= 'Z' || strings.Contains(name, ".")) {
 		b.WriteString("h(")
 		b.WriteString(name)
 	} else {

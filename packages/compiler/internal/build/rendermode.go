@@ -368,6 +368,17 @@ func dynamicParamsAllowed(prog *ast.Program, staticMode bool) bool {
 	return !staticMode
 }
 
+// fallbackTemplateUnused reports whether a dynamic route's `[param]` template
+// has no consumer: the page is prerendered (not SSR/ISR/streaming), lists its
+// params with generateStaticParams, does not opt in with an explicit
+// `dynamicParams = true`, and this is not a dev build.
+func (b *Builder) fallbackTemplateUnused(prog *ast.Program, mode RenderMode, serverPage, hasGSP bool) bool {
+	if b.DevMode || !hasGSP || serverPage || mode != RenderSSG {
+		return false
+	}
+	return parsePageConfig(prog).dynamicParams == nil
+}
+
 // usesSuspense reports whether the page AST contains a <Suspense> JSX element
 // anywhere (nested inside functions, conditionals, arrays, etc.). This is an
 // AST-based check - a prior string scan (`strings.Contains(source, "<Suspense")`)

@@ -242,6 +242,8 @@ func (b *Builder) runGSPBundle(abs, target string, bnd *bundler.Bundler, virtual
 		ResolveImport: resolve,
 		VirtualFiles:  virtual,
 
+		// Module-level JSX in the page chain compiles without React in scope.
+		JSXImportSource: "@krate/runtime/server",
 		SourceTransform: b.serverGlobalsTransform,
 	})
 	if err != nil {
@@ -324,6 +326,7 @@ Promise.resolve(fn()).then(function (r) { globalThis.%s = r; }, function () {});
 		ResolveImport: resolve,
 		VirtualFiles:  virtual,
 
+		JSXImportSource: "@krate/runtime/server",
 		SourceTransform: b.serverGlobalsTransform,
 		Worker:          b.jsWorker(),
 		WorkerLabel:     "static-params",

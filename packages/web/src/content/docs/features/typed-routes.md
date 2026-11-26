@@ -244,11 +244,20 @@ The bootstrap is emitted as ESM and run on the configured runtime.
 
 ## Static output & dynamic params
 
-By default a dynamic route (`[slug].tsx`) keeps a **fallback template**, so any
+A dynamic route (`[slug].tsx`) that exports `generateStaticParams` and is
+prerendered (no SSR, ISR or streaming) is built as the concrete pages the
+function returns. Nothing serves the `[param]` template at request time, so it
+is not written to the output (`dist/compare/[item]/index.html` does not exist)
+and other params 404, the same as with `dynamicParams = false`. The dev server
+keeps the template.
+
+A route that is rendered at request time (SSR, ISR, streaming), or that opts in
+with `export const dynamicParams = true`, keeps a **fallback template**, so any
 URL matching the pattern is answered at request time. That answer has status
 200: a slug with no entry renders the page's own not-found branch
-(`if (!post) return <h1>Not found</h1>`), not an HTTP 404. When the set of valid
-params is closed, turn that off with `dynamicParams`:
+(`if (!post) return <h1>Not found</h1>`), not an HTTP 404. A route with no
+`generateStaticParams` keeps its template too. To close the set explicitly,
+whatever the render mode, use `dynamicParams`:
 
 ```tsx
 // src/pages/blog/[slug].tsx

@@ -670,6 +670,24 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A component picked from a table at run time renders and ships its helper components. `const View =
+  views[kind]` with `<View/>` (and `const views = { a: A, b: B }`) lowers to a conditional over the
+  components the table holds, so each branch's body and the helpers it uses (a same-module `<Frame>`) reach the
+  page script instead of failing with "Frame is not defined" or KR8320. In list rows, `<item.view/>` and
+  `const View = item.view; <View/>` now render the row's component; the member tag was emitted as the string
+  `"item.view"` and the local was dropped.
+- `generateStaticParams` evaluates a page module that builds JSX when it loads (a module-level const holding
+  JSX, or a data module whose consts hold JSX) instead of failing with "React is not defined". The build-time
+  endpoint bundle for `pages/` API files uses the same JSX runtime.
+- A prerendered dynamic route with `generateStaticParams` no longer writes its `[param]` template page next to
+  the expanded pages (`dist/compare/[item]/index.html` with an empty title). Nothing serves it at request time,
+  so unknown params 404 like `dynamicParams = false`. SSR/ISR/streaming routes, routes with an explicit
+  `export const dynamicParams = true`, routes without `generateStaticParams` and dev builds keep it.
+- A named import of a missing export from a project module (`import { missingName } from "./data"`, or through a
+  tsconfig alias) is a build error, KR7128, with a did-you-mean hint, instead of an undefined binding that fails in
+  the browser. Type exports count, `export *` is followed, and modules the build cannot enumerate (CommonJS,
+  ambient declarations, `export *` from a package) are skipped.
+
 - Data with JSX in some fields no longer hides its other fields from the build. A module constant such as
   `[{ id, name, icon: <svg/> }]` (imported from another module too) used to be skipped whole, so
   `<title>{items.find(...).name}</title>` failed with KR8353 and `{item.name}` rendered empty until

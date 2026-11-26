@@ -230,6 +230,8 @@ func (b *Builder) runEndpointBundle(abs, route string, bnd *bundler.Bundler) ([]
 		Sourcefile:    "krate-endpoint-bootstrap.ts",
 		Loader:        api.LoaderTS,
 		ResolveImport: resolve,
+
+		JSXImportSource: "@krate/runtime/server",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bundling: %w", err)

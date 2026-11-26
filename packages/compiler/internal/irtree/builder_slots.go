@@ -500,6 +500,12 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		return b.buildSlotNodes(&cloned, parentID)
 	}
 
+	// A tag read from a module-level table of components lowers to a
+	// conditional over its members.
+	if cond := b.dynamicTagSwitch(el); cond != nil {
+		return b.buildSlotNodes(cond, parentID)
+	}
+
 	// External components (including `Namespace.Provider`) are islands. Their
 	// provider context must live inside the island, so do not flatten them as
 	// Krate context providers.
@@ -2759,6 +2765,17 @@ func substituteListParamJSX(el *ast.JSXElement, s *listParamSubstituter) *ast.JS
 			c := *closing
 			c.Name = s.tagTo
 			closing = &c
+		}
+	}
+	// A member tag rooted at a row accessor (`<item.view/>`) reads through it.
+	if call, ok := s.elem.(*ast.CallExpr); ok && len(call.Args) == 0 && strings.HasPrefix(el.Opening.Name, s.param+".") {
+		if id, ok := call.Callee.(*ast.Identifier); ok && id.Name == s.param {
+			opening.Name = s.param + "()" + el.Opening.Name[len(s.param):]
+			if closing != nil {
+				c := *closing
+				c.Name = opening.Name
+				closing = &c
+			}
 		}
 	}
 	for _, attr := range el.Opening.Attributes {

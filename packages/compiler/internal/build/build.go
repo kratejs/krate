@@ -2942,6 +2942,13 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		cut:        layoutCut,
 	}, &renderMode, &revalidate)
 	serverPage := scPlan.serverPage
+	// With the final render mode known: a prerendered dynamic route that
+	// generateStaticParams enumerates, and that nothing serves at request time,
+	// has no use for a fallback template.
+	if allowDynamic && isDynRoute && !isSegment && b.fallbackTemplateUnused(entryModule.Program, renderMode, serverPage, hasGSP) {
+		allowDynamic = false
+		staticOnly = true
+	}
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}

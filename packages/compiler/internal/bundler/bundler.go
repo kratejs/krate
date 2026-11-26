@@ -666,6 +666,9 @@ func (b *Bundler) resolveModuleImports(mod *Module) error {
 	if err := b.checkRuntimeImports(mod); err != nil {
 		return err
 	}
+	if err := b.checkNamedImports(mod); err != nil {
+		return err
+	}
 	for _, imp := range mod.Imports {
 		if err := checkUnsupportedStylesheet(mod, imp); err != nil {
 			return err

@@ -434,6 +434,12 @@ A named import from `@krate/runtime` (or one of its subpaths) asks for something
 
 A package can list browser code that Krate bundles with esbuild like an npm dependency, instead of compiling it as Krate source: `"krate": { "vendor": ["src/engine/"] }`. Each entry is a path prefix relative to the package directory; an entry ending in `/` matches every file under that directory. The list must be an array of strings that stay inside the package (no absolute paths or `..`). Fix the package.json of the package named in the message. This is an error.
 
+### KR7128
+
+**Named import is not exported by the project module**
+
+`import { name } from "./data"` asks a file in your project (a relative path or a tsconfig path alias) for a name it does not export. The bundle would bind `name` to nothing, so the page fails in the browser (or renders blank) instead of at build time. Check the spelling against the module's exports; the hint lists close matches. Types count as exports, `export *` is followed through project files, and a module whose exports the build cannot enumerate (CommonJS, ambient declarations, `export *` from a package) is not checked. This is an error.
+
 ### KR7130
 
 **Metadata route could not be built**

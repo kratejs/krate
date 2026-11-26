@@ -259,3 +259,38 @@ export default function Home() { return <p>home</p>; }`,
 		t.Errorf("og/twitter description copied from the page description:\n%s", head)
 	}
 }
+
+// generateStaticParams evaluates the page module at build time: JSX in a
+// module-level const, or in an imported data module, compiles without React
+// in scope.
+func TestGenerateStaticParamsModuleLevelJSX(t *testing.T) {
+	t.Parallel()
+	for name, tsconfig := range map[string]string{
+		"no tsconfig":  "",
+		"jsx preserve": `{ "compilerOptions": { "jsx": "preserve" } }`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			files := map[string]string{
+				"src/data/rows.tsx": `export const rows = [{ slug: 'one', icon: <b>1</b> }, { slug: 'two', icon: <b>2</b> }];`,
+				"src/pages/item/[slug].tsx": `import { rows } from '../../data/rows';
+const badge = <i>badge</i>;
+export function generateStaticParams() { return rows.map((r) => ({ slug: r.slug })); }
+export default function Item() { return <main><h1>Item page</h1>{badge}</main>; }`,
+			}
+			if tsconfig != "" {
+				files["tsconfig.json"] = tsconfig
+			}
+			b, root := hooksProject(t, files)
+			if err := b.BuildAll(); err != nil {
+				t.Fatal(err)
+			}
+			for _, slug := range []string{"one", "two"} {
+				html := readMetaDist(t, root, "item/"+slug+"/index.html")
+				if !strings.Contains(html, "Item page") {
+					t.Errorf("item/%s page missing its content:\n%s", slug, html)
+				}
+			}
+		})
+	}
+}
