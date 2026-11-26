@@ -266,6 +266,33 @@ describe('server children of a kept island', () => {
   });
 });
 
+describe('a kept island whose new markup sits in more elements than the live one', () => {
+  // The new page wraps its island in one more element than the old page did,
+  // so the swap cannot map every ancestor and rebuilds that element; the new
+  // island's own slots must still reach the kept island.
+  const grid = (id: string, cell: string) =>
+    island('Grid', { __krateTree: [{ $: 'c', e: 'Cell', c: [{ $: 'h', r: id }] }] }, '<table><tbody><tr><td>' + slot(id, cell) + '</td></tr></tbody></table>');
+  const page = (id: string, cell: string, deep: boolean) =>
+    island(
+      'Frame',
+      { __krateChildren: { __krateSlotRef: 'f' + id } },
+      slot('f' + id, '<main><div class="outer">' + (deep ? '<div class="inner">' + grid(id, cell) + '</div>' : grid(id, cell)) + '</div></main>'),
+    );
+
+  it('hands the new slot to the kept island', () => {
+    root.innerHTML = page('a1', '<span>old</span>', false);
+    const [frame, table] = mountIslands(root);
+    swap(page('b2', '<a href="/x">go</a>', true));
+    expect(table.handle.unmount).not.toHaveBeenCalled();
+    expect(frame.handle.unmount).not.toHaveBeenCalled();
+    const [props, pool] = table.handle.update.mock.calls[0];
+    expect(JSON.stringify(props)).toContain('"r":"b2"');
+    expect(Object.keys(pool!)).toEqual(['b2']);
+    expect(pool!.b2[0].map((n: Node) => (n as Element).outerHTML)).toEqual(['<a href="/x">go</a>']);
+    expect(table.handle.slots!.map((x) => x.id)).toEqual(['b2']);
+  });
+});
+
 describe('maskIslands', () => {
   it('replaces islands (nested and real-React) by their component name', () => {
     const html = `<p>a</p>${island('A', { x: 1 }, `<b>${island('B', {}, 'b')}</b>`)}<i></i>${realIsland('R', { y: 1 }, 'fallback')}`;

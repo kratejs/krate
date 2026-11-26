@@ -32,6 +32,7 @@ func TestBrowserAsChildSoftNav(t *testing.T) {
 	if err != nil {
 		requireE2E(t, "radix-ui is not installed for the examples (run pnpm install): %v", err)
 	}
+	ensureRuntimeDist(t)
 	b, root := scProject(t, map[string]string{
 		"src/components/button.tsx": `import { Slot } from 'radix-ui';
 export function Button({ asChild = false, ...props }: any) {
@@ -49,16 +50,30 @@ export function GridCell({ className, ...props }: any) { return <td data-slot="g
 `,
 		"src/components/shell.tsx": `'use client';
 import { useState } from 'react';
-export function Shell({ children }: any) {
+export function Shell({ children, menu }: any) {
   const [n, setN] = useState(0);
-  return <div className="shell" data-n={n} onClick={() => setN(n + 1)}>{children}</div>;
+  return <div className="shell" data-n={n} onClick={() => setN(n + 1)}>{menu}{children}</div>;
 }
+`,
+		"src/components/menu.tsx": `'use client';
+import { useState } from 'react';
+export function Menu({ children }: any) {
+  const [open, setOpen] = useState(false);
+  return <div className="menu" data-open={open ? 'yes' : 'no'} onClick={() => setOpen(!open)}>{children}</div>;
+}
+`,
+		"src/components/providers.tsx": `'use client';
+import { createContext } from 'react';
+const Ctx = createContext('x');
+export function Providers({ children }: any) { return <Ctx.Provider value="y">{children}</Ctx.Provider>; }
 `,
 		"src/components/panel.tsx": `'use client';
 import { useState } from 'react';
+import { usePathname } from '@krate/runtime';
 export function Panel({ children }: any) {
   const [n, setN] = useState(0);
-  return <section data-n={n} onClick={() => setN(n + 1)}>{children}</section>;
+  const path = usePathname();
+  return <section data-path={path} data-n={n} onClick={() => setN(n + 1)}>{children}</section>;
 }
 `,
 		"src/components/badge.tsx": `export function Badge({ children, ...props }: any) {
@@ -73,22 +88,30 @@ export function Age({ label }: { label: string }) {
   return <span className="age" data-ready={ready ? 'yes' : 'no'}>{label}</span>;
 }
 `,
-		"src/pages/_layout.tsx": `import { Shell } from '../components/shell';
-export default async function Layout({ children }: { children: any }) {
+		"src/components/frame.tsx": `import { Shell } from './shell';
+import { Providers } from './providers';
+import { Menu } from './menu';
+async function FrameBody({ children }: { children: any }) {
   await Promise.resolve();
-  return <Shell><header><Link href="/">Home</Link></header>{children}</Shell>;
+  return <Shell menu={<div id="menu"><Menu><Link href="/">Menu</Link></Menu></div>}><header><Link href="/">Home</Link></header>{children}</Shell>;
+}
+export function Frame({ children }: { children: any }) {
+  return <Providers><FrameBody>{children}</FrameBody></Providers>;
 }
 `,
 		"src/pages/loading.tsx": `export default function Loading() { return <div id="loading-ui">Loading...</div>; }
 `,
-		"src/pages/index.tsx": `export default function Home() {
-  return <main><Link id="to-table" href="/table">Table</Link><Link id="to-b" href="/table?tab=b">Versions</Link></main>;
+		"src/pages/index.tsx": `import { useState } from 'react';
+export default function Home() {
+  const [n, setN] = useState(0);
+  return <main><button id="count" onClick={() => setN(n + 1)}>{n}</button><Link id="to-table" href="/table">Table</Link><Link id="to-b" href="/table?tab=b">Versions</Link><Link id="to-swap" href="/swap">Swap</Link><Link id="to-swap-b" href="/swap?tab=b">Swap B</Link></main>;
 }
 `,
 		"src/pages/table.tsx": `import { Age } from '../components/age';
 import { Button } from '../components/button';
 import { Badge } from '../components/badge';
 import { Panel } from '../components/panel';
+import { Frame } from '../components/frame';
 import { Grid, GridBody, GridRow, GridCell } from '../components/grid';
 const sets: any = { b: [{ id: 'b1' }, { id: 'b2' }, { id: 'b3' }], c: [], d: [{ id: 'd1' }, { id: 'd2' }], e: [{ id: 'b1' }, { id: 'b2' }, { id: 'b3' }], f: [{ id: 'b3' }, { id: 'b2' }, { id: 'b1' }], g: [{ id: 'b2' }, { id: 'b3' }, { id: 'b1' }] };
 export default async function TablePage({ searchParams }: any) {
@@ -96,7 +119,7 @@ export default async function TablePage({ searchParams }: any) {
   const tab = searchParams?.tab || 'a';
   const rows = sets[tab] || [];
   return (
-    <main>
+    <Frame><main>
       <nav><Link id="tab-a" href="/table">A</Link><Link id="tab-b" href="/table?tab=b">B</Link><Link id="tab-c" href="/table?tab=c">C</Link><Link id="tab-d" href="/table?tab=d">D</Link><Link id="tab-e" href="/table?tab=e">E</Link><Link id="tab-f" href="/table?tab=f">F</Link><Link id="tab-g" href="/table?tab=g">G</Link></nav>
       {tab === 'a' ? (
         <div className="card"><Grid>
@@ -127,15 +150,58 @@ export default async function TablePage({ searchParams }: any) {
           </GridBody>
         </Grid></Panel></div><p>pager</p></div>
       )}
-    </main>
+    </main></Frame>
   );
+}
+`,
+		"src/pages/swap.tsx": `import { Age } from '../components/age';
+import { Button } from '../components/button';
+import { Badge } from '../components/badge';
+import { Grid, GridBody, GridRow, GridCell } from '../components/grid';
+import { Panel } from '../components/panel';
+import { Frame } from '../components/frame';
+async function Rows({ tab }: any) {
+  await Promise.resolve();
+  return (
+    <Grid>
+      <GridBody>
+        {tab === 'b' ? (
+          <GridRow>
+            <GridCell>name <span className="v">v1</span></GridCell>
+            <GridCell><Age label="x" /></GridCell>
+            <GridCell className="act"><Button asChild size="sm"><Link href="/item/9" className="go">Go</Link></Button></GridCell>
+          </GridRow>
+        ) : (
+          <GridRow>
+            <GridCell><Badge className="tag">{tab === 'a' ? 'version' : 'other'}</Badge></GridCell>
+            <GridCell><Age label="x" /></GridCell>
+          </GridRow>
+        )}
+      </GridBody>
+    </Grid>
+  );
+}
+async function Body({ tab }: any) {
+  await Promise.resolve();
+  return (
+    <Panel><main>
+      <nav><Link id="s-a" href="/swap">A</Link><Link id="s-b" href="/swap?tab=b">B</Link><Link id="s-c" href="/swap?tab=c">C</Link></nav>
+      <div className="outer">
+        {tab === 'b' ? <div className="inner"><Rows tab="b" /></div> : <Rows tab={tab} />}
+      </div>
+    </main></Panel>
+  );
+}
+export default async function SwapPage({ searchParams }: any) {
+  await Promise.resolve();
+  return <Frame><Body tab={searchParams?.tab || 'a'} /></Frame>;
 }
 `,
 		"src/pages/item/[id].tsx": `export default function Item({ params }: any) { return <main id="item">Item {params.id}</main>; }
 `,
 	})
-	b.Cfg.Minify = true
 	withPreact(t, root)
+	linkRuntimeDist(t, root)
 	if err := os.Symlink(radix, filepath.Join(root, "node_modules", "radix-ui")); err != nil {
 		t.Skipf("cannot link radix-ui: %v", err)
 	}

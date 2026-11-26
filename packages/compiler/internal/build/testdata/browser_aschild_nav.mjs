@@ -41,7 +41,9 @@ try {
   await page.goto(base + "/");
   await page.click("#to-table");
   await page.waitForSelector("td.when", { timeout: 5000 });
+  await page.evaluate(() => (window.__spaMarker = 1));
   for (const tab of ["b", "f", "g", "b", "f", "e", "a", "d", "c", "b", "d"]) {
+    if (!(await page.evaluate(() => window.__spaMarker === 1))) failures.push("table nav reloaded before " + tab);
     await page.hover("#tab-" + tab);
     await page.waitForTimeout(400);
     await page.click("#tab-" + tab);
@@ -103,6 +105,44 @@ try {
     if (JSON.stringify(got) !== JSON.stringify(want[tab])) failures.push("early navigation " + from + " to " + tab + " differs from a full load: " + JSON.stringify({ want: want[tab], got }));
     await fast.close();
   }
+  // A client table whose slot changes shape (span to link) at the same count.
+  const swapShape = (pg) => pg.evaluate(() => ({ go: document.querySelectorAll("a.go").length, tag: [...document.querySelectorAll("td .tag")].map((e) => e.textContent), age: document.querySelectorAll(".age").length }));
+  const swapWant = {};
+  for (const tab of ["a", "b", "c"]) {
+    const pg = await open();
+    await pg.goto(base + "/swap" + (tab === "a" ? "" : "?tab=" + tab));
+    await waitHydrated(pg, ".age[data-ready=yes]");
+    swapWant[tab] = await swapShape(pg);
+    await pg.close();
+  }
+  if (swapWant.b.go !== 1 || swapWant.a.tag.length !== 1) failures.push("full loads of /swap are not as expected: " + JSON.stringify(swapWant));
+  const sw = await open();
+  await sw.goto(base + "/");
+  await sw.click("#to-swap");
+  await sw.waitForSelector("td", { timeout: 5000 });
+  await waitHydrated(sw, ".age[data-ready=yes]");
+  await sw.evaluate(() => (window.__spaMarker = 1));
+  for (const tab of ["b", "a", "b", "c", "b"]) {
+    await sw.click("#s-" + tab);
+    await sw.waitForFunction((t) => location.search === (t === "a" ? "" : "?tab=" + t), tab, { timeout: 5000 });
+    await sw.waitForTimeout(600);
+    if (!(await sw.evaluate(() => window.__spaMarker === 1))) failures.push("navigation to swap tab " + tab + " reloaded the page");
+    const got = await swapShape(sw);
+    if (JSON.stringify(got) !== JSON.stringify(swapWant[tab])) failures.push("swap tab " + tab + " differs from a full load: " + JSON.stringify({ want: swapWant[tab], got }));
+  }
+  try {
+    await sw.click("a.go", { timeout: 3000 });
+    await sw.waitForSelector("#item", { timeout: 5000 });
+  } catch (e) {
+    failures.push("clicking Go did not navigate: " + sw.url());
+  }
+  const fromHome = await open();
+  await fromHome.goto(base + "/");
+  await fromHome.click("#to-swap-b");
+  await fromHome.waitForFunction(() => location.search === "?tab=b", null, { timeout: 5000 });
+  await fromHome.waitForTimeout(800);
+  const gotHome = await swapShape(fromHome);
+  if (JSON.stringify(gotHome) !== JSON.stringify(swapWant.b)) failures.push("swap from another page differs: " + JSON.stringify({ want: swapWant.b, got: gotHome }));
   if (errors.length) failures.push(errors.join("\n"));
 } finally {
   await browser.close();

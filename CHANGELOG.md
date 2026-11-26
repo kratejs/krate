@@ -679,6 +679,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Client-side navigation: server content inside a client component lost on a same-page swap. When the swap kept a
+  client island (a table, say) and its new markup sat in a different number of elements than the old, the new
+  island's server children (a `<Button asChild><Link>` in a cell) were read after the swap had moved their markup
+  and found nothing, so the island re-rendered with an empty slot. The slots of a paired island are now read
+  before the swap runs.
+
 - Tailwind: `--value([duration])` in an `@utility` (used by `tw-animate-css` for `animation-duration-*` and
   `delay-*`) no longer prints an "unknown type" warning. Like Tailwind, `duration` is a valid type name that is
   only selected by an explicit `[duration:...]` hint; a bare `[400ms]` is served by the `[*]` fallback.
