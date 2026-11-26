@@ -1186,6 +1186,12 @@ A prop that holds JSX with a component that has state (`slot={<Probe />}`, where
 
 The `source` of a redirect, rewrite or header rule, or the `value` of one of its `has` or `missing` conditions, uses a regular-expression feature that Go's RE2 engine does not have: lookbehind, a backreference, or a lookahead that is not the start of a parameter pattern. Krate refuses to load the config rather than keep a rule that never matches. A leading negative lookahead inside a parameter, such as `/store/:slug((?!compare$)[^/]+)`, is supported. Otherwise rewrite the pattern without the feature, or handle the request in `middleware.ts`. This is an error.
 
+### KR8356
+
+**Build-time evaluation of a statement stopped**
+
+The build runs the statements of a component body that build up a value (loops, `switch`, `try`, labelled blocks, `push`, `splice`, `sort`, `Map.set` and so on) so the result is rendered into the page. This statement uses a construct the build cannot run, or ran past the limit of 100000 loop iterations per component, so the value it builds is left to the browser (the markup is empty until the page hydrates, or the build reports KR8352 for a component without state). The message names the statement and the reason. Rewrite the statement with plain loops, array methods, `Map` and `Set` over props, locals and module constants, or compute the value in one expression. A value that depends on state, such as a signal, is expected to be computed in the browser and does not produce this warning.
+
 ### KR8360
 
 **Component state resets when the condition flips**

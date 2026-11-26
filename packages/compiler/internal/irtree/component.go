@@ -210,6 +210,7 @@ func (b *builder) enterComponentBody(fn *ast.FnDecl) {
 	b.pendingRefs = nil
 	b.pendingPropsRegs = nil
 	b.localFnBody = fn.Body
+	b.localJSXInits = nil
 	// Locals that are useRef {current:...} objects: `ref={myRef}` assigns
 	// `.current` instead of clobbering the object.
 	b.refObjectVars = collectRefObjectVars(fn.Body)
@@ -394,6 +395,8 @@ func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 	// useId() resolves to a per-component-instance build-time literal, stable
 	// across SSR and hydration.
 	fold := collectLocalVarsWithBuilder(fn.Body, b.sigMap(), b.localProps, b.useIDSequence(node.ID), b)
+	b.localJSXInits = fold.jsxInits
+	b.reportFoldNotes(fold)
 	// A changed local replaces any same-named binding: with its final folded
 	// value, or (when it has none) by removal so reads defer to hydration.
 	for name := range fold.changed {

@@ -18,10 +18,25 @@ const (
 	// CodeRouteSourceUnsupported: a redirect, rewrite or header source (or a
 	// has/missing value) that uses a regex feature Go cannot run.
 	CodeRouteSourceUnsupported Code = "KR8355"
+	// CodeFoldGaveUp: a statement in a component body that builds up a value
+	// the build could not run, for a reason the author can change.
+	CodeFoldGaveUp Code = "KR8356"
 )
 
 func init() {
 	Register(
+		CodeInfo{
+			Code:  CodeFoldGaveUp,
+			Title: "Build-time evaluation of a statement stopped",
+			Explanation: "The build runs the statements of a component body that build up a value (loops, `switch`, " +
+				"`try`, labelled blocks, `push`, `splice`, `sort`, `Map.set` and so on) so the result is rendered into " +
+				"the page. This statement uses a construct the build cannot run, or ran past the limit of 100000 loop " +
+				"iterations per component, so the value it builds is left to the browser (the markup is empty until the " +
+				"page hydrates, or the build reports KR8352 for a component without state). The message names the " +
+				"statement and the reason. Rewrite the statement with plain loops, array methods, `Map` and `Set` over " +
+				"props, locals and module constants, or compute the value in one expression. A value that depends on " +
+				"state, such as a signal, is expected to be computed in the browser and does not produce this warning.",
+		},
 		CodeInfo{
 			Code:  CodeRouteSourceUnsupported,
 			Title: "Route source uses a regex feature Go cannot run",

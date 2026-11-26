@@ -66,8 +66,12 @@ func (in *Interp) call(e *ast.CallExpr) (Value, bool) {
 		}
 	}
 	var fn Value
+	var recv Value
+	var key string
+	isMethod := false
 	if mem, ok := e.Callee.(*ast.MemberExpr); ok {
-		recv, short := in.eval(mem.Object)
+		var short bool
+		recv, short = in.eval(mem.Object)
 		if short {
 			return Undefined(), true
 		}
@@ -77,10 +81,11 @@ func (in *Interp) call(e *ast.CallExpr) (Value, bool) {
 		if mem.Optional && recv.IsNullish() {
 			return Undefined(), true
 		}
-		key, ok := in.propertyKey(mem)
+		key, ok = in.propertyKey(mem)
 		if !ok {
 			return in.Eval(mem.Property), false
 		}
+		isMethod = true
 		if recv.IsNullish() {
 			return Unsupported("TypeError: cannot read properties of " + recv.ToString() + " (reading '" + key + "') in " + calleeName(mem)), false
 		}
@@ -90,6 +95,16 @@ func (in *Interp) call(e *ast.CallExpr) (Value, bool) {
 		fn, short = in.eval(e.Callee)
 		if short {
 			return Undefined(), true
+		}
+	}
+	if in.InPlace && isMethod && recv.kind == KindArray && inPlaceMethods[key] {
+		args, bad := in.Args(e.Args)
+		if bad.IsUnknown() {
+			return bad, false
+		}
+		in.callPos = e.Position
+		if r, ok := inPlaceArrayMethod(recv, key, args); ok {
+			return r, false
 		}
 	}
 	if fn.IsUnknown() {

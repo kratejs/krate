@@ -606,6 +606,9 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		eval.SetRestProps(map[string]map[string]ast.Expr{node.RestPropsName: node.RestProps})
 	}
 	if node.SSREvalBindings != nil {
+		if node.Fn != nil && len(irtree.RenderMutatedNames(node.Fn.Body)) > 0 {
+			eval.IsolateBindings()
+		}
 		eval.SetBindings(node.SSREvalBindings)
 	}
 	if e.DevInspect {

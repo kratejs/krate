@@ -487,6 +487,7 @@ func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs
 	}
 	b.liveProps, b.livePropsParam = nil, ""
 	b.localFnBody = childFn.Body
+	b.localJSXInits = nil
 	b.locateOnly++
 	slots := b.buildSlotNodes(ret, string(childID))
 	b.locateOnly--

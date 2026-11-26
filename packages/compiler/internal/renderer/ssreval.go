@@ -24,6 +24,8 @@ import (
 type SSREval struct {
 	functions map[string]*ast.FnDecl
 	depth     int
+	// isolate copies the values bound by SetBindings (see IsolateBindings).
+	isolate bool
 
 	// devMark marks the output of each component this evaluator renders
 	// itself for the dev component inspector (nil outside dev builds);
@@ -178,7 +180,9 @@ func NewSSREval(functions map[string]*ast.FnDecl) *SSREval {
 	e.frame = jsvalue.NewScope(e.module)
 	// Static and server components are baked into HTML, so the build clock and
 	// Math.random() may be read here.
-	e.in = &jsvalue.Interp{Scope: e.frame, Volatile: true}
+	// The evaluator's values are its own copies (see resolveIdent), so
+	// in-place array methods are safe.
+	e.in = &jsvalue.Interp{Scope: e.frame, Volatile: true, InPlace: true, LoopCap: 100_000}
 	e.in.Hooks = jsvalue.Hooks{
 		Ident: e.resolveIdent,
 		Call:  e.interceptCall,
@@ -319,11 +323,25 @@ func (e *SSREval) SetEvalJS(fn func(code string) (string, error)) {
 	e.evalJS = fn
 }
 
+// IsolateBindings makes SetBindings copy the values it binds. A host calls it
+// for a component whose body may change what it reads.
+func (e *SSREval) IsolateBindings() { e.isolate = true }
+
 // SetBindings binds the root component's props. Each name is bound directly
 // (destructured parameters) and the whole set is also exposed as a `props`
 // object (a single `props` parameter), matching how the IR builder flattens
 // call-site attributes.
 func (e *SSREval) SetBindings(bindings map[string]jsvalue.Value) {
+	if e.isolate {
+		// The caller's values may be shared with other components and pages;
+		// a body that changes them works on copies.
+		cl := jsvalue.NewCloner()
+		cp := make(map[string]jsvalue.Value, len(bindings))
+		for k, v := range bindings {
+			cp[k] = cl.Clone(v)
+		}
+		bindings = cp
+	}
 	names := make([]string, 0, len(bindings))
 	for k := range bindings {
 		names = append(names, k)

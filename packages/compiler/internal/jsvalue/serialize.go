@@ -416,6 +416,11 @@ func writeJSONString(b *strings.Builder, s string) {
 // (nil for JSX, functions and Unknown values).
 func ToAST(v Value) ast.Expr {
 	switch v.kind {
+	case KindJSX:
+		if v.jsx != nil {
+			return v.jsx.Expr
+		}
+		return nil
 	case KindUndefined:
 		return &ast.Identifier{Name: "undefined"}
 	case KindNull:

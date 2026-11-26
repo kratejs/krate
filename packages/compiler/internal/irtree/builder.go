@@ -351,6 +351,7 @@ type componentCtx struct {
 	// Render scope of the component body.
 	currentNode     *ComponentNode      // component whose slots are being built
 	localFnBody     []ast.Stmt          // body of current component function for handler resolution
+	localJSXInits   map[string]ast.Expr // locals whose JSX value statements built up (see localexec.go)
 	localSignals    map[string]ast.Expr // component-local signal context (name -> initial expr)
 	signalSetters   map[string]bool     // component-local signal setter names
 	localParamNames map[string]bool     // component parameter names (destructured or not) for undefined folding

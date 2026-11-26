@@ -306,6 +306,9 @@ func (b *builder) localInit(name string, needJSX bool) (ast.Expr, bool) {
 	if b.isShadowed(name) {
 		return nil, false
 	}
+	if init, ok := b.localJSXInits[name]; ok {
+		return init, true
+	}
 	var init ast.Expr
 	for _, stmt := range b.localFnBody {
 		vs, ok := stmt.(*ast.VarStmt)

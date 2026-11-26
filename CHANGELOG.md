@@ -670,6 +670,18 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Build-time evaluation runs statements that build up a value in a component body, not only expressions:
+  a loop that groups pages with `find` and `push`, `switch` inside loops, `break`/`continue` (labelled too),
+  nested loops, `let` reassignment, `Map`/`Set` building, and `push`/`pop`/`shift`/`unshift`/`splice`/`sort`/
+  `reverse`/index assignment/`delete` on arrays and objects the component creates, including pushing
+  objects, arrays and JSX. Mutation follows JS aliasing (`let g = groups.find(...)` then `g.items.push(...)`
+  changes the element of `groups`). Before, such a value was left unknown, so a component with state
+  rendered it empty until hydration and one without state failed with `KR8352`. A module constant, or a
+  prop that came from one, is copied the first time a component changes it, so one page's change never
+  reaches another page's render. The limit is 100000 loop iterations per component (it was 1000 for
+  components with state), and a statement the build cannot run now says why in a `KR8356` warning (naming the
+  statement and the reason) instead of silently deferring to the browser. `sort()` and `reverse()` called as
+  statements in a component without state now change the array, as in JS, instead of returning an unused copy.
 - Build-time component folding and module-constant resolution are now deterministic across clean builds:
   stateless components that compute chained locals via module-level helper functions fold in declaration
   order with full builder hooks instead of random map iteration (eliminating intermittent `KR8352`

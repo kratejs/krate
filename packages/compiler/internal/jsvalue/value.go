@@ -102,6 +102,7 @@ type Value struct {
 	coll *Collection
 	date *DateValue
 	re   *RegExpValue
+	jsx  *JSXNode
 	// unsupported marks an Unknown produced by an unsupported construct (as
 	// opposed to a value that is merely dynamic).
 	unsupported bool

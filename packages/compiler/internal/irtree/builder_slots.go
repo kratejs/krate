@@ -4896,6 +4896,8 @@ func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func
 		b.propKeys = savedKeys
 	}()
 	fold := collectLocalVarsWithBuilder(fn.Body, b.sigMap(), scope, nextUseId, b)
+	b.localJSXInits = fold.jsxInits
+	b.reportFoldNotes(fold)
 	locals, inits := fold.locals, fold.inits
 	destructured := destructNames(fold.destructs)
 	// Walk locals in source declaration order so chained locals that depend
