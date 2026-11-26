@@ -219,6 +219,10 @@ import { Callout } from '../../components/callout';
 <Callout type="tip">Imports work too.</Callout>
 ```
 
+A relative import resolves from the `.mdx` file's own directory, also in docs-plugin
+pages (which the build generates under `.krate/gen/`): the same `../../components/callout`
+works wherever the file sits. Aliases (`@/`, `~/`), packages and URLs are used as written.
+
 ## Configuration
 
 ```typescript

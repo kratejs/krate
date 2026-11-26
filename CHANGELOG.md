@@ -670,6 +670,20 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Docs plugin: generated docs pages can use the app's root layout. A new `rootLayout: true` option wraps
+  every generated page (tag and category pages too) in `pagesDir/_layout.*`, outside the theme's layout, so
+  the app's fonts, global CSS, `<html lang>` and `<body>` attributes and metadata apply, with one `<html>` and
+  one `<body>` in the output. Default stays `false`. See guides/customizing-docs.
+- Docs plugin: relative imports in a docs `.mdx` (or `.md`) file, in `import`, `export ... from` and
+  `import()`, resolve from the content file's own directory instead of `.krate/gen/docs/<route dir>`, so
+  `import Card from "../../components/card"` no longer works at one depth and fails at another. Aliases,
+  packages and URLs are left as written.
+- Docs plugin colour mode: new `defaultTheme` (`"light"`, `"dark"` or `"system"`, default `"system"`) is used
+  when no choice is stored, and `themeScript: false` turns the pre-paint script off for themes that manage
+  the mode themselves. The settings reach the theme as `props.colorMode`; `@krate/base-docs-theme`'s toggle,
+  layout and `ThemePrePaint` (new `defaultTheme` and `enabled` props, `site.defaultTheme`/`site.themePrePaint`)
+  follow them. A script marked `data-krate-once` is kept once per page, so the plugin's script and a root
+  layout's `ThemePrePaint` no longer both run. `HomeLayout`'s toggle now also uses `site.themeStorageKey`.
 - Build-time evaluation runs statements that build up a value in a component body, not only expressions:
   a loop that groups pages with `find` and `push`, `switch` inside loops, `break`/`continue` (labelled too),
   nested loops, `let` reassignment, `Map`/`Set` building, and `push`/`pop`/`shift`/`unshift`/`splice`/`sort`/

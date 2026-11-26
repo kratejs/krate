@@ -730,6 +730,9 @@ docs({
   pagination: true,   // prev/next links (default true)
   editLink: { pattern: "https://github.com/org/repo/edit/main/:path" },
   search: { placeholder: "Search the docs", hotkey: "/" },
+  rootLayout: false,       // wrap docs pages in the app's root _layout (default false)
+  defaultTheme: "system",  // "light" | "dark" | "system" when no choice is stored
+  themeScript: true,       // the pre-paint colour-mode script (default true)
 })
 ```
 

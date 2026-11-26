@@ -457,6 +457,11 @@ type Builder struct {
 
 	segmentGenMu sync.Mutex
 	segmentGen   map[string]string // generated segment source path -> content written
+
+	// rootLayoutPages are the plugin-generated pages (outside pagesDir) that
+	// asked to be wrapped in the app's root layout. Set once per build, before
+	// any page is built.
+	rootLayoutPages map[string]bool
 }
 
 // shouldMinifyJS reports whether generated JavaScript should be minified.
@@ -1250,8 +1255,15 @@ func (b *Builder) BuildAll() error {
 	}
 
 	// Add generated pages (from BeforeBuild hooks like docs plugin)
+	b.rootLayoutPages = nil
 	for _, gp := range genPages {
 		pages = append(pages, gp.Path)
+		if gp.RootLayout {
+			if b.rootLayoutPages == nil {
+				b.rootLayoutPages = map[string]bool{}
+			}
+			b.rootLayoutPages[gp.Path] = true
+		}
 	}
 
 	// Run GenerateRoutes hooks for plugin-generated virtual pages
@@ -4441,6 +4453,19 @@ func findRouteStack(pagePath, pagesDir string) []routeBoundary {
 		dir = parent
 	}
 	return stack
+}
+
+// rootLayoutBoundaries returns the layouts directly in pagesDir (the app's
+// root layout); route-group and nested layouts do not apply to a generated
+// page. It is appended after a generated page's own boundaries, outermost.
+func rootLayoutBoundaries(pagesDir string) []routeBoundary {
+	var out []routeBoundary
+	for _, name := range layoutNames {
+		if p := firstExisting(pagesDir, []string{name}); p != "" {
+			out = append(out, routeBoundary{Path: p, Kind: "layout", Dir: pagesDir})
+		}
+	}
+	return out
 }
 
 // firstExisting returns the first dir/name that exists (memoized in

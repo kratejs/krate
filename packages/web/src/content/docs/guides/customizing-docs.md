@@ -37,6 +37,9 @@ export default defineConfig({
 | `sidebar` | Custom sidebar override |
 | `links` | Social links rendered in the navbar |
 | `search` | Search bar options (see [Search](/docs/features/search/)) |
+| `rootLayout` | Wrap generated docs pages in the app's root `_layout` (default `false`, see [Using the app's root layout](#using-the-apps-root-layout)) |
+| `defaultTheme` | Colour mode when none is stored: `"light"`, `"dark"` or `"system"` (default, follows `prefers-color-scheme`) |
+| `themeScript` | Inject the pre-paint colour-mode script (default `true`, see [Colour mode](#colour-mode)) |
 
 ## What the plugin generates
 
@@ -93,12 +96,59 @@ A page whose file name is a route convention name (`template`, `loading`, `error
 `404`, `not-found`, `500`, `403`, `401`, `forbidden`, `unauthorized`, or anything
 starting with `_`) still renders as an ordinary docs page at its own URL.
 
+## Using the app's root layout
+
+Generated docs pages live under `.krate/gen/docs/`, outside `pagesDir`, so by
+default none of your app's layouts wrap them: the docs theme owns the whole shell.
+That means the fonts, global CSS, and `<html>`/`<body>` attributes you set in
+`src/pages/_layout.tsx` do not reach the docs. Opt in with `rootLayout`:
+
+```ts
+docs({ contentDir: "src/content/docs", theme: baseDocsTheme(), rootLayout: true })
+```
+
+Every generated page (including the tag and category pages) is then wrapped in
+`pagesDir/_layout.*`, the same way a page at `src/pages/docs/...` would be: the root
+layout's markup is outermost, the theme's layout is inside it, and the root layout's
+`<Head>` content (`<html lang>`, `<body>` attributes, metadata, stylesheets) is merged
+into the docs page. Only the root layout applies: layouts in route groups or in
+other directories do not.
+
+With `rootLayout` on, a theme should render its shell as a plain element such as
+`<div>` or `<main>`, and leave `<html>`, `<body>` and the document `<title>`
+chrome to the root layout; set `<html>`/`<body>` attributes through `<Head>`.
+`@krate/base-docs-theme` and `@krate/simple-docs-theme` already do this, so
+the page has exactly one `<html>` and one `<body>`. The default (`false`) leaves
+existing sites unchanged.
+
+## Colour mode
+
+The docs plugin adds a small script to every page's `<head>` that sets
+`data-theme` on `<html>` before first paint, from the choice stored in
+`localStorage` (key `theme`, or the theme's `themeStorageKey`) or, when nothing is
+stored, from `defaultTheme`:
+
+| `defaultTheme` | Nothing stored |
+|----------------|----------------|
+| `"system"` (default) | follow `prefers-color-scheme` |
+| `"light"` | light |
+| `"dark"` | dark |
+
+A visitor's stored choice always wins. Set `themeScript: false` to drop the script
+entirely, for a theme or root layout that manages the colour mode itself. The
+plugin passes the same settings to the theme as `props.colorMode`
+(`{ default, prePaint, storageKey }`), and `@krate/base-docs-theme`'s toggle
+starts from them. If the root layout renders `ThemePrePaint` from
+`@krate/base-docs-theme/shell` (which takes `defaultTheme` too), the two scripts
+carry the same `data-krate-once="theme-prepaint"` marker and the page keeps one.
+A custom script you want kept once per page can use the same attribute.
+
 ## The layout component
 
 The layout is a normal Krate TSX component receiving a single `DocsLayoutProps`
 object (`pageTitle`, `siteTitle`, `sidebarItems`, `tocItems`, `breadcrumbs`,
-`prev`/`next`, `socialLinks`, `currentPath`, `routeBase`, tag/category links, and
-optional `options`). It renders `{children}` for the content and owns all
+`prev`/`next`, `socialLinks`, `currentPath`, `routeBase`, tag/category links,
+`colorMode`, and optional `options`). It renders `{children}` for the content and owns all
 surrounding chrome.
 
 Each `tocItems` entry is `{ title, id, depth, html? }`. `title` is the heading's

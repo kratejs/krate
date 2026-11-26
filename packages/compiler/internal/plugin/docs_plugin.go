@@ -41,6 +41,16 @@ type DocsPluginOptions struct {
 	Breadcrumbs *bool `json:"breadcrumbs,omitempty"`
 	// Pagination toggles prev/next links (default true).
 	Pagination *bool `json:"pagination,omitempty"`
+	// RootLayout wraps every generated docs page in the app's root layout
+	// (pagesDir/_layout.*), so the app's fonts, global CSS and <html>/<body>
+	// attributes apply. Default false: the theme owns the whole shell.
+	RootLayout bool `json:"rootLayout,omitempty"`
+	// DefaultTheme is the colour mode used when none is stored: "light",
+	// "dark" or "system" (default, follow prefers-color-scheme).
+	DefaultTheme string `json:"defaultTheme,omitempty"`
+	// ThemeScript toggles the pre-paint script that sets data-theme on <html>
+	// (default true). Turn it off for themes that manage colour mode.
+	ThemeScript *bool `json:"themeScript,omitempty"`
 
 	// titleSlot is set from the resolved theme: the layout renders the page's
 	// leading <h1> itself (props.titleHTML), so the plugin removes it from the
@@ -58,6 +68,31 @@ type DocsPluginOptions struct {
 func (o *DocsPluginOptions) TOCEnabled() bool         { return o.TOC == nil || *o.TOC }
 func (o *DocsPluginOptions) BreadcrumbsEnabled() bool { return o.Breadcrumbs == nil || *o.Breadcrumbs }
 func (o *DocsPluginOptions) PaginationEnabled() bool  { return o.Pagination == nil || *o.Pagination }
+func (o *DocsPluginOptions) ThemeScriptEnabled() bool { return o.ThemeScript == nil || *o.ThemeScript }
+
+// DefaultThemeMode returns the configured default colour mode, "system" when
+// unset or not one of light/dark/system.
+func (o *DocsPluginOptions) DefaultThemeMode() string {
+	switch o.DefaultTheme {
+	case "light", "dark":
+		return o.DefaultTheme
+	}
+	return "system"
+}
+
+// themePrePaintScript returns the script that applies the stored colour mode
+// (or def when nothing valid is stored) to <html> before first paint. def is
+// "light", "dark" or "system".
+func themePrePaintScript(storageKey, def string) string {
+	keyJSON, _ := json.Marshal(storageKey)
+	fallback := "window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'"
+	if def == "light" || def == "dark" {
+		fallback = "'" + def + "'"
+	}
+	return "(function(){try{var k=" + string(keyJSON) +
+		";var s=localStorage.getItem(k);if(s!=='dark'&&s!=='light'){s=" + fallback + ";}" +
+		"document.documentElement.setAttribute('data-theme',s);}catch(e){}})();"
+}
 
 // SidebarConfig configures the docs sidebar. It accepts:
 //   - "auto" (default): build from the filesystem/frontmatter
@@ -478,7 +513,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 				}
 
 				fileLayoutRel := theme.importSpecifier(filepath.Dir(tsxPath))
-				tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, searchEnabled, b.sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, li, opts, themeOptions, cfg.Markdown, docs.DocsBasePath)
+				tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, filepath.Dir(tsxPath), searchEnabled, b.sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, li, opts, themeOptions, cfg.Markdown, docs.DocsBasePath)
 
 				_ = os.MkdirAll(filepath.Dir(tsxPath), 0755)
 				_ = os.WriteFile(tsxPath, []byte(tsxSource), 0644)
@@ -495,7 +530,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 
 	for res := range resultsCh {
 		if ctx.GeneratedPages != nil {
-			*ctx.GeneratedPages = append(*ctx.GeneratedPages, GeneratedPage{Path: res.tsxPath, Route: res.route})
+			*ctx.GeneratedPages = append(*ctx.GeneratedPages, GeneratedPage{Path: res.tsxPath, Route: res.route, RootLayout: opts.RootLayout})
 		}
 	}
 
@@ -748,7 +783,7 @@ func applyNavOverride(override *docs.NavOverride, autoTitle, autoLink string) (t
 	return title, link, link != ""
 }
 
-func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page docs.Page, layoutRel string, searchEnabled bool, sections []docs.SidebarItem, tocItems []docs.TOCItem, breadcrumbs []docs.Breadcrumb, prevTitle, prevLink, nextTitle, nextLink string, li docsLocaleInfo, opts *DocsPluginOptions, themeOptions json.RawMessage, mdConfig markdown.Config, routeBase string) string {
+func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page docs.Page, layoutRel, genDir string, searchEnabled bool, sections []docs.SidebarItem, tocItems []docs.TOCItem, breadcrumbs []docs.Breadcrumb, prevTitle, prevLink, nextTitle, nextLink string, li docsLocaleInfo, opts *DocsPluginOptions, themeOptions json.RawMessage, mdConfig markdown.Config, routeBase string) string {
 	prevTitle, prevLink, prevOk := applyNavOverride(page.Prev, prevTitle, prevLink)
 	nextTitle, nextLink, nextOk := applyNavOverride(page.Next, nextTitle, nextLink)
 	if !opts.PaginationEnabled() {
@@ -774,7 +809,10 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	if data, err := os.ReadFile(page.SourcePath); err == nil {
 		rawSrc = string(data)
 		res := markdown.Compile(rawSrc, siteMarkdown(cfg, mdConfig), markdown.Options{MDX: strings.HasSuffix(page.SourcePath, ".mdx")})
-		mdxImports = res.ESM
+		mdxImports = make([]string, len(res.ESM))
+		for i, stmt := range res.ESM {
+			mdxImports[i] = relocateImports(stmt, filepath.Dir(page.SourcePath), genDir)
+		}
 		segments = res.Segments
 		mdxFrontmatter = markdown.FrontmatterDecl(res.Frontmatter, res.ESM)
 	}
@@ -1024,6 +1062,15 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	sb.WriteString(string(routeBaseJSON))
 	sb.WriteString(",\n")
 
+	colorJSON, _ := json.Marshal(map[string]any{
+		"default":    opts.DefaultThemeMode(),
+		"prePaint":   opts.ThemeScriptEnabled(),
+		"storageKey": themeStorageKey(themeOptions),
+	})
+	sb.WriteString("    colorMode: ")
+	sb.WriteString(string(colorJSON))
+	sb.WriteString(",\n")
+
 	if len(strings.TrimSpace(string(themeOptions))) > 2 {
 		sb.WriteString("    options: ")
 		sb.WriteString(string(themeOptions))
@@ -1076,22 +1123,14 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	// Pre-paint theme script: apply the persisted/preferred colour scheme before
 	// the stylesheet paints, so the page never flashes the wrong theme. Runs
 	// before the hydration bundle; the layout later reconciles the signal.
-	themeKey := "theme"
-	if len(themeOptions) > 0 {
-		var to struct {
-			ThemeStorageKey string `json:"themeStorageKey"`
-		}
-		if json.Unmarshal(themeOptions, &to) == nil && to.ThemeStorageKey != "" {
-			themeKey = to.ThemeStorageKey
-		}
+	themeKey := themeStorageKey(themeOptions)
+	if opts.ThemeScriptEnabled() {
+		// data-krate-once lets the head merge keep one copy when the app's
+		// root layout renders the same script.
+		sb.WriteString("        <script data-krate-once=\"theme-prepaint\">{`")
+		sb.WriteString(escapeTemplateLit(themePrePaintScript(themeKey, opts.DefaultThemeMode())))
+		sb.WriteString("`}</script>\n")
 	}
-	keyJSON, _ := json.Marshal(themeKey)
-	prepaint := "(function(){try{var k=" + string(keyJSON) +
-		";var s=localStorage.getItem(k);if(s!=='dark'&&s!=='light'){s=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}" +
-		"document.documentElement.setAttribute('data-theme',s);}catch(e){}})();"
-	sb.WriteString("        <script>{`")
-	sb.WriteString(escapeTemplateLit(prepaint))
-	sb.WriteString("`}</script>\n")
 	sb.WriteString("      </Head>\n")
 
 	sb.WriteString("      <DocsLayout {...docsProps} >")
@@ -1132,6 +1171,20 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	sb.WriteString("}\n")
 
 	return sb.String()
+}
+
+// themeStorageKey is the localStorage key for the colour mode: the theme's
+// themeStorageKey option, "theme" by default.
+func themeStorageKey(themeOptions json.RawMessage) string {
+	if len(themeOptions) > 0 {
+		var to struct {
+			ThemeStorageKey string `json:"themeStorageKey"`
+		}
+		if json.Unmarshal(themeOptions, &to) == nil && to.ThemeStorageKey != "" {
+			return to.ThemeStorageKey
+		}
+	}
+	return "theme"
 }
 
 // leadingTitleRe matches a heading 1 at the very start of rendered markdown.

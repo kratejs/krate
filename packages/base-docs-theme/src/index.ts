@@ -15,6 +15,7 @@ export type {
   SiteSocial,
   SiteFooterColumn,
 } from "./shell";
+export type { DefaultTheme } from "./colormode";
 export { activeNavLink, normalizeNavPath } from "./nav";
 export type { ActiveNav, ActiveNavLink } from "./nav";
 export { DocsSearch, DocsSearchComponent } from "./search";

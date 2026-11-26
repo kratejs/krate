@@ -49,6 +49,9 @@ func ConfigWarnings(cfg *config.Config) []string {
 			}
 		}
 		if pc.Name == "docs" {
+			if v, ok := pc.Options["defaultTheme"].(string); ok && v != "" && v != "light" && v != "dark" && v != "system" {
+				out = append(out, fmt.Sprintf("docs.defaultTheme %q is not light, dark or system (using system)", v))
+			}
 			if v, ok := pc.Options["editLinkBase"].(string); ok && v != "" {
 				out = append(out, "docs.editLinkBase is deprecated; use docs.editLink.base (or docs.editLink.pattern)")
 			}

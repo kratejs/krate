@@ -554,7 +554,7 @@ export function DocsSearch(props: DocsSearchProps) {
       </button>
       {hotkey && (
         <Head>
-          <script>{"(function(){" + PLATFORM_PREPAINT + "})();"}</script>
+          <script data-krate-once="platform-prepaint">{"(function(){" + PLATFORM_PREPAINT + "})();"}</script>
         </Head>
       )}
       <dialog
