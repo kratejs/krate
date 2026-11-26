@@ -651,6 +651,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- CSS modules imported through a tsconfig `paths` alias (`import s from "@/components/box.module.css"`)
+  now get their classes applied: the page no longer throws `ReferenceError: s is not defined` (KR8352 on
+  larger sites), and server bundles no longer fail with "cannot resolve CSS module". A client chunk
+  that imports a CSS module also no longer fails with esbuild's "without an output path configured"
+  message when it is rebuilt alone, so the chunk's real error surfaces.
 - Docs search with Pagefind: result titles and excerpts kept the page's HTML entities, so code in an
   excerpt read `&lt;Link href&gt;` instead of `<Link href>`.
 

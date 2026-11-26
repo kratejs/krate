@@ -183,7 +183,7 @@ func (r *serverBundleRun) compile(page *PageResult, logf func(format string, arg
 			"@krate/runtime",
 			"@krate/runtime/*",
 		},
-		Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(files), serverExportPlugin(page.ServerExports, absSource, files), goServerBundlePlugin(page.GoBaked, root, files), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), serverRuntimeTagsPlugin(), serverGlobalsPlugin(root), pathAliasPlugin(res), externalNodeModulesPluginMemo(outPath, serverMemo))...),
+		Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root, res), cbPlugin, unusedClientModulePlugin(files), serverExportPlugin(page.ServerExports, absSource, files), goServerBundlePlugin(page.GoBaked, root, files), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), serverRuntimeTagsPlugin(), serverGlobalsPlugin(root), pathAliasPlugin(res), externalNodeModulesPluginMemo(outPath, serverMemo))...),
 		Stdin: &api.StdinOptions{
 			Loader:     api.LoaderTSX,
 			Contents:   stdinContents,
