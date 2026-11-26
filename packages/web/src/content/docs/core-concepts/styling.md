@@ -72,6 +72,21 @@ If a `tailwind.config.{ts,js,mjs}` file exists, or your CSS uses `@tailwind` or
 without the reset or utilities. A directive added while `krate dev` is running
 takes effect after a restart.
 
+### Class detection
+
+With no `content` or `scanDirs`, Krate looks for class names in `src/` and in
+every project source file the build compiles: the pages, layouts and the
+modules they import, wherever they live (a top-level `components/` folder
+reached through a `@/*` alias, for example). Files in `node_modules` are not
+scanned. Arbitrary values (`h-[1.3rem]`), variants and `md:` prefixes are
+found as in any other file.
+
+- `@source "../shared-ui"` adds a directory (or a glob such as
+  `"../ui/**/*.tsx"`) to the default; it does not replace it.
+- `@import "tailwindcss" source(none)` turns automatic detection off, and
+  `source("../app")` replaces it with that directory.
+- Setting `content` or `scanDirs` scans exactly those paths.
+
 ### CSS-first directives
 
 Krate reads the Tailwind v4 CSS-first directives from your stylesheets (files
@@ -90,7 +105,7 @@ configure the generator, and **removes them from the shipped CSS**:
   @keyframes fadein { from { opacity: 0 } to { opacity: 1 } }
 }
 
-@source "../shared-ui";               /* extra directory to scan */
+@source "../shared-ui";               /* extra directory or glob, added to the default */
 @source not "../shared-ui/legacy";    /* excluded directory */
 @source inline("underline p-{1,2}");  /* always generate these */
 

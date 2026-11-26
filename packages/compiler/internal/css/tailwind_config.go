@@ -40,6 +40,11 @@ type TailwindOptions struct {
 	// ExecuteConfig forces in-process config evaluation (esbuild + QuickJS)
 	// instead of the static parser.
 	ExecuteConfig bool
+	// SourceFiles are source files the build compiles (pages, layouts and the
+	// modules they import). With no `content`/`scanDirs` they are scanned
+	// besides the default `src`, so classes in a top-level components/ folder
+	// are found.
+	SourceFiles []string
 }
 
 // configFileNames are the supported tailwind config filenames.
@@ -308,15 +313,18 @@ func GenerateTailwindDirectives(root string, cfg *TailwindConfig, opts TailwindO
 		res.Warnings = append(res.Warnings, cfg.Warnings...)
 	}
 
-	var dirs []string
+	var dirs, files []string
 	if !d.NoAutoSource {
 		dirs = resolveScanDirs(root, opts)
+		if len(opts.ContentOverrides) == 0 && len(opts.ScanDirs) == 0 {
+			files = opts.SourceFiles
+		}
 	}
 	dirs = append(dirs, d.Sources...)
 	scanner := NewTailwindScanner(root)
 	scanner.Exclude = d.Excludes
 	scanner.Names = customUtilityRoots(&generator.Theme)
-	classes := scanner.ScanClasses(dirs)
+	classes := scanner.ScanClasses(dirs, files...)
 	for _, c := range d.Inline {
 		classes[c] = true
 	}

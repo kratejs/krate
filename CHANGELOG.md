@@ -651,6 +651,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Tailwind now emits utilities written in project files outside `src/` (a top-level `components/`
+  folder imported through a `@/*` alias, for example): with no `content`/`scanDirs`, the modules the
+  build compiles are scanned too, in `krate dev` rebuilds as well. `@source` globs (`dir/**/*.tsx`)
+  also work in `@import "tailwindcss" source(...)`.
 - An island on the React compatibility path no longer throws `ReferenceError` for values used only in its
   props: `<Chart data={loadRows()} />` now imports `loadRows` into the island chunk (it used to keep
   only imports used as JSX tags). KR8302 now also covers `@/` and `~/` alias imports.

@@ -1973,6 +1973,23 @@ func (b *Builder) tailwindOptions() css.TailwindOptions {
 	}
 }
 
+// moduleSourceFiles returns the project files the pages built so far depend
+// on (pages, layouts and local modules), so Tailwind sees classes in files
+// outside src/. Dependencies in node_modules or outside the root are skipped.
+func (b *Builder) moduleSourceFiles() []string {
+	b.depMu.Lock()
+	defer b.depMu.Unlock()
+	files := make([]string, 0, len(b.depGraph))
+	for f := range b.depGraph {
+		if !isWithin(f, b.Root) || strings.Contains(filepath.ToSlash(f), "/node_modules/") {
+			continue
+		}
+		files = append(files, f)
+	}
+	sort.Strings(files)
+	return files
+}
+
 // twPageInfo is the Tailwind state one page's authored CSS contributes: its
 // CSS-first directives and the @keyframes/@property blocks that @apply expanded
 // (carried by the shared Tailwind sheet instead of every page sheet).
@@ -2102,6 +2119,7 @@ func (b *Builder) tailwindCSS() string {
 		return ""
 	}
 	opts := b.tailwindOptions()
+	opts.SourceFiles = b.moduleSourceFiles()
 	twCfg := css.LoadTailwindConfigWithOptions(b.Root, opts)
 	// v4 CSS-first config: directives from project CSS files plus those seen
 	// in the authored CSS processed so far (covers CSS outside the scan dirs).

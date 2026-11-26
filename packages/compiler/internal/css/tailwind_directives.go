@@ -130,6 +130,18 @@ func (d *TailwindDirectives) handle(r cssAtRule, baseDir string) {
 }
 
 func (d *TailwindDirectives) addSource(p, baseDir string) {
+	// A glob scans its static base directory.
+	if i := strings.IndexAny(p, "*?{["); i >= 0 {
+		p = p[:i]
+		if j := strings.LastIndexByte(p, '/'); j >= 0 {
+			p = p[:j]
+		} else {
+			p = "."
+		}
+		if p == "" {
+			p = "/"
+		}
+	}
 	abs := p
 	if !filepath.IsAbs(abs) {
 		abs = filepath.Join(baseDir, p)
