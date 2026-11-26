@@ -146,6 +146,11 @@ func GetProperty(v Value, key string) Value {
 			}
 			return Undefined()
 		}
+		if v.arr != nil && v.arr.Props != nil {
+			if p, ok := (Value{kind: KindObject, obj: v.arr.Props}).Get(key); ok {
+				return p
+			}
+		}
 		if arrayMethods[key] {
 			return boundMethod(v, key)
 		}
@@ -210,6 +215,10 @@ func GetProperty(v Value, key string) Value {
 		if dateMethods[key] {
 			return boundMethod(v, key)
 		}
+	case KindRegExp:
+		if p, ok := regexpProperty(v, key); ok {
+			return p
+		}
 	}
 	// A standard member the interpreter has no implementation for must not read
 	// as undefined: `typeof arr.splice` or `if (arr.toSpliced)` would fold to the
@@ -238,6 +247,8 @@ func builtinTypeName(k Kind) string {
 		return "Set"
 	case KindDate:
 		return "Date"
+	case KindRegExp:
+		return "RegExp"
 	}
 	return "Object"
 }
@@ -255,6 +266,8 @@ func realBuiltinMember(k Kind, key string) bool {
 		return setBuiltinMembers[key]
 	case KindDate:
 		return dateBuiltinMembers[key]
+	case KindRegExp:
+		return regexpBuiltinMembers[key]
 	}
 	if sharedBuiltinMembers[key] {
 		return k == KindArray || k == KindString || k == KindNumber || k == KindBool
@@ -297,6 +310,7 @@ var stringMethods = map[string]bool{
 	"toUpperCase": true, "toLowerCase": true,
 	"trim": true, "trimStart": true, "trimEnd": true, "split": true, "slice": true, "substring": true,
 	"startsWith": true, "endsWith": true, "includes": true, "indexOf": true, "lastIndexOf": true,
+	"match": true, "matchAll": true, "search": true,
 	"replace": true, "replaceAll": true, "padStart": true, "padEnd": true, "repeat": true,
 	"charAt": true, "at": true, "concat": true, "toString": true, "valueOf": true, "charCodeAt": true,
 }
@@ -325,6 +339,8 @@ func boundMethod(recv Value, name string) Value {
 			return iteratorMethod(recv, name, args)
 		case KindDate:
 			return dateMethod(recv, name, args)
+		case KindRegExp:
+			return regexpMethod(recv, name, args)
 		case KindObject:
 			switch name {
 			case "hasOwnProperty":
@@ -697,6 +713,9 @@ func stringMethod(s, name string, args []Value) Value {
 		return String(s)
 	case "split":
 		sepV := arg(args, 0)
+		if sepV.kind == KindRegExp {
+			return stringSplitRegExp(s, sepV, arg(args, 1))
+		}
 		limit := math.MaxInt32
 		if l := arg(args, 1); l.kind != KindUndefined {
 			limit = int(ToUint32(l.ToNumber()))
@@ -720,6 +739,12 @@ func stringMethod(s, name string, args []Value) Value {
 			parts = parts[:limit]
 		}
 		return NewArray(parts...)
+	case "match":
+		return stringMatch(s, arg(args, 0))
+	case "matchAll":
+		return stringMatchAll(s, arg(args, 0))
+	case "search":
+		return stringSearch(s, arg(args, 0))
 	case "slice":
 		st := relIndex(arg(args, 0), n, 0)
 		en := relIndex(arg(args, 1), n, n)
@@ -748,7 +773,11 @@ func stringMethod(s, name string, args []Value) Value {
 		return String(fromUnits(u[st:en]))
 	case "startsWith", "endsWith", "includes", "indexOf", "lastIndexOf":
 		needleV := arg(args, 0)
-		if needleV.kind != KindString && needleV.kind != KindNumber && needleV.kind != KindBool && !needleV.IsNullish() {
+		if needleV.kind == KindRegExp {
+			if name == "startsWith" || name == "endsWith" || name == "includes" {
+				return Unsupported("TypeError: First argument to String.prototype." + name + " must not be a regular expression")
+			}
+		} else if needleV.kind != KindString && needleV.kind != KindNumber && needleV.kind != KindBool && !needleV.IsNullish() {
 			return Unsupported("String.prototype." + name + " with a non-string argument")
 		}
 		needle := units(needleV.ToString())
@@ -773,8 +802,11 @@ func stringMethod(s, name string, args []Value) Value {
 		}
 	case "replace", "replaceAll":
 		pat := arg(args, 0)
+		if pat.kind == KindRegExp {
+			return stringReplaceRegExp(s, name == "replaceAll", pat, arg(args, 1))
+		}
 		if pat.kind != KindString {
-			return Unsupported("String.prototype." + name + " with a non-string pattern (regular expressions are not supported at build time)")
+			return Unsupported("String.prototype." + name + " with a non-string pattern")
 		}
 		repl := arg(args, 1)
 		var out strings.Builder

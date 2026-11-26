@@ -19,7 +19,7 @@ func StrictEquals(a, b Value) bool {
 		return a.n == b.n // NaN != NaN, +0 == -0
 	case KindString, KindBigInt:
 		return a.s == b.s
-	case KindArray, KindObject, KindFunction, KindIterator, KindMap, KindSet, KindDate:
+	case KindArray, KindObject, KindFunction, KindIterator, KindMap, KindSet, KindDate, KindRegExp:
 		return a.same(b)
 	}
 	// JSX elements are fresh objects per evaluation; Unknown is never equal.
@@ -64,7 +64,7 @@ func LooseEquals(a, b Value) bool {
 
 func isObjectKind(k Kind) bool {
 	switch k {
-	case KindArray, KindObject, KindFunction, KindJSX, KindIterator, KindMap, KindSet, KindDate:
+	case KindArray, KindObject, KindFunction, KindJSX, KindIterator, KindMap, KindSet, KindDate, KindRegExp:
 		return true
 	}
 	return false
@@ -201,8 +201,16 @@ func BinaryOp(op string, a, b Value) Value {
 			if idx == "length" {
 				return Bool(true)
 			}
+			if b.arr != nil && b.arr.Props != nil {
+				if _, ok := (Value{kind: KindObject, obj: b.arr.Props}).Get(idx); ok {
+					return Bool(true)
+				}
+			}
 			n := StringToNumber(idx)
 			return Bool(isArrayIndex(idx) && int(n) < len(b.Elems()))
+		}
+		if b.kind == KindRegExp {
+			return Bool(regexpBuiltinMembers[a.ToString()])
 		}
 	}
 	return Unsupported("binary operator " + op)

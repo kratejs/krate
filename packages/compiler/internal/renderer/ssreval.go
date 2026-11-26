@@ -605,7 +605,7 @@ func (e *SSREval) isBound(name string) bool {
 // nativeGlobals are the built-ins jsvalue implements itself. Their calls run
 // natively and only fall back to the JS engine for members jsvalue lacks.
 var nativeGlobals = map[string]bool{
-	"Date": true, "Math": true, "JSON": true, "String": true, "Number": true, "Boolean": true,
+	"Date": true, "RegExp": true, "Math": true, "JSON": true, "String": true, "Number": true, "Boolean": true,
 	"Object": true, "Array": true, "parseInt": true, "parseFloat": true,
 	"isNaN": true, "isFinite": true, "URL": true, "encodeURIComponent": true, "encodeURI": true, "decodeURIComponent": true,
 }
@@ -624,8 +624,9 @@ func (e *SSREval) maybeDelegate(expr ast.Expr, callee ast.Expr) (jsvalue.Value, 
 		// The embedded engine runs in the build machine's time zone and
 		// locale and reads its own clock, so a Date it computes would differ
 		// from the build environment jsvalue models. A Date expression the
-		// evaluator cannot reproduce stays unresolved instead.
-		if !v.IsUnsupported() || root == "Date" {
+		// evaluator cannot reproduce stays unresolved instead. RegExp runs
+		// through jsvalue's own QuickJS helper so its value stays a RegExp.
+		if !v.IsUnsupported() || root == "Date" || root == "RegExp" {
 			return v, true
 		}
 	}

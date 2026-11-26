@@ -651,6 +651,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Build-time evaluation now supports JavaScript regular expressions (literals and `new RegExp(...)`),
+  stored in locals, module constants, or objects and used with `exec`, `test`, `lastIndex`,
+  `String.prototype.match`, `matchAll`, `replace`, `replaceAll` (string and callback replacers),
+  `search`, and `split` (including match arrays with `index`, `input`, `groups`, and `indices`),
+  evaluated through a pooled embedded QuickJS VM so stateless components that tokenize or format
+  strings with regexes bake directly to static HTML with zero client JS.
 - Dynamic-route pages with `generateStaticParams` that destructure `{ params }` (or nested/renamed/plain
   props forms) and index module-level data (`const { slug } = params; const [first] = DATA[slug]`,
   `DATA[params.slug]`, `DATA[slug].title`, or nested object destructuring) now fold those locals at build

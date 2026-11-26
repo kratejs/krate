@@ -256,8 +256,10 @@ func literalValue(e *ast.Literal) Value {
 			return Undefined()
 		}
 		return Null()
+	case ast.RegexpLit:
+		return parseRegExpLiteral(e.Value)
 	}
-	return Unsupported("regular expression literals are not supported")
+	return Unsupported("unsupported literal " + e.Value)
 }
 
 func (in *Interp) ident(name string) Value {
@@ -388,6 +390,28 @@ func (in *Interp) binary(e *ast.BinaryExpr) Value {
 		in.Eval(e.Left)
 		return in.Eval(e.Right)
 	case "instanceof":
+		left := in.Eval(e.Left)
+		right := in.Eval(e.Right)
+		if left.IsUnknown() {
+			return left
+		}
+		if right.IsUnknown() {
+			return right
+		}
+		if right.kind == KindFunction && right.fn != nil && right.fn.Builtin {
+			switch right.fn.Name {
+			case "RegExp":
+				return Bool(left.kind == KindRegExp)
+			case "Array":
+				return Bool(left.kind == KindArray)
+			case "Date":
+				return Bool(left.kind == KindDate)
+			case "Map":
+				return Bool(left.kind == KindMap)
+			case "Set":
+				return Bool(left.kind == KindSet)
+			}
+		}
 		return Unsupported("instanceof")
 	}
 	left := in.Eval(e.Left)
@@ -427,6 +451,11 @@ func (in *Interp) assignTo(target ast.Expr, v Value) Value {
 					obj.arr.Elems = append(obj.arr.Elems, Undefined())
 				}
 				obj.arr.Elems[idx] = v
+				return v
+			}
+		case KindRegExp:
+			if key == "lastIndex" && obj.re != nil {
+				obj.re.lastIndex = v
 				return v
 			}
 		case KindUnknown:
@@ -487,7 +516,7 @@ func (in *Interp) object(e *ast.ObjectExpr) Value {
 				for i, v := range src.Elems() {
 					obj.Set(NumberToString(float64(i)), v)
 				}
-			case KindUndefined, KindNull, KindBool, KindNumber, KindDate, KindMap, KindSet, KindIterator:
+			case KindUndefined, KindNull, KindBool, KindNumber, KindDate, KindMap, KindSet, KindIterator, KindRegExp:
 			case KindString:
 				for i, r := range []rune(src.s) {
 					obj.Set(NumberToString(float64(i)), String(string(r)))

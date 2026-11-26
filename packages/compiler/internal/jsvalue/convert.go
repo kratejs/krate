@@ -52,7 +52,7 @@ func (v Value) toPrimitive(numberHint bool) Value {
 			return dateNeedsEnv("the string form of a Date")
 		}
 		return String(v.ToString())
-	case KindArray, KindObject, KindJSX, KindFunction, KindIterator, KindMap, KindSet:
+	case KindArray, KindObject, KindJSX, KindFunction, KindIterator, KindMap, KindSet, KindRegExp:
 		return String(v.ToString())
 	}
 	return v
@@ -112,6 +112,8 @@ func (v Value) ToString() string {
 		return "[object Set]"
 	case KindIterator:
 		return "[object " + v.iter.Tag + "]"
+	case KindRegExp:
+		return v.re.String()
 	}
 	return ""
 }
@@ -135,7 +137,7 @@ func (v Value) TypeOf() string {
 	switch v.kind {
 	case KindUndefined:
 		return "undefined"
-	case KindNull, KindArray, KindObject, KindJSX, KindIterator, KindMap, KindSet, KindDate:
+	case KindNull, KindArray, KindObject, KindJSX, KindIterator, KindMap, KindSet, KindDate, KindRegExp:
 		return "object"
 	case KindBool:
 		return "boolean"

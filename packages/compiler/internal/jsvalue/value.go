@@ -46,6 +46,9 @@ const (
 	KindSet
 	// KindDate is a Date. Build time evaluation runs in UTC, see date.go.
 	KindDate
+	// KindRegExp is a JavaScript RegExp object. Matching runs in QuickJS, see
+	// regexp.go.
+	KindRegExp
 )
 
 func (k Kind) String() string {
@@ -78,6 +81,8 @@ func (k Kind) String() string {
 		return "set"
 	case KindDate:
 		return "date"
+	case KindRegExp:
+		return "regexp"
 	}
 	return "unknown"
 }
@@ -96,6 +101,7 @@ type Value struct {
 	iter *Iterator
 	coll *Collection
 	date *DateValue
+	re   *RegExpValue
 	// unsupported marks an Unknown produced by an unsupported construct (as
 	// opposed to a value that is merely dynamic).
 	unsupported bool
@@ -131,9 +137,11 @@ func (v Value) Thrown() *ThrownError {
 	return v.thrown
 }
 
-// Array is a JS array.
+// Array is a JS array. Props is non-nil only when the array carries own
+// non-index properties (such as a RegExp match's index, input and groups).
 type Array struct {
 	Elems []Value
+	Props *Object
 }
 
 // Object is a JS plain object with insertion-ordered keys.
@@ -323,6 +331,8 @@ func (v Value) same(o Value) bool {
 		return v.coll == o.coll
 	case KindDate:
 		return v.date == o.date
+	case KindRegExp:
+		return v.re == o.re
 	}
 	return false
 }
@@ -429,6 +439,13 @@ func (v Value) ContainsUnknown() bool {
 				return true
 			}
 		}
+		if v.arr != nil && v.arr.Props != nil {
+			for _, k := range v.arr.Props.keys {
+				if v.arr.Props.props[k].ContainsUnknown() {
+					return true
+				}
+			}
+		}
 	case KindObject:
 		for _, k := range v.obj.keys {
 			if v.obj.props[k].ContainsUnknown() {
@@ -439,17 +456,24 @@ func (v Value) ContainsUnknown() bool {
 	return false
 }
 
-// ContainsRuntimeObject reports whether v holds a Map, Set, Date or iterator at
-// any depth. The build can evaluate those, but they have no literal form, so
-// code that reaches the client must keep the original expression.
+// ContainsRuntimeObject reports whether v holds a Map, Set, Date, RegExp or
+// iterator at any depth. The build can evaluate those, but runtime objects
+// must keep their original expression when serialized for client signals.
 func (v Value) ContainsRuntimeObject() bool {
 	switch v.kind {
-	case KindMap, KindSet, KindDate, KindIterator:
+	case KindMap, KindSet, KindDate, KindIterator, KindRegExp:
 		return true
 	case KindArray:
 		for _, e := range v.Elems() {
 			if e.ContainsRuntimeObject() {
 				return true
+			}
+		}
+		if v.arr != nil && v.arr.Props != nil {
+			for _, k := range v.arr.Props.keys {
+				if v.arr.Props.props[k].ContainsRuntimeObject() {
+					return true
+				}
 			}
 		}
 	case KindObject:
@@ -471,6 +495,13 @@ func (v Value) firstUnknown() Value {
 		for _, e := range v.Elems() {
 			if u := e.firstUnknown(); u.kind == KindUnknown {
 				return u
+			}
+		}
+		if v.arr != nil && v.arr.Props != nil {
+			for _, k := range v.arr.Props.keys {
+				if u := v.arr.Props.props[k].firstUnknown(); u.kind == KindUnknown {
+					return u
+				}
 			}
 		}
 	case KindObject:

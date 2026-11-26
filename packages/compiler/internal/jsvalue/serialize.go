@@ -56,7 +56,7 @@ func renderChild(b *strings.Builder, v Value) error {
 				return err
 			}
 		}
-	case KindObject:
+	case KindObject, KindRegExp:
 		return ErrObjectChild
 	default:
 		return &UnknownChildError{Value: v}
@@ -145,6 +145,8 @@ func writeJSSource(b *strings.Builder, v Value) bool {
 		} else {
 			b.WriteString("new Date(" + NumberToString(v.date.ms) + ")")
 		}
+	case KindRegExp:
+		b.WriteString(v.re.String())
 	case KindMap, KindSet:
 		if v.kind == KindMap {
 			b.WriteString("new Map([")
@@ -369,7 +371,7 @@ func writeJSON(b *strings.Builder, v Value, gap, indent string) jsonResult {
 		} else {
 			writeJSONString(b, dateISO(v.date.ms))
 		}
-	case KindMap, KindSet, KindIterator:
+	case KindMap, KindSet, KindIterator, KindRegExp:
 		b.WriteString("{}")
 	case KindJSX:
 		// A React element serializes as its (opaque) object form; there is no
@@ -463,6 +465,8 @@ func ToAST(v Value) ast.Expr {
 			arg = ToAST(Number(v.date.ms))
 		}
 		return &ast.NewExpr{Callee: &ast.Identifier{Name: "Date"}, Args: []ast.Expr{arg}}
+	case KindRegExp:
+		return &ast.Literal{Kind: ast.RegexpLit, Value: v.re.String()}
 	}
 	return nil
 }

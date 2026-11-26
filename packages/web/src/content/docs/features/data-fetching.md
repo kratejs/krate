@@ -67,6 +67,13 @@ output on every machine:
   `new Set(values)`, `arr.entries()`, `arr.keys()`, `map.values()` and the like
   return real iterators (`.next()`, `.toArray()`, `.map()`) that also work with
   `for...of`, spread, `Array.from` and destructuring.
+- Regular expressions work at build time with JavaScript semantics (via the
+  embedded QuickJS engine): regex literals (`/pattern/flags`) and
+  `new RegExp(...)` can be stored in module constants and objects, passed to
+  `exec`, `test`, `String.prototype.match`, `matchAll`, `replace`, `replaceAll`
+  (with string or function replacers), `search` and `split`, and honour
+  `lastIndex`, `g`/`y`/`d` flags, lookbehind, backreferences and named capture
+  groups (`match.groups`).
 - A local such as `const now = new Date()` is a build value in a server or
   static component. In a client component it is evaluated by the browser when
   the page loads, so write the expression in the JSX

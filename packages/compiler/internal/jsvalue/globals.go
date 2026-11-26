@@ -65,6 +65,8 @@ func globalValue(in *Interp, name string) (Value, bool) {
 		return m, true
 	case "Date":
 		return dateCtor(in), true
+	case "RegExp":
+		return regexpCtor(), true
 	case "URL":
 		return urlCtor(), true
 	case "encodeURIComponent":
@@ -317,11 +319,22 @@ func objectCtor() Value {
 			}
 			return keys, vals, true
 		case KindArray:
-			keys := make([]string, len(v.Elems()))
-			for i := range keys {
+			elems := v.Elems()
+			keys := make([]string, len(elems))
+			vals := make([]Value, len(elems))
+			for i := range elems {
 				keys[i] = strconv.Itoa(i)
+				vals[i] = elems[i]
 			}
-			return keys, v.Elems(), true
+			if v.arr != nil && v.arr.Props != nil {
+				pv := Value{kind: KindObject, obj: v.arr.Props}
+				for _, k := range pv.Keys() {
+					keys = append(keys, k)
+					val, _ := pv.Get(k)
+					vals = append(vals, val)
+				}
+			}
+			return keys, vals, true
 		case KindString:
 			var keys []string
 			var vals []Value
@@ -330,7 +343,7 @@ func objectCtor() Value {
 				vals = append(vals, String(fromUnits([]uint16{c})))
 			}
 			return keys, vals, true
-		case KindNumber, KindBool, KindDate, KindMap, KindSet, KindIterator:
+		case KindNumber, KindBool, KindDate, KindMap, KindSet, KindIterator, KindRegExp:
 			return nil, nil, true
 		}
 		return nil, nil, false
