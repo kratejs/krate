@@ -651,6 +651,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- An island on the React compatibility path no longer throws `ReferenceError` for values used only in its
+  props: `<Chart data={loadRows()} />` now imports `loadRows` into the island chunk (it used to keep
+  only imports used as JSX tags). KR8302 now also covers `@/` and `~/` alias imports.
 - CSS modules imported through a tsconfig `paths` alias (`import s from "@/components/box.module.css"`)
   now get their classes applied: the page no longer throws `ReferenceError: s is not defined` (KR8352 on
   larger sites), and server bundles no longer fail with "cannot resolve CSS module". A client chunk

@@ -439,11 +439,13 @@ func (b *builder) checkUnbundledImports(node *ComponentNode) {
 	}
 }
 
-// localCodeModule reports a relative import of a script module (not a
-// stylesheet, JSON or asset import).
+// localCodeModule reports a relative or tsconfig-alias (`@/`, `~/`) import of
+// a script module (not a stylesheet, JSON or asset import). Scoped npm
+// packages (`@scope/pkg`) are not local.
 func localCodeModule(source string) bool {
 	src := strings.Trim(source, "\"'`")
-	if !strings.HasPrefix(src, "./") && !strings.HasPrefix(src, "../") {
+	if !strings.HasPrefix(src, "./") && !strings.HasPrefix(src, "../") &&
+		!strings.HasPrefix(src, "@/") && !strings.HasPrefix(src, "~/") {
 		return false
 	}
 	switch strings.ToLower(filepath.Ext(src)) {

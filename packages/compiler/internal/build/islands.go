@@ -19,6 +19,8 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/lexer"
+	"github.com/kratejs/krate/packages/compiler/internal/parser"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 	"github.com/kratejs/krate/packages/native/jsruntime"
@@ -432,14 +434,24 @@ func (b *Builder) printIslandWarning(e irtree.ExternalComponent, code diag.Code,
 	}
 }
 
-// islandImportsFor keeps only bindings referenced as JSX tags in the subtree.
+// islandImportsFor keeps the bindings the subtree references: JSX tags as
+// well as values read in prop expressions (calls, identifiers). Names that
+// only appear in strings, comments or as property names are not references.
 // The external root is always present, and local components used as tags are
 // included so esbuild can compile them into the island.
 func islandImportsFor(subtree string, imports []irtree.ExternalImport) []irtree.ExternalImport {
+	refs := islandSubtreeRefs(subtree)
 	var out []irtree.ExternalImport
 	seen := map[string]bool{}
 	for _, imp := range imports {
-		if imp.Local == "" || !strings.Contains(subtree, "<"+imp.Local) {
+		if imp.Local == "" {
+			continue
+		}
+		if refs != nil {
+			if !refs[imp.Local] {
+				continue
+			}
+		} else if !strings.Contains(subtree, "<"+imp.Local) {
 			continue
 		}
 		key := imp.Source + "\x00" + imp.Local
@@ -450,6 +462,41 @@ func islandImportsFor(subtree string, imports []irtree.ExternalImport) []irtree.
 		out = append(out, imp)
 	}
 	return out
+}
+
+// islandSubtreeRefs returns the identifiers a serialized island subtree
+// references, or nil when it does not parse (callers then fall back to tag
+// matching).
+func islandSubtreeRefs(subtree string) map[string]bool {
+	p := parser.New(lexer.New("(" + subtree + ")").Tokenize())
+	prog := p.ParseProgram()
+	if prog == nil || len(p.Errors()) > 0 {
+		return nil
+	}
+	// Non-computed member properties (`x.name`) are not references.
+	props := map[*ast.Identifier]bool{}
+	irtree.WalkAST(prog, func(n any) bool {
+		if m, ok := n.(*ast.MemberExpr); ok && !m.Computed {
+			if id, ok := m.Property.(*ast.Identifier); ok {
+				props[id] = true
+			}
+		}
+		return true
+	})
+	refs := map[string]bool{}
+	irtree.WalkAST(prog, func(n any) bool {
+		switch x := n.(type) {
+		case *ast.Identifier:
+			if !props[x] {
+				refs[x.Name] = true
+			}
+		case *ast.JSXOpening:
+			name, _, _ := strings.Cut(x.Name, ".")
+			refs[name] = true
+		}
+		return true
+	})
+	return refs
 }
 
 func writeIslandImportLines(sb *strings.Builder, imports []irtree.ExternalImport) {
