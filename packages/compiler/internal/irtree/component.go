@@ -96,11 +96,19 @@ func (b *builder) buildComponentScoped(fn *ast.FnDecl, node *ComponentNode, isPa
 	// declarations and its scope-valued props are visible while building it.
 	b.scopeHandles = make(map[string]scopeRef)
 	b.currentNode = node
+	if b.ann.UseClient[fn.Name] {
+		b.useClientDepth++
+		defer func() { b.useClientDepth-- }()
+	}
 
 	// Signal declarations are collected against the caller's signal table;
 	// everything after runs against this component's own.
 	node.Signals = b.collectSignalDecls(fn)
 	b.installSignalTable(node.Signals)
+	if node.Tier == TierClient && b.callsStateHook(fn.Body) {
+		node.StateHooks = true
+		b.registerHookLocals(fn)
+	}
 	node.BodyUses = b.collectBodySignalUses(fn.Body, node.Signals)
 	b.signalSetters = make(map[string]bool, len(node.Signals))
 	for _, sig := range node.Signals {
@@ -895,7 +903,13 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 				continue
 			}
 			emittedFns[fnDecl.Name] = true
-			if fnJS := b.reactifier().renderFnDeclJS(fnDecl, b.sigMap()); fnJS != "" {
+			sigs := b.sigMap()
+			if b.stateFns[fnDecl] && !declaresLocalFn(fn.Body, fnDecl) {
+				// A hook has its own bindings; the component's getters of
+				// the same name are not in its scope.
+				sigs = nil
+			}
+			if fnJS := b.reactifier().renderFnDeclJS(fnDecl, sigs); fnJS != "" {
 				node.ExtraVars = append(node.ExtraVars, fnJS)
 				node.addPureDecl(fnJS, fnDecl.Name)
 				b.noteFnPos(node, fn, fnDecl, fnJS)
@@ -1044,7 +1058,7 @@ func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl, funcProps map[string]b
 		// from a parent component; only hooks keep it hydrated.
 		liveParams = nil
 	}
-	return !slotsHaveExpr(node.Children, params, funcProps) &&
+	return !node.StateHooks && !slotsHaveExpr(node.Children, params, funcProps) &&
 		len(node.Signals) == 0 && len(node.Effects) == 0 &&
 		len(node.Memos) == 0 && onlyFoldedVars(node, liveParams) &&
 		len(node.Handlers) == 0 && len(node.AttrBindings) == 0 &&

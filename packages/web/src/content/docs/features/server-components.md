@@ -190,8 +190,31 @@ export default async function Home() {
   the server, in place; no browser chunk is made for it. `process.env` reads
   in modules only the server tree uses are real, so [KR8310](/docs/reference/diagnostics/#kr8310)
   only fires for modules a client component bundles.
-- Pages without server components are unaffected: there, `"use client"`
-  changes nothing and components compile through the normal Krate pipeline.
+- Pages without server components have no client boundaries: their
+  `"use client"` modules compile through the normal Krate pipeline, with one
+  rule (below) that makes the directive mean "runs in the browser" there too.
+
+### `"use client"` on pages without server components
+
+A component defined in a `"use client"` module, and the components it renders,
+are built as client components, as in Next.js: the build renders the initial
+HTML of what it can compute, and whatever it cannot (`window.innerWidth`,
+`localStorage`, `document`, a browser-only API) is bound when the page
+hydrates, instead of failing the build with
+[KR8352](/docs/reference/diagnostics/#kr8352). A stateless component with no
+such value is fully rendered at build time and still ships no JavaScript, so
+the directive costs nothing there.
+
+```tsx
+"use client";
+export function Width() {
+  return <p>{window.innerWidth > 0 ? "wide" : "none"}</p>; // filled in by the browser
+}
+```
+
+Without the directive the same component is rendered once at build time, and
+the build fails on the browser-only read. A `@static`, `@server`, `@runtime`
+or async component keeps its tier whatever the module says.
 
 ### Islands across client navigations
 

@@ -240,6 +240,11 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	if b.callsOpaqueHook(fn.Body) {
 		return true
 	}
+	// A project function that creates state (a hook defined in the project)
+	// gives the component state of its own.
+	if b.callsStateHook(fn.Body) {
+		return true
+	}
 	// Module-level values the build-time interpreter cannot compute are
 	// read at hydration time.
 	if b.readsOpaqueModuleValue(fn) {

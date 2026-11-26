@@ -86,6 +86,12 @@ func classifyTiers(ann *irtree.Annotations, cfg *config.Config) {
 		src := ann.ComponentSources[name]
 		raw := ann.ComponentRaw[name]
 		ann.ComponentTiers[name] = classifyComponent(name, ann.Functions[name], cfg, src, raw)
+		if fn := ann.Functions[name]; fn != nil && !fn.Async && ann.ComponentTiers[name] == irtree.TierClient && bundler.HasUseClientDirective(raw) {
+			if ann.UseClient == nil {
+				ann.UseClient = make(map[string]bool)
+			}
+			ann.UseClient[name] = true
+		}
 	}
 }
 

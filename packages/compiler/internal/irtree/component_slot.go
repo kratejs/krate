@@ -91,7 +91,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	// applies to components using first-class scope-handle spreads, and to
 	// components handed a scope handle, which they may pass further down.
 	if !renderer && len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !b.passesScopeHandle(attrs) && !hasComponentChildren(el.Children) && !b.isLazyComponent(childName) {
-		if !b.componentNeedsClient(childFn, attrs) {
+		if !b.componentNeedsClient(childFn, attrs) && !b.inUseClient(childName) {
 			// A signal-less component that renders a parent's signal value
 			// (e.g. <Display value={display()}/>) must stay reactive, so its
 			// return JSX is inlined with the props substituted by their

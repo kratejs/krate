@@ -670,6 +670,19 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A component that gets its state from a project hook now hydrates. A function that creates state
+  (`createSignal`, `createMemo`, `createEffect`, `createResource`, ... in its body or in a hook it
+  calls), defined in the component's module or imported, makes the components that call it client
+  components: the hook and its helpers ship with them, the getters it returns are reactive (an object
+  `{ on, toggle }` or an array `[on, toggle]`, also through another hook), and the server HTML holds the
+  hook's initial values when the build can compute them. It used to be rendered at build time and failed
+  with KR8352 "unresolved identifier createSignal" (React source) or shipped dead bindings (Krate-native).
+  In a Krate-native module a hook's top-level `return` now hands back the getters it created instead of
+  their current values. See Core concepts > Reactivity.
+- `"use client"` on a page without server components now has a meaning: a component of such a module
+  (and the components it renders) is built as a client component, so what the build cannot evaluate
+  (`window.innerWidth`, `localStorage`) is bound when the page hydrates instead of failing the build with
+  KR8352. A component the build can fully render still ships no JavaScript. See Async Server Components.
 - CSS pruning no longer drops rules of an island that appear only after interaction. Every class of a CSS
   module that a package island imports is kept (before, a panel opened by a click lost its base rules while
   its `:hover` rule survived). Pruning is now per class: a class's base, pseudo-class and compound rules, also

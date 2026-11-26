@@ -336,8 +336,10 @@ type componentCtx struct {
 	// attributes it collects (attr name -> expression). Used to expand
 	// `{...props}` spreads on intrinsic elements.
 	restProps         map[string]map[string]ast.Expr
-	pendingScopeProps map[string]scopeRef // the parent's scope-valued props for the child build
-	forceClient       bool                // keep a wrapper client so call-site child slots hydrate
+	pendingScopeProps map[string]scopeRef  // the parent's scope-valued props for the child build
+	forceClient       bool                 // keep a wrapper client so call-site child slots hydrate
+	useClientDepth    int                  // >0 while building inside a "use client" component
+	stateFns          map[*ast.FnDecl]bool // project functions that create reactive state (hookstate.go)
 	// liveProps names the props whose call-site value reads a caller signal;
 	// they are registered as getters, so `<livePropsParam>.<name>` reads are
 	// reactive in the child's hydration code.

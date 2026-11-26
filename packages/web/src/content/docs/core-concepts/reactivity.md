@@ -157,6 +157,48 @@ argument that reads state (`useDebounce(value, 300)`, `useDocumentTitle("n" +
 n)`) receives the argument as a live getter that the hook's parameters read
 through, so its effects, memos and state initializers follow the argument.
 
+### Hooks that create state
+
+A custom hook may create state itself. A project function (in the component's
+module or imported, directly or through other hooks) whose body calls
+`createSignal`, `createMemo`, `createEffect`, `createResource` or another
+reactive primitive is a state hook, and a component that calls one hydrates:
+
+```tsx
+// hooks.ts
+export function useToggle(initial = false) {
+  const [on, setOn] = createSignal(initial);
+  return { on, toggle: () => setOn(!on()) };
+}
+
+// Panel.tsx
+import { useToggle } from "./hooks";
+export function Panel() {
+  const { on, toggle } = useToggle();
+  return <button onClick={toggle}>{on() ? "open" : "closed"}</button>;
+}
+```
+
+- The hook and the helpers it uses ship with the component, and the call runs
+  once per instance during hydration.
+- In a Krate-native module, a hook returns the getters it created as getters:
+  `return { on, toggle }` and `return [on, toggle]` hand `on` to the caller,
+  which reads it with `on()` and gets bindings for text and attributes. (A
+  plain function that is not a hook still returns the value of a getter you
+  name bare.) An arrow in the result that reads hook state and writes none
+  (`doubled: () => n() * 2`) is a getter too. Destructure the result
+  (`const { on } = useToggle()`) so the getters are known; with
+  `const t = useToggle()`, reads like `t.on()` are live but have no initial
+  value in the HTML.
+- The server HTML holds the hook's initial values when the build can compute
+  them (`useToggle()` renders `closed`, `useToggle(true)` renders `open`). A
+  value it cannot compute, such as an argument that reads the browser, is
+  filled in at hydration without a build error.
+- A component with no hook and no state of its own is still rendered at build
+  time and ships no JavaScript.
+- In a React source module the call is wrapped as before (see below); the
+  hook's initial value is filled in at hydration.
+
 ## Render values in React source components
 
 Krate components run once. A component written in React style (a module that
