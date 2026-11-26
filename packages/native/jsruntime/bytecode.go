@@ -3,7 +3,7 @@ package jsruntime
 import (
 	"sync"
 
-	"modernc.org/quickjs"
+	quickjs "github.com/kratejs/krate/packages/native/jsruntime/internal/qjs"
 )
 
 // compileIsolated compiles trusted source in a fresh VM of its own. Shared

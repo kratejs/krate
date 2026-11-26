@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"modernc.org/quickjs"
+	quickjs "github.com/kratejs/krate/packages/native/jsruntime/internal/qjs"
 )
 
 func strArg(args []any, i int) string {
