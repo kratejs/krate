@@ -59,6 +59,10 @@ type PageMeta struct {
 	// groups kept ("" for the root). LookupSegmentPage walks up from it to find
 	// the page's nearest not-found or error page.
 	SegDir string `json:"segDir,omitempty"`
+	// Params holds the route params of a page expanded from generateStaticParams
+	// whose route is a plain path, so a request-time render has them without
+	// a [param] page to match.
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // pageConfig holds the merged page-level render config extracted from

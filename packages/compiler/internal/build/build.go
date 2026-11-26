@@ -1532,10 +1532,12 @@ func (b *Builder) BuildAll() error {
 	{
 		filtered := results[:0]
 		var dropped []string
+		var droppedResults []*PageResult
 		for _, r := range results {
 			if r != nil && r.StaticOnly && r.IsDynamicTemplate {
 				pat := routeFromOutName(r.OutName)
 				dropped = append(dropped, pat)
+				droppedResults = append(droppedResults, r)
 				b.staticOnlyMu.Lock()
 				b.staticOnlyRoutes = append(b.staticOnlyRoutes, pat)
 				b.staticOnlyMu.Unlock()
@@ -1544,6 +1546,13 @@ func (b *Builder) BuildAll() error {
 			filtered = append(filtered, r)
 		}
 		results = filtered
+		for _, r := range droppedResults {
+			if err := b.unservedDynamicRoute(r, results); err != nil {
+				fmt.Fprintf(b.stderr(), "  %sx Error:%s %s\n", cRed, cReset, errWithHint(err))
+				failureMessages = append(failureMessages, "  "+errWithHint(err))
+				failureErrs = append(failureErrs, err)
+			}
+		}
 		if len(dropped) > 0 {
 			printf("  %s*%s Static-only dynamic routes (no fallback template): %s\n", cCyan, cReset, strings.Join(dropped, ", "))
 		}

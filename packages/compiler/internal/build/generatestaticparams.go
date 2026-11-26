@@ -162,18 +162,26 @@ func extractParamNames(pagePath, pagesDir string) []string {
 	return params
 }
 
-var gspExportRe = regexp.MustCompile(`(?m)^\s*export\s+(?:async\s+)?function\s*\*?\s*generateStaticParams\b`)
+var gspExportRe = regexp.MustCompile(`(?m)^\s*export\s+(?:(?:async\s+)?function\s*\*?\s*|(?:const|let|var)\s+)generateStaticParams\b`)
 
-// hasGenerateStaticParams checks if the program exports a generateStaticParams function.
+// hasGenerateStaticParams checks if the program exports generateStaticParams as a function or a const/let/var binding.
 func hasGenerateStaticParams(prog *ast.Program) bool {
 	for _, stmt := range prog.Body {
 		exp, ok := stmt.(*ast.ExportStmt)
 		if !ok {
 			continue
 		}
-		fn, ok := exp.Declaration.(*ast.FnDecl)
-		if ok && fn.Name == "generateStaticParams" {
-			return true
+		switch d := exp.Declaration.(type) {
+		case *ast.FnDecl:
+			if d.Name == "generateStaticParams" {
+				return true
+			}
+		case *ast.VarStmt:
+			for _, decl := range d.Decls {
+				if decl.Name == "generateStaticParams" {
+					return true
+				}
+			}
 		}
 	}
 	return false
@@ -1085,4 +1093,22 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		result.IslandStubs = newIslandServerStubs(entryModule.Program, tree.ExternalComponents, islandSSR)
 	}
 	return result, bundle.CSS, nil
+}
+
+// unservedDynamicRoute reports a closed-params dynamic route whose template was
+// dropped and that has no other page from the same file: without a detected
+// generateStaticParams nothing would serve any URL of it.
+func (b *Builder) unservedDynamicRoute(tmpl *PageResult, results []*PageResult) error {
+	for _, r := range results {
+		if r != nil && r.SourcePath == tmpl.SourcePath {
+			return nil
+		}
+	}
+	if v, ok := b.gspMemo.Load(tmpl.Page); ok && v.(*gspOnce).res.note {
+		return nil
+	}
+	route := routeFromOutName(tmpl.OutName)
+	return diag.New(tmpl.Page, 1, 1,
+		"dynamic route "+route+" has closed params but exports no generateStaticParams, so no page would be built and every URL would answer 404",
+		"export `generateStaticParams` (a function or a const) from the page, or remove `dynamicParams = false` (and `output: \"static\"`) so the route renders any param", "").WithCode(diag.CodeDynamicRouteUnserved)
 }

@@ -524,6 +524,12 @@ After writing the output, Krate checks that every quoted `/chunks/...` URL in th
 
 A page or layout links a `.css` file that lives in `public/` with `<link rel="stylesheet">`. Files in `public/` are copied as written, so the stylesheet is neither minified nor given a content hash, cannot be cached as immutable, and is a separate render-blocking request in front of the bundled styles. Move the file under `src/` and import it from the layout or page (`import "../styles/site.css"`) so it goes through the CSS pipeline. Import it before other stylesheets if it used to be linked before them, since the bundled order follows import order. This is a warning.
 
+### KR7148
+
+**Dynamic route has no page to serve**
+
+A dynamic route whose params are closed (`export const dynamicParams = false`, or `output: "static"`) is served only by the pages `generateStaticParams` lists: prerendered files, or server routes when the page or one of its layouts renders per request. Without a `generateStaticParams` the build can name no param, so the route would answer 404 for every URL and nothing would be written. This is a build error. Export `generateStaticParams` from the page (as a function or a const), or remove `dynamicParams = false` so the route renders any param on demand.
+
 ### KR7150
 
 **Unknown code theme**

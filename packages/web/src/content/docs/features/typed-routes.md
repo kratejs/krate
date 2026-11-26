@@ -277,6 +277,16 @@ With `dynamicParams = false`:
 The equivalent forms are `export const dynamicParams = false` or
 `export const config = { dynamicParams: false }`.
 
+`generateStaticParams` may be a function or a const (`export const generateStaticParams = () => [...]`).
+
+When the page is async and it, or a layout above it, reads request data
+(`cookies()`, `headers()`), the listed params cannot be prerendered. They stay
+server routes that render per request with their params, and any other param
+404s, as in Next.js. The listed pages work in `krate serve`, the dev server and
+the Node and serverless targets. A closed route that exports no
+`generateStaticParams` would have no page at all, so the build fails with
+`[KR7148]`.
+
 ### Site-wide static output
 
 Add `output: "static"` to `krate.config.ts` to make the whole site static:

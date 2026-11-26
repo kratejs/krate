@@ -290,6 +290,8 @@ type serverPage struct {
 	// Segment marks a segment page rendered per request; it is addressed by
 	// its synthetic route and never matched against a URL.
 	Segment bool `json:"segment,omitempty"`
+	// Params are the route params of a page expanded from generateStaticParams.
+	Params map[string]string `json:"params,omitempty"`
 }
 
 type serverRegion struct {
@@ -464,7 +466,7 @@ func buildServerBundle(root string, cfg *config.Config, target string, warn func
 
 	pageMods := &strings.Builder{}
 	for _, p := range sm.Pages {
-		data.Pages = append(data.Pages, serverPage{Route: p.Route, Mode: p.Mode, Revalidate: p.Revalidate, BundlePath: p.BundlePath, ServerComponents: p.ServerComponents, SegDir: p.SegDir, Segment: p.Segment})
+		data.Pages = append(data.Pages, serverPage{Route: p.Route, Mode: p.Mode, Revalidate: p.Revalidate, BundlePath: p.BundlePath, ServerComponents: p.ServerComponents, SegDir: p.SegDir, Segment: p.Segment, Params: p.Params})
 		rel := strings.Trim(strings.TrimPrefix(p.Route, "/"), "/")
 		shellPath := filepath.Join(outDir, filepath.FromSlash(rel), "index.html")
 		if rel == "" {

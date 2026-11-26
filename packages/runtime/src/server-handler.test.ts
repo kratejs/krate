@@ -589,6 +589,36 @@ describe("page headers()", () => {
   });
 });
 
+describe("pages expanded from generateStaticParams", () => {
+  const shell =
+    "<html><head><title>t</title></head><body><!--suspense:page-->baked<!--/suspense:page--></body></html>";
+  it("render with their params and 404 for unlisted ones", async () => {
+    const h = createKrateHandler({
+      target: "node",
+      data: data({
+        hasMiddleware: false,
+        pages: [
+          { route: "/help/alpha", mode: "ssr", bundlePath: "help-alpha", params: { slug: "alpha" } },
+          { route: "/help/beta", mode: "ssr", bundlePath: "help-beta", params: { slug: "beta" } },
+        ],
+        allPages: [{ route: "/help/alpha", mode: "ssr" }, { route: "/help/beta", mode: "ssr" }],
+        staticOnlyRoutes: ["/help/[slug]"],
+        shells: { "/help/alpha": shell, "/help/beta": shell },
+      }),
+      modules: {
+        pages: {
+          "help-alpha": { default: async (p: any) => jsx("p", { children: "slug=" + (await p.params).slug }) },
+          "help-beta": { default: async (p: any) => jsx("p", { children: "slug=" + (await p.params).slug }) },
+        },
+      },
+    });
+    const get = (p: string) => h(new Request("http://example.test" + p, { headers: { accept: "text/html" } }));
+    expect(await (await get("/help/alpha/")).text()).toContain("slug=alpha");
+    expect(await (await get("/help/beta/")).text()).toContain("slug=beta");
+    expect((await get("/help/gamma/")).status).toBe(404);
+  });
+});
+
 describe("page redirect statuses", () => {
   const shell =
     "<html><head><title>t</title></head><body><!--suspense:page-->baked<!--/suspense:page--></body></html>";

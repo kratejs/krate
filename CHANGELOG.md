@@ -679,6 +679,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A dynamic route with `export const dynamicParams = false` and `generateStaticParams` answered 404 for every
+  param when the page is async and a layout above it reads `cookies()` or `headers()`. Two causes. A
+  `generateStaticParams` written as `export const generateStaticParams = () => ...` was not recognised, so no
+  page was built and the template was dropped. And a page that cannot be prerendered kept no params: its server
+  route rendered with empty params. The listed params now stay server routes that carry their params (in
+  `krate serve`, the dev server, the Node sidecar and the serverless targets) and other params 404, as in Next.js.
+  A closed route with no `generateStaticParams` is a build error (`KR7148`) instead of a silent 404.
 - `<div innerHTML={html} />` and `<p textContent={text} />` on an intrinsic element set the content in the static
   page, in build-time rendering and in the browser (an `innerHTML` that reads state is re-applied), instead of
   printing an `innerHTML="..."` attribute or dropping the value. They match `dangerouslySetInnerHTML={{ __html }}`

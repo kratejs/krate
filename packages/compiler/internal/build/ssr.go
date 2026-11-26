@@ -634,7 +634,14 @@ func (s *SSRServer) FindPageForRoute(urlPath string) (*ManifestPage, map[string]
 		if params, ok := e.pattern.match(parts); ok {
 			p := &idx.manifest.Pages[e.page]
 			if len(params) == 0 {
-				params = idx.patternParams(p, parts)
+				if len(p.Params) > 0 {
+					params = make(map[string]string, len(p.Params))
+					for k, v := range p.Params {
+						params[k] = v
+					}
+				} else {
+					params = idx.patternParams(p, parts)
+				}
 			}
 			return p, params
 		}
