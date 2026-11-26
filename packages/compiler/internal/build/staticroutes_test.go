@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image"
 	"image/color"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -399,5 +400,134 @@ func TestPagesRouteFileWithDefaultExportStaysAPage(t *testing.T) {
 	}
 	if !isPagesRouteHandler(handler) {
 		t.Fatal("a GET-exporting route.ts was not taken for a route handler")
+	}
+}
+
+// noisePNG returns a w x h PNG of pseudo-random pixels, which does not
+// compress, so its data URL is large.
+func noisePNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	seed := uint32(12345)
+	for i := range img.Pix {
+		seed = seed*1664525 + 1013904223
+		img.Pix[i] = byte(seed >> 24)
+		if i%4 == 3 {
+			img.Pix[i] = 255
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestStaticRouteForceStaticImageResponseWithDataURLLogo(t *testing.T) {
+	t.Parallel()
+	root, cfg := staticRouteTestProject(t, map[string]string{
+		"src/pages/index.tsx":   `export default function Home() { return <main>Home</main>; }`,
+		"public/brand/logo.png": string(noisePNG(t, 256, 256)),
+		"src/api/card.tsx": `import { ImageResponse } from "@krate/runtime/og";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+export const dynamic = "force-static";
+export async function GET() {
+  const file = await readFile(path.join(process.cwd(), "public/brand/logo.png"));
+  const logo = "data:image/png;base64," + file.toString("base64");
+  return new ImageResponse(
+    <div style={{ display: "flex", width: "100%", height: "100%", background: "#112233", alignItems: "center", padding: 40 }}>
+      <img src={logo} width={64} height={64} />
+      <div style={{ marginLeft: 20, fontSize: 60, color: "#ffffff" }}>Hello</div>
+    </div>,
+    { width: 1200, height: 630 },
+  );
+}
+`,
+	}, false)
+
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "dist", "api", "card"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, format, err := image.Decode(bytes.NewReader(data))
+	if err != nil || format != "png" {
+		t.Fatalf("api/card is not a PNG: %v %s", err, format)
+	}
+	if b := img.Bounds(); b.Dx() != 1200 || b.Dy() != 630 {
+		t.Errorf("bounds = %v, want 1200x630", b)
+	}
+	if c := pixel(img, 1190, 620); c != (color.NRGBA{0x11, 0x22, 0x33, 255}) {
+		t.Errorf("background pixel = %v", c)
+	}
+	idx := loadStaticRoutes(filepath.Join(root, "dist"))
+	if e := idx["/api/card"]; e.ContentType != "image/png" {
+		t.Errorf("manifest /api/card = %+v", e)
+	}
+}
+
+func TestStaticRouteLargeTextBody(t *testing.T) {
+	t.Parallel()
+	root, cfg := staticRouteTestProject(t, map[string]string{
+		"src/pages/index.tsx": `export default function Home() { return <main>Home</main>; }`,
+		"src/api/big.ts": `export const dynamic = "force-static";
+export function GET() {
+  return new Response("x".repeat(5 * 1024 * 1024), { headers: { "Content-Type": "text/plain" } });
+}
+`,
+	}, false)
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	fi, err := os.Stat(filepath.Join(root, "dist", "api", "big"))
+	if err != nil || fi.Size() != 5*1024*1024 {
+		t.Fatalf("dist/api/big: %v size=%v", err, fi)
+	}
+}
+
+func TestStaticRouteRunnerFailuresReportStderrAndExit(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			name: "thrown error",
+			src:  `export function GET() { throw new Error("boom-from-handler"); }`,
+			want: []string{"boom-from-handler"},
+		},
+		{
+			name: "process exit with stderr",
+			src:  `export function GET() { console.error("custom stderr line"); process.exit(7); }`,
+			want: []string{"exit status 7", "stdout was empty", "custom stderr line"},
+		},
+		{
+			name: "exit zero without a result",
+			src:  `export function GET() { process.exit(0); }`,
+			want: []string{"unreadable static route handler output", "exit status 0", "stdout was empty"},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root, cfg := staticRouteTestProject(t, map[string]string{
+				"src/pages/index.tsx": `export default function Home() { return <main>Home</main>; }`,
+				"src/api/bad.ts":      `export const dynamic = "force-static";` + "\n" + tc.src,
+			}, false)
+			err := New(root, cfg).BuildAll()
+			if err == nil {
+				t.Fatal("expected a build error")
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q does not contain %q", err.Error(), w)
+				}
+			}
+		})
 	}
 }

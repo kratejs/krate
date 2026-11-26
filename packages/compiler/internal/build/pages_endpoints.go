@@ -263,20 +263,19 @@ func (b *Builder) runEndpointBundle(abs, route string, bnd *bundler.Bundler) ([]
 	if len(b.Env) > 0 {
 		cmd.Env = append(os.Environ(), environ.KVList(b.Env)...)
 	}
-	out, err := cmd.Output()
+	run, err := runBuildScript(ctx, cmd, "timed out after 30s")
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, errors.New("timed out after 30s")
-		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			stderr := strings.TrimSpace(string(exitErr.Stderr))
-			if strings.Contains(stderr, "KRATE_NO_GET") {
+			if strings.Contains(run.Stderr, "KRATE_NO_GET") {
 				return nil, &endpointExit{noGET: true, msg: "no GET export"}
 			}
-			return nil, &endpointExit{msg: stderr}
+			return nil, &endpointExit{msg: err.Error()}
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, err
 		}
 		return nil, fmt.Errorf("%s is required to build prerendered endpoints: %w", cmdName, err)
 	}
-	return out, nil
+	return run.Stdout, nil
 }

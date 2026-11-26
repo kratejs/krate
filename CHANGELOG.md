@@ -260,6 +260,9 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   `krate serve` and static deploy adapters (`_headers`, `_redirects`, `vercel.json`). Non-GET handlers,
   `dynamic = "force-dynamic"`, missing `generateStaticParams`, and request-dependent reads (`headers()`,
   `cookies()`, `request.headers`, `request.cookies`, `searchParams`) fail with `KR7135`.
+  Large responses (a 1200x630 `ImageResponse` with an embedded data-URL logo, multi-megabyte text) are
+  read in full, and a failed build-time script (static routes, metadata routes, `generateStaticParams`,
+  prerendered endpoints) reports its exit status, whether stdout was empty, and the stderr tail.
 - Build-time prerendering for async pages with `generateStaticParams` (and non-dynamic async pages
   under `output: "static"`): each param set is rendered once through the staged SSR driver with
   thenable `params`, resolved `<Suspense>` boundaries, `"use client"` island hydration chunks, and

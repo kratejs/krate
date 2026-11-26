@@ -3,10 +3,8 @@ package build
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -285,18 +283,11 @@ func (b *Builder) runGSPBundle(abs, target string, bnd *bundler.Bundler, virtual
 	if len(b.Env) > 0 {
 		cmd.Env = append(os.Environ(), environ.KVList(b.Env)...)
 	}
-	out, err := cmd.Output()
+	run, err := runBuildScript(ctx, cmd, "execution timed out after 30s")
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, errors.New("execution timed out after 30s")
-		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("execution failed:\n%s", strings.TrimSpace(string(exitErr.Stderr)))
-		}
 		return nil, err
 	}
-	return out, nil
+	return run.Stdout, nil
 }
 
 // gspEmbedded evaluates the page's generateStaticParams on the embedded

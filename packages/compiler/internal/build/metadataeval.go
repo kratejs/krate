@@ -3,10 +3,8 @@ package build
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -318,19 +316,12 @@ func (b *Builder) runBootstrapBundle(abs, source, prefix string, bnd *bundler.Bu
 	if len(b.Env) > 0 {
 		cmd.Env = append(os.Environ(), environ.KVList(b.Env)...)
 	}
-	out, err := cmd.Output()
+	run, err := runBuildScript(ctx, cmd, "execution timed out after 30s")
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, errors.New("execution timed out after 30s")
-		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("execution failed:\n%s", strings.TrimSpace(string(exitErr.Stderr)))
-		}
 		return nil, err
 	}
 	// The module may print before the result; the result is the last line.
-	lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
+	lines := strings.Split(strings.TrimRight(string(run.Stdout), "\r\n"), "\n")
 	return []byte(lines[len(lines)-1]), nil
 }
 

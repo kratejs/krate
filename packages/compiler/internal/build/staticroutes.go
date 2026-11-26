@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"mime"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -336,7 +335,7 @@ func (b *Builder) evalStaticRoute(src staticRouteSource, bnd *bundler.Bundler) (
 		return nil, err
 	}
 
-	out, err := b.runStaticRouteBundle(abs, staticRouteBootstrapJS(abs, b.Root, src.URLPattern), bnd)
+	run, err := b.runStaticRouteBundle(abs, staticRouteBootstrapJS(abs, b.Root, src.URLPattern), bnd)
 	if err != nil {
 		return nil, b.staticRouteErr(src,
 			"running static route handler failed: "+err.Error(),
@@ -356,8 +355,10 @@ func (b *Builder) evalStaticRoute(src staticRouteSource, bnd *bundler.Bundler) (
 			ImageSpec   json.RawMessage `json:"imageSpec"`
 		} `json:"results"`
 	}
-	if err := json.Unmarshal(out, &envelope); err != nil {
-		return nil, b.staticRouteErr(src, "unreadable static route handler output: "+err.Error(), "")
+	if err := json.Unmarshal(run.Stdout, &envelope); err != nil {
+		return nil, b.staticRouteErr(src,
+			"unreadable static route handler output ("+err.Error()+"): "+run.describe("exit status 0"),
+			"the build-time runner must print one JSON result line on stdout; check the handler for process.exit() or output that truncates stdout")
 	}
 
 	switch envelope.ErrorCode {
@@ -441,7 +442,7 @@ func (b *Builder) evalStaticRoute(src staticRouteSource, bnd *bundler.Bundler) (
 }
 
 // runStaticRouteBundle compiles and executes a static route handler bootstrap.
-func (b *Builder) runStaticRouteBundle(abs, source string, bnd *bundler.Bundler) ([]byte, error) {
+func (b *Builder) runStaticRouteBundle(abs, source string, bnd *bundler.Bundler) (scriptRun, error) {
 	resolve := func(importer, spec string) (string, bool) {
 		if bnd != nil {
 			if p := bnd.ResolveForNode(importer, spec); p != "" {
@@ -460,15 +461,15 @@ func (b *Builder) runStaticRouteBundle(abs, source string, bnd *bundler.Bundler)
 		SourceTransform: b.serverGlobalsTransform,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("bundling static route: %w", err)
+		return scriptRun{}, fmt.Errorf("bundling static route: %w", err)
 	}
 	genDir := filepath.Join(b.Root, ".krate", "gen")
 	if err := os.MkdirAll(genDir, 0o755); err != nil {
-		return nil, fmt.Errorf("creating bootstrap directory: %w", err)
+		return scriptRun{}, fmt.Errorf("creating bootstrap directory: %w", err)
 	}
 	scriptPath := filepath.Join(genDir, "staticroute-"+hashContent([]byte(js))+".mjs")
 	if err := fsutil.WriteFileIfChanged(scriptPath, []byte(js), 0o644); err != nil {
-		return nil, fmt.Errorf("writing bootstrap: %w", err)
+		return scriptRun{}, fmt.Errorf("writing bootstrap: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -493,19 +494,14 @@ func (b *Builder) runStaticRouteBundle(abs, source string, bnd *bundler.Bundler)
 	env["KRATE_PRERENDER"] = "1"
 	cmd.Env = append(os.Environ(), environ.KVList(env)...)
 
-	out, err := cmd.Output()
+	run, err := runBuildScript(ctx, cmd, "execution timed out after 30s")
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, errors.New("execution timed out after 30s")
-		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("execution failed:\n%s", strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return nil, err
+		return run, err
 	}
-	lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
-	return []byte(lines[len(lines)-1]), nil
+	// The handler may print before the result; the result is the last line.
+	lines := strings.Split(strings.TrimRight(string(run.Stdout), "\r\n"), "\n")
+	run.Stdout = []byte(lines[len(lines)-1])
+	return run, nil
 }
 
 // staticRouteBootstrapJS generates the Node entry that validates exports,
@@ -517,10 +513,20 @@ func staticRouteBootstrapJS(abs, root, urlPattern string) string {
 	return fmt.Sprintf(`import * as mod from %q;
 import { inlineImages } from "@krate/runtime/og";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { writeSync } from "node:fs";
 
 const root = %s;
 const pattern = %s;
-const emit = (obj) => { process.stdout.write(JSON.stringify(obj) + "\n"); process.exit(0); };
+const emit = (obj) => {
+  // Write synchronously and in full: process.exit() would cut a large async pipe write short.
+  const buf = Buffer.from(JSON.stringify(obj) + "\n");
+  let off = 0;
+  while (off < buf.length) {
+    try { off += writeSync(1, buf, off, buf.length - off); }
+    catch (err) { if (!err || err.code !== "EAGAIN") throw err; }
+  }
+  process.exit(0);
+};
 
 const nonGet = [];
 for (const m of ["POST", "PUT", "PATCH", "DELETE"]) {
