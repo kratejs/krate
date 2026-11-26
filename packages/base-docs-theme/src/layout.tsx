@@ -17,6 +17,7 @@ interface SidebarItem {
 
 interface TOCItem {
   title: string;
+  html?: string;
   id: string;
   depth: number;
 }

@@ -104,7 +104,12 @@ export interface DocsLayoutProps<Options = DocsThemeOptions> {
   /** Recursive sidebar tree (enriched: active/expanded/collapsible filled in). */
   sidebarItems: DocsSidebarItem[];
   /** Table-of-contents headings extracted from the rendered page. */
-  tocItems: { title: string; id: string; depth: number }[];
+  /**
+   * `title` is plain text; `html` (present only when the heading has inline
+   * formatting) is sanitized inline HTML limited to code, em, strong, kbd,
+   * sub, sup and s.
+   */
+  tocItems: { title: string; id: string; depth: number; html?: string }[];
   /** Breadcrumb trail for the current page. */
   breadcrumbs: { label: string; url: string; isLast: boolean }[];
   /** Previous page title/link in sidebar order. */

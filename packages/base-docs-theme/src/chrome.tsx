@@ -226,6 +226,7 @@ export function SidebarNav(props: SidebarNavProps) {
 
 interface TOCItem {
   title: string;
+  html?: string;
   id: string;
   depth: number;
 }
@@ -635,7 +636,7 @@ export function TOCNav(props: TOCNavProps) {
           data-depth={item.depth}
           href={`#${item.id}`}
         >
-          {item.title}
+          {item.html ? <span dangerouslySetInnerHTML={{ __html: item.html }} /> : item.title}
         </a>
       ))}
     </nav>

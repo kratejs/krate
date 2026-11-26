@@ -101,6 +101,13 @@ object (`pageTitle`, `siteTitle`, `sidebarItems`, `tocItems`, `breadcrumbs`,
 optional `options`). It renders `{children}` for the content and owns all
 surrounding chrome.
 
+Each `tocItems` entry is `{ title, id, depth, html? }`. `title` is the heading's
+plain text. `html` is set only when the heading has inline formatting, and holds
+sanitized inline HTML (text escaped; only `code`, `em`, `strong`, `kbd`, `sub`,
+`sup` and `s`, without attributes; the heading anchor is removed). A theme
+renders it with `dangerouslySetInnerHTML` when present and falls back to
+`title`; `@krate/base-docs-theme` does.
+
 A page's `# Heading` is part of `children`, so a layout cannot put the frontmatter
 `description` below the title by itself. A theme can opt in with
 `titleSlot: true` in the descriptor it returns from `defineDocsTheme`. The docs
