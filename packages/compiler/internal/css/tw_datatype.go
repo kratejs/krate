@@ -32,6 +32,9 @@ var twDataTypes = map[string]bool{
 	"integer": true, "url": true, "position": true, "bg-size": true, "line-width": true,
 	"image": true, "family-name": true, "generic-name": true, "absolute-size": true,
 	"relative-size": true, "angle": true, "vector": true,
+	// Tailwind accepts duration in --value([duration]) but never infers it
+	// from a bare arbitrary value; only the `duration:` hint selects it.
+	"duration": true,
 }
 
 // twMathFns are the CSS math functions Tailwind recognizes in a value.

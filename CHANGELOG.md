@@ -679,6 +679,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Tailwind: `--value([duration])` in an `@utility` (used by `tw-animate-css` for `animation-duration-*` and
+  `delay-*`) no longer prints an "unknown type" warning. Like Tailwind, `duration` is a valid type name that is
+  only selected by an explicit `[duration:...]` hint; a bare `[400ms]` is served by the `[*]` fallback.
+
 - A dynamic route with `export const dynamicParams = false` and `generateStaticParams` answered 404 for every
   param when the page is async and a layout above it reads `cookies()` or `headers()`. Two causes. A
   `generateStaticParams` written as `export const generateStaticParams = () => ...` was not recognised, so no
