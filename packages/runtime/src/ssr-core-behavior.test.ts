@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSSRCore, type ManifestPage, type RegionMeta, type SSRCoreOptions } from "./ssr-core.js";
 import { installRenderStore, markNoStore, type CacheScope } from "./cache-scope.js";
 import { forbidden, unauthorized } from "./request-context.js";
-import { jsx } from "./server.js";
+import { cookies, headers } from "./action-context.js";
+import { jsx, Suspense } from "./server.js";
 
 // The renderer installs the cache scope store once per process; so does this file.
 installRenderStore(new AsyncLocalStorage<CacheScope>());
@@ -124,5 +125,81 @@ describe("ISR pages", () => {
     const b = await core.renderPage(req("/ns"));
     expect(a).toMatchObject({ noStore: true, cacheStatus: "miss", html: "<p>1</p>" });
     expect(b).toMatchObject({ cacheStatus: "miss", html: "<p>2</p>" });
+  });
+});
+
+describe("prerender mode", () => {
+  it("renders async page with awaitable and sync params, generateMetadata, and resolved Suspense", async () => {
+    const AsyncChild = async ({ label }: { label: string }) => {
+      await Promise.resolve();
+      return jsx("span", { children: "child:" + label });
+    };
+    const { core } = make({
+      pages: [page("/items/[slug]")],
+      modules: {
+        "/items/[slug]": {
+          generateMetadata: async (props: any) => {
+            const { slug } = await props.params;
+            return { title: "Item " + slug };
+          },
+          default: async (props: any) => {
+            const { slug } = await props.params;
+            return jsx("main", {
+              children: [
+                jsx("h1", { children: `${slug}/${props.params.slug}` }),
+                jsx(Suspense, {
+                  fallback: jsx("p", { children: "loading" }),
+                  children: jsx(AsyncChild, { label: slug }),
+                }),
+              ],
+            });
+          },
+        },
+      },
+    });
+    const frame = await core.renderPageRegion(
+      page("/items/[slug]"),
+      "page",
+      req("/items/[slug]", { url: "/items/alpha", params: { slug: "alpha" }, prerender: true }),
+    );
+    expect(frame.status).toBe(200);
+    expect(frame.dynamicUsage).toBeUndefined();
+    expect(frame.title).toBe("Item alpha");
+    expect(frame.html).toContain("<h1>alpha/alpha</h1>");
+    expect(frame.html).toContain("<span>child:alpha</span>");
+    expect(frame.html).not.toContain("loading");
+  });
+
+  it("reports dynamicUsage when headers(), cookies(), or searchParams are read during prerender", async () => {
+    const { core } = make({
+      pages: [page("/h"), page("/c"), page("/s"), page("/sm")],
+      modules: {
+        "/h": { default: async () => jsx("p", { children: (await headers()).get("host") }) },
+        "/c": { default: async () => jsx("p", { children: (await cookies()).get("sid")?.value }) },
+        "/s": {
+          default: async (props: any) => {
+            const sp = await props.searchParams;
+            return jsx("p", { children: sp.q || "none" });
+          },
+        },
+        "/sm": {
+          generateMetadata: async (props: any) => {
+            const sp = await props.searchParams;
+            return { title: sp.tab || "default" };
+          },
+          default: async () => jsx("p", { children: "body" }),
+        },
+      },
+    });
+    for (const [route, api] of [
+      ["/h", "headers()"],
+      ["/c", "cookies()"],
+      ["/s", "searchParams"],
+      ["/sm", "searchParams"],
+    ] as const) {
+      const frame = await core.renderPageRegion(page(route), "page", req(route, { prerender: true }));
+      expect(frame.dynamicUsage).toBe(api);
+      expect(frame.error).toBeUndefined();
+    }
   });
 });

@@ -92,9 +92,9 @@ func generateSitemap(ctx *BuildResultHookCtx) error {
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
 
-	basePath := ""
+	basePath, slashMode := "", ""
 	if cfg, ok := ctx.Config.(*config.Config); ok {
-		basePath = cfg.BaseURLPath()
+		basePath, slashMode = cfg.BaseURLPath(), cfg.TrailingSlashMode()
 	}
 	seen := map[string]bool{}
 	for _, p := range ctx.Pages {
@@ -105,7 +105,7 @@ func generateSitemap(ctx *BuildResultHookCtx) error {
 		if !sitemapIncludes(p, opts.Exclude) {
 			continue
 		}
-		loc := CanonicalURL(baseURL, basePath, p.OutName)
+		loc := CanonicalURLMode(baseURL, basePath, p.OutName, slashMode)
 		if seen[loc] {
 			continue
 		}

@@ -8,6 +8,10 @@ export default defineConfig({
   minify: true,
   sourcemap: false,
 
+  // Page navigations animate with the View Transitions API. Set "off" to turn
+  // that off.
+  viewTransitions: "auto",
+
   devServer: {
     port: 3000,
     open: false,

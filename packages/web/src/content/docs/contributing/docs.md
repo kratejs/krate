@@ -43,7 +43,9 @@ order: 2
 | `badge` | Small sidebar badge next to the title |
 | `head` | Extra `<head>` markup |
 
-Directories become sidebar sections via their `index.md`'s `sidebar` frontmatter.
+Directories become sidebar sections via their `index.md`: the section title is its
+`sidebar.label`, else its `title`, else the folder name, and `sidebar.order` (or `order`)
+sets its position among the sibling pages.
 Add each new page to its section index table.
 
 ## Style

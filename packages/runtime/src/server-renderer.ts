@@ -355,6 +355,7 @@ function reloadManifest() {
 // ISR cache persistence - survives renderer restarts so a bounce doesn't
 // cold-render every ISR variant. Written debounced (coalesced) to the build
 // output dir (.krate/isr-cache.json), overridable via KRATE_ISR_CACHE.
+const PRERENDER_MODE = process.env.KRATE_PRERENDER === "1";
 const isrCacheFile = process.env.KRATE_ISR_CACHE || "";
 let persistTimer: NodeJS.Timeout | null = null;
 
@@ -363,7 +364,7 @@ function isrCachePath(): string {
 }
 
 function persistIsrNow() {
-  if (SSR_WORKERS > 1) return;
+  if (PRERENDER_MODE || SSR_WORKERS > 1) return;
   if (persistTimer) {
     clearTimeout(persistTimer);
     persistTimer = null;
@@ -381,12 +382,13 @@ function persistIsrNow() {
 function scheduleIsrPersist() {
   // Clustered: multiple workers would race on the same cache file; keep the ISR
   // cache in memory only.
-  if (SSR_WORKERS > 1) return;
+  if (PRERENDER_MODE || SSR_WORKERS > 1) return;
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(persistIsrNow, 1000);
 }
 
 function loadIsrCache() {
+  if (PRERENDER_MODE) return;
   try {
     const file = isrCachePath();
     if (fs.existsSync(file)) {
@@ -578,6 +580,7 @@ const server = http.createServer(async (req, res) => {
         params: parsed.params,
         query: parsed.query,
         regions: parsed.regions,
+        prerender: !!parsed.prerender,
       };
 
       const page = findPage(renderReq.route);

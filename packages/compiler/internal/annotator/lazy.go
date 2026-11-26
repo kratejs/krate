@@ -95,18 +95,30 @@ func lowerContextUses(ann *irtree.Annotations, modules []ModuleSource) {
 			}
 		}
 	}
-	seen := map[*ast.FnDecl]bool{}
-	for _, fn := range ann.Functions {
-		if fn == nil || seen[fn] {
+	rewritten := map[*ast.FnDecl]*ast.FnDecl{}
+	for fnKey, fn := range ann.Functions {
+		if fn == nil {
 			continue
 		}
-		seen[fn] = true
-		for _, stmt := range fn.Body {
+		if cp, done := rewritten[fn]; done {
+			if cp != fn {
+				ann.Functions[fnKey] = cp
+			}
+			continue
+		}
+		// Copy-on-write so cached shared *ast.Program nodes are never mutated
+		// across concurrent page builds.
+		var newBody []ast.Stmt
+		for i, stmt := range fn.Body {
 			vs, ok := stmt.(*ast.VarStmt)
 			if !ok {
 				continue
 			}
-			for _, d := range vs.Decls {
+			var newDecls []*ast.VarDecl
+			for j, d := range vs.Decls {
+				if d == nil {
+					continue
+				}
 				if name := usedContextArg(d.Init); name != "" && contexts[name] {
 					// Reads of the binding were already lowered to getter
 					// calls, so it stays a getter: a memo over the context read
@@ -115,12 +127,33 @@ func lowerContextUses(ann *irtree.Annotations, modules []ModuleSource) {
 						Object:   &ast.Identifier{Name: name},
 						Property: &ast.Identifier{Name: "useContext"},
 					}}
-					d.Init = &ast.CallExpr{
+					if newDecls == nil {
+						newDecls = append([]*ast.VarDecl(nil), vs.Decls...)
+					}
+					dc := *d
+					dc.Init = &ast.CallExpr{
 						Callee: &ast.Identifier{Name: "createMemo"},
 						Args:   []ast.Expr{&ast.ArrowFn{Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: read}}}},
 					}
+					newDecls[j] = &dc
 				}
 			}
+			if newDecls != nil {
+				if newBody == nil {
+					newBody = append([]ast.Stmt(nil), fn.Body...)
+				}
+				vc := *vs
+				vc.Decls = newDecls
+				newBody[i] = &vc
+			}
+		}
+		if newBody != nil {
+			fc := *fn
+			fc.Body = newBody
+			rewritten[fn] = &fc
+			ann.Functions[fnKey] = &fc
+		} else {
+			rewritten[fn] = fn
 		}
 	}
 }

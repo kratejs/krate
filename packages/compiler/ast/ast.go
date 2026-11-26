@@ -144,6 +144,10 @@ func (a *ArrowFn) Pos() Pos { return a.Position }
 type ObjectExpr struct {
 	Position   Pos
 	Properties []*ObjectProp
+	// Ref is set by the compiler on a literal it made from a build-time
+	// value, so evaluating the literal yields that value (same identity).
+	// Parsers and plugins leave it nil.
+	Ref any `json:"-"`
 }
 
 func (o *ObjectExpr) node()    {}
@@ -173,6 +177,8 @@ type ObjectProp struct {
 type ArrayExpr struct {
 	Position Pos
 	Elements []Expr
+	// Ref: see ObjectExpr.Ref.
+	Ref any `json:"-"`
 }
 
 func (a *ArrayExpr) node()    {}

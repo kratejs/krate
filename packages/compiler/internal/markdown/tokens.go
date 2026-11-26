@@ -139,6 +139,11 @@ func (t *tokenTable) resolveStatic(h string) string {
 func (t *tokenTable) protect(text string, mdx bool, report reportFn) string {
 	var out strings.Builder
 	var mdOpen []string // md mode: open uppercase components at line start
+	type openTag struct {
+		name string
+		flow bool
+	}
+	var mdxOpen []openTag // mdx mode: open components and whether they started a line
 	n := len(text)
 	i := 0
 	atLineStart := func(pos int) bool {
@@ -205,8 +210,22 @@ func (t *tokenTable) protect(text string, mdx bool, report reportFn) string {
 			if flow {
 				kind = 'F'
 			}
-			if flow && tg.closing && strings.TrimSpace(restOfLine(text, tg.end)) == "" {
-				separateFromContainer(&out)
+			closesFlow := false
+			if mdx && tg.component && !tg.selfClose {
+				if !tg.closing {
+					mdxOpen = append(mdxOpen, openTag{tg.name, flow})
+				} else if k := len(mdxOpen) - 1; k >= 0 && mdxOpen[k].name == tg.name {
+					closesFlow = mdxOpen[k].flow
+					mdxOpen = mdxOpen[:k]
+				}
+			}
+			if flow && strings.TrimSpace(restOfLine(text, tg.end)) == "" {
+				if tg.closing {
+					separateFromContainer(&out, closesFlow)
+				} else if mdx && tg.component && !tg.selfClose {
+					// An opening tag alone on its line also ends a paragraph above it.
+					separateFromContainer(&out, true)
+				}
 			}
 			out.WriteString(t.add(kind, text[i:tg.end], i))
 			i = tg.end
@@ -278,8 +297,10 @@ var containerLineRe = regexp.MustCompile(`^(?:\s*(?:[-*+]|\d{1,9}[.)])\s|\s*>|\s
 // stands on its own line. Without a blank line, the opaque tag token is read as
 // a lazy continuation of the last list item, quote or table row above it, and
 // the component would close inside that block. Plain paragraphs are left
-// alone so the tag stays in the same inline run as its text.
-func separateFromContainer(out *strings.Builder) {
+// alone so an inline opener (`see <Badge>x` ... `</Badge>`) keeps its text in
+// one run; endPara is set when the matching opener itself started a line, so
+// the tag is a flow element that ends the paragraph above it.
+func separateFromContainer(out *strings.Builder, endPara bool) {
 	cur := out.String()
 	// Drop the indentation already written for this line.
 	cur = strings.TrimRight(cur, " \t")
@@ -291,7 +312,7 @@ func separateFromContainer(out *strings.Builder) {
 		return
 	}
 	prev := body[strings.LastIndexByte(body, '\n')+1:]
-	if !containerLineRe.MatchString(prev) && !strings.HasSuffix(strings.TrimSpace(prev), "|") {
+	if !endPara && !containerLineRe.MatchString(prev) && !strings.HasSuffix(strings.TrimSpace(prev), "|") {
 		return
 	}
 	out.Reset()

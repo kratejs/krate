@@ -73,6 +73,10 @@ type Annotations struct {
 	// ComponentRaw maps each used function name to the raw source text of the
 	// module it was defined in, for directive detection per module.
 	ComponentRaw map[string]string
+	// UseClient marks the used components defined in a module that starts
+	// with "use client". They always take the client path, so what the build
+	// cannot evaluate is filled in by the browser (see componentNeedsClient).
+	UseClient map[string]bool
 	// CVAFactories maps a module-level `const X = cva(base, config)` binding to
 	// its resolved spec, across the entry and all imported modules. Used to fold
 	// shadcn/ui variant calls to static class strings.
@@ -447,6 +451,9 @@ type ComponentNode struct {
 	// LazyLoader is set when its loader is not a static import.
 	Lazy       bool
 	LazyLoader string
+	// StateHooks marks a component that calls a project function creating
+	// reactive state (see hookstate.go); it always hydrates.
+	StateHooks bool
 	Props      map[string]ast.Expr
 	// RuntimeProps holds resolved prop values for runtime-tier components
 	// (prop name -> value). These are serialized into the page's runtime props

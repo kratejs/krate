@@ -15,7 +15,7 @@
 // itunes, appLinks, archives, assets, bookmarks and other. metadataBase resolves
 // relative URLs. Anything else is ignored.
 
-import { httpFallbackStatus, redirectTarget, thenableRecord } from './request-context.js';
+import { httpFallbackStatus, isDynamicUsageError, redirectTarget, thenableRecord } from './request-context.js';
 
 export interface TemplateString {
   default?: string;
@@ -264,7 +264,7 @@ export async function resolveMetadata(segments: MetadataSegment[], rawProps: Met
         // notFound(), forbidden(), unauthorized() and redirect() in
         // generateMetadata answer the request; any other error costs only the
         // segment's metadata.
-        if (httpFallbackStatus(error) || redirectTarget(error)) throw error;
+        if (httpFallbackStatus(error) || redirectTarget(error) || isDynamicUsageError(error)) throw error;
         errors.push({ file: seg.file || '', error });
         own = undefined;
       }
@@ -474,8 +474,21 @@ export function renderMetadataTags(md: Metadata, templates: { openGraph?: string
     const parts = (['telephone', 'date', 'address', 'email', 'url'] as const).filter((k) => f[k] === false).map((k) => `${k}=no`);
     if (parts.length) push(meta('name', 'format-detection', parts.join(', ')));
   }
-  if (md.openGraph) renderOpenGraph(md.openGraph, base, templates.openGraph, push);
-  if (md.twitter) renderTwitter(md.twitter, base, templates.twitter, push);
+  // Like Next.js, an openGraph or twitter object without its own title takes
+  // the resolved top-level title (already templated); twitter takes the
+  // openGraph title and description first. Descriptions are not copied from
+  // the top level, so a <Head> description override leaves no stale copy.
+  const topTitle = typeof md.title === 'string' ? md.title : '';
+  let ogTitle = '';
+  if (md.openGraph) {
+    ogTitle = titleOf(md.openGraph.title as string | TemplateString | undefined, templates.openGraph) || topTitle;
+    renderOpenGraph(md.openGraph, base, ogTitle, md.openGraph.description, push);
+  }
+  if (md.twitter) {
+    const twTitle = titleOf(md.twitter.title as string | TemplateString | undefined, templates.twitter) || ogTitle || topTitle;
+    const twDescription = md.twitter.description || md.openGraph?.description;
+    renderTwitter(md.twitter, base, twTitle, twDescription, push);
+  }
   if (md.appLinks) {
     for (const [platform, entries] of Object.entries(md.appLinks))
       for (const entry of toArray(entries as Record<string, unknown> | Array<Record<string, unknown>>))
@@ -508,9 +521,9 @@ function renderIcons(icons: NonNullable<Metadata['icons']>, base: string | undef
   emit(o.other, 'icon');
 }
 
-function renderOpenGraph(og: OpenGraph, base: string | undefined, template: string | undefined, push: (t: string) => void): void {
-  push(meta('property', 'og:title', titleOf(og.title as string | TemplateString | undefined, template)));
-  push(meta('property', 'og:description', og.description));
+function renderOpenGraph(og: OpenGraph, base: string | undefined, title: string, description: string | undefined, push: (t: string) => void): void {
+  push(meta('property', 'og:title', title));
+  push(meta('property', 'og:description', description));
   push(meta('property', 'og:url', resolveBaseJoin(og.url, base)));
   push(meta('property', 'og:site_name', og.siteName));
   push(meta('property', 'og:locale', og.locale));
@@ -551,7 +564,7 @@ function renderOpenGraph(og: OpenGraph, base: string | undefined, template: stri
   }
 }
 
-function renderTwitter(tw: Twitter, base: string | undefined, template: string | undefined, push: (t: string) => void): void {
+function renderTwitter(tw: Twitter, base: string | undefined, title: string, description: string | undefined, push: (t: string) => void): void {
   const images = imageList(tw.images, base);
   const card = tw.card || (images.length > 0 ? 'summary_large_image' : 'summary');
   push(meta('name', 'twitter:card', card));
@@ -559,8 +572,8 @@ function renderTwitter(tw: Twitter, base: string | undefined, template: string |
   push(meta('name', 'twitter:site:id', tw.siteId));
   push(meta('name', 'twitter:creator', tw.creator));
   push(meta('name', 'twitter:creator:id', tw.creatorId));
-  push(meta('name', 'twitter:title', titleOf(tw.title as string | TemplateString | undefined, template)));
-  push(meta('name', 'twitter:description', tw.description));
+  push(meta('name', 'twitter:title', title));
+  push(meta('name', 'twitter:description', description));
   for (const img of images) {
     push(meta('name', 'twitter:image', img.url));
     push(meta('name', 'twitter:image:alt', img.alt));

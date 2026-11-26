@@ -5,7 +5,7 @@ A documentation site scaffolded with
 powered by the Krate [`docs` plugin](https://krate.js.org/docs/features/plugins/).
 
 It ships with a sidebar, table of contents, breadcrumbs, prev/next navigation,
-light/dark theme, and WASM-powered full-text search - the same experience as the
+light/dark theme, and full-text search (Pagefind) - the same experience as the
 official [krate.js.org](https://krate.js.org) docs.
 
 ## Getting started

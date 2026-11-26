@@ -221,6 +221,14 @@ func rewriteNextScripts(scripts map[string]any, node nodeDeploy, rep *Report, re
 			*rewrites = append(*rewrites, fmt.Sprintf("scripts.%s: %q -> %q (the original is in the backup)", name, old, cmd))
 			continue
 		}
+		if name == "start" {
+			if cmd, ok := staticServeToKrate(old); ok {
+				scripts[name] = cmd
+				*rewrites = append(*rewrites, fmt.Sprintf("scripts.%s: %q -> %q (it served Next's static export directory; the original is in the backup)", name, old, cmd))
+				rep.Info = append(rep.Info, fmt.Sprintf("package.json scripts.%s served the static export (out/); it now runs `%s`, which serves Krate's dist/", name, cmd))
+				continue
+			}
+		}
 		if !nextBin.MatchString(old) {
 			if strings.Contains(old, ".next/") {
 				rep.Info = append(rep.Info, fmt.Sprintf("package.json scripts.%s refers to .next/, which Krate does not write; check it", name))
@@ -270,6 +278,43 @@ func rewriteNextScripts(scripts map[string]any, node nodeDeploy, rep *Report, re
 		nextStays = nextStays || stays
 	}
 	return nextStays
+}
+
+var staticServeCmd = regexp.MustCompile(`^(?:npx(?:\s+(?:-y|--yes))?\s+|pnpm\s+dlx\s+|bunx\s+)?serve((?:\s+\S+)*)\s*$`)
+
+// staticServeToKrate maps a script that only serves Next's static export
+// directory (`serve out`, `npx serve ./out -l 3000`) to `krate serve`. Other
+// directories and unknown flags are left alone.
+func staticServeToKrate(script string) (string, bool) {
+	m := staticServeCmd.FindStringSubmatch(strings.TrimSpace(script))
+	if m == nil {
+		return "", false
+	}
+	args := strings.Fields(m[1])
+	dir, port := "", ""
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; a {
+		case "-s", "--single":
+		case "-l", "-p", "--listen", "--port":
+			if i+1 >= len(args) || strings.Trim(args[i+1], "0123456789") != "" {
+				return "", false
+			}
+			port = args[i+1]
+			i++
+		default:
+			if dir != "" || strings.HasPrefix(a, "-") {
+				return "", false
+			}
+			dir = strings.TrimSuffix(strings.TrimPrefix(a, "./"), "/")
+		}
+	}
+	if dir != "out" {
+		return "", false
+	}
+	if port != "" {
+		return "krate serve --port " + port, true
+	}
+	return "krate serve", true
 }
 
 // installCommand is the install command of the package manager the project

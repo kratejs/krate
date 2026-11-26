@@ -43,6 +43,7 @@ type SidebarItem struct {
 type Page struct {
 	Path          string        `json:"path"`
 	Title         string        `json:"title"`
+	TitleSet      bool          `json:"-"` // Title came from frontmatter
 	Order         int           `json:"order"`
 	Content       string        `json:"content"`
 	Dir           string        `json:"dir"`
@@ -211,6 +212,7 @@ func scanPage(cfg Config, absPath, relPath string) (Page, error) {
 		}
 	}
 
+	titleSet := fm.Title != ""
 	if fm.Title == "" {
 		fm.Title = PathToTitle(relPath)
 	}
@@ -234,6 +236,7 @@ func scanPage(cfg Config, absPath, relPath string) (Page, error) {
 	return Page{
 		Path:          pagePath,
 		Title:         fm.Title,
+		TitleSet:      titleSet,
 		Order:         fm.Order,
 		Content:       htmlContent,
 		Dir:           dirPart,

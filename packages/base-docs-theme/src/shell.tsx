@@ -1,6 +1,8 @@
 import { createSignal, createEffect, onMount, onCleanup, subscribeNavigation, getNavigationState } from "@krate/runtime";
 import { activeNavLink } from "./nav";
 import { PLATFORM_PREPAINT } from "./platform";
+import { initialTheme, themePrePaintBody } from "./colormode";
+import type { DefaultTheme } from "./colormode";
 
 /**
  * Shared site shell: header, footer, theme toggle, and the marketing HomeLayout.
@@ -51,6 +53,10 @@ export interface SiteConfig {
   footerColumns?: SiteFooterColumn[];
   /** localStorage key for the light/dark preference (default `theme`). */
   themeStorageKey?: string;
+  /** Mode used when none is stored: "light", "dark" or "system" (default). */
+  defaultTheme?: DefaultTheme;
+  /** Set false to drop the pre-paint colour script (the app manages the mode). */
+  themePrePaint?: boolean;
 }
 
 /** Identity helper giving `defineSite` full type-checking. */
@@ -66,20 +72,17 @@ const DEFAULT_BRAND: NonNullable<SiteConfig["brand"]> = { text: "krate", href: "
  * data-platform ("mac" or "other") for platform-specific shortcut labels. Every
  * shell that renders ThemeToggle should include this.
  */
-export function ThemePrePaint(props: { storageKey?: string }) {
-  const key = JSON.stringify(props.storageKey || "theme");
-  const script =
-    "(function(){try{var k=" + key +
-    ";var s=localStorage.getItem(k);if(s!=='dark'&&s!=='light'){s=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}" +
-    "document.documentElement.setAttribute('data-theme',s);}catch(e){}" + PLATFORM_PREPAINT + "})();";
+export function ThemePrePaint(props: { storageKey?: string; defaultTheme?: DefaultTheme; enabled?: boolean }) {
+  const body = themePrePaintBody(props.storageKey || "theme", props.defaultTheme);
   return (
     <Head>
-      <script>{script}</script>
+      {props.enabled !== false && <script data-krate-once="theme-prepaint">{"(function(){" + body + "})();"}</script>}
+      <script data-krate-once="platform-prepaint">{"(function(){" + PLATFORM_PREPAINT + "})();"}</script>
     </Head>
   );
 }
 
-export function ThemeToggle(props: { storageKey?: string }) {
+export function ThemeToggle(props: { storageKey?: string; defaultTheme?: DefaultTheme }) {
   const storageKey = props.storageKey || "theme";
   const [theme, setTheme] = createSignal("light");
   var btnRef: HTMLElement | null = null;
@@ -89,11 +92,7 @@ export function ThemeToggle(props: { storageKey?: string }) {
     try {
       saved = localStorage.getItem(storageKey) || "";
     } catch {}
-    var dark = saved === "dark";
-    if (!dark && saved !== "light") {
-      dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    }
-    setTheme(dark ? "dark" : "light");
+    setTheme(initialTheme(saved, props.defaultTheme));
   });
 
   createEffect(function () {
@@ -268,12 +267,16 @@ export function SiteFooter(props: { site: SiteConfig }) {
 export function HomeLayout(props: { site: SiteConfig; currentPath?: string; children: any }) {
   return (
     <div class="site-shell">
-      <ThemePrePaint storageKey={props.site.themeStorageKey} />
+      <ThemePrePaint
+        storageKey={props.site.themeStorageKey}
+        defaultTheme={props.site.defaultTheme}
+        enabled={props.site.themePrePaint}
+      />
       <Head>
         <link rel="stylesheet" href="/site.css" />
       </Head>
       <SiteHeader site={props.site} currentPath={props.currentPath}>
-        <ThemeToggle />
+        <ThemeToggle storageKey={props.site.themeStorageKey} defaultTheme={props.site.defaultTheme} />
       </SiteHeader>
       <main>{props.children}</main>
       <SiteFooter site={props.site} />

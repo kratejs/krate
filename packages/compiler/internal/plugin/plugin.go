@@ -121,6 +121,10 @@ type Route struct {
 type GeneratedPage struct {
 	Path  string `json:"path"`  // absolute filesystem path to the generated .tsx file
 	Route string `json:"route"` // URL path e.g. "docs/getting-started"
+	// RootLayout wraps the page in the app's root layout (pagesDir/_layout.*),
+	// as an ordinary page under pagesDir would be. Generated pages otherwise
+	// get only layouts found in their own tree.
+	RootLayout bool `json:"rootLayout,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

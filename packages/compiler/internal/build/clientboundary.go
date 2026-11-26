@@ -1203,7 +1203,7 @@ func (b *Builder) clientChunkOptions(guard *unavailableGuard) (api.BuildOptions,
 		External:          []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:            []string{shim},
 		Metafile:          true,
-		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root), threeIslandPlugin(), konvaIslandPlugin()},
+		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(&islandCSSSink{root: b.Root}), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root), threeIslandPlugin(), konvaIslandPlugin()},
 		LogLevel:          api.LogLevelSilent,
 	}
 	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
@@ -1845,7 +1845,7 @@ __krate_render.__krateGen = __krateGen;
 func (c *clientSSRImpls) options(plugin *api.Plugin, guard *unavailableGuard) (api.BuildOptions, error) {
 	// The modules share their options, so the pure-module plugin shares its
 	// resolutions across them.
-	plugins := []api.Plugin{purePrunePluginMemo(c.root, &c.memo), guard.plugin(), serverCSSPlugin(c.root), *plugin}
+	plugins := []api.Plugin{purePrunePluginMemo(c.root, &c.memo), guard.plugin(), serverCSSPlugin(c.root, c.res), *plugin}
 	plugins = append(plugins, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), reactDOMHintsPlugin(c.root), reactServerCompatPlugin(c.root), routerHooksPlugin(c.root), threeIslandPlugin(), konvaIslandPlugin(), preactRequirePlugin())
 	shim, err := boundaryShims(filepath.Dir(c.bundleDir))
 	if err != nil {

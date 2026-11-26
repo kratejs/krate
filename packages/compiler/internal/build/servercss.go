@@ -55,7 +55,7 @@ func moduleMappingJS(mapping map[string]string) string {
 // Krate's scoper and write a stray .css file, so a `*.module.css` import
 // becomes the Krate class mapping and any other stylesheet import becomes an
 // empty module (the page links its CSS separately).
-func serverCSSPlugin(root string) api.Plugin {
+func serverCSSPlugin(root string, res *bundler.ImportResolver) api.Plugin {
 	return api.Plugin{
 		Name: "krate-server-css",
 		Setup: func(pb api.PluginBuild) {
@@ -66,7 +66,9 @@ func serverCSSPlugin(root string) api.Plugin {
 				case strings.HasPrefix(path, "."):
 					path = filepath.Join(args.ResolveDir, filepath.FromSlash(path))
 				default:
-					if p := resolver.NodeModule(args.ResolveDir, path); p != "" {
+					if p := res.ResolveAlias(path); p != "" {
+						path = p
+					} else if p := resolver.NodeModule(args.ResolveDir, path); p != "" {
 						path = p
 					} else if !strings.HasSuffix(path, ".module.css") {
 						// An unresolvable package stylesheet still contributes

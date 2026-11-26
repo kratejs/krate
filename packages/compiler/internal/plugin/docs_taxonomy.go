@@ -81,12 +81,12 @@ func (p *DocsPlugin) generateTaxonomyPages(ctx *BuildHookCtx, cfg *config.Config
 			if theme != nil {
 				layoutRel = theme.importSpecifier(filepath.Dir(tsxPath))
 			}
-			src := p.generateTSX(ctx, cfg, page, layoutRel, searchEnabled, sections, nil, nil, "", "", "", "", docsLocaleInfo{}, opts, themeOptions, cfg.Markdown, routeBase)
+			src := p.generateTSX(ctx, cfg, page, layoutRel, filepath.Dir(tsxPath), searchEnabled, sections, nil, nil, "", "", "", "", docsLocaleInfo{}, opts, themeOptions, cfg.Markdown, routeBase)
 			if err := fsutil.WriteFileAtomic(tsxPath, []byte(src), 0644); err != nil {
 				return err
 			}
 			if ctx.GeneratedPages != nil {
-				*ctx.GeneratedPages = append(*ctx.GeneratedPages, GeneratedPage{Path: tsxPath, Route: route})
+				*ctx.GeneratedPages = append(*ctx.GeneratedPages, GeneratedPage{Path: tsxPath, Route: route, RootLayout: opts.RootLayout})
 			}
 		}
 		return nil

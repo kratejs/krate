@@ -90,6 +90,8 @@ func keyID(v Value) (string, bool) {
 		return fmt.Sprintf("c%p", v.coll), true
 	case KindDate:
 		return fmt.Sprintf("d%p", v.date), true
+	case KindRegExp:
+		return fmt.Sprintf("r%p", v.re), true
 	}
 	return "", false
 }

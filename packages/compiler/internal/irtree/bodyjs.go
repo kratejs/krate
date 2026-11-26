@@ -226,6 +226,16 @@ func (b *builder) extraVarDeclJS(decl *ast.VarDecl) (string, bool) {
 			}
 		}
 	}
+	if call, _ := b.stateHookCall(decl.Init); call != nil {
+		// The hook runs in the hydration scope and creates its own state.
+		lhs := decl.Name
+		if decl.IsDestructuring {
+			lhs = decl.Pattern
+		}
+		if lhs != "" {
+			return "var " + lhs + "=" + generateExprJS(decl.Init, b.sigMap()), true
+		}
+	}
 	if decl.IsDestructuring || referencesProps(decl.Init) {
 		return "", false
 	}

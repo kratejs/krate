@@ -10,9 +10,10 @@ import (
 
 // TOCItem represents a single heading entry in the table of contents.
 type TOCItem struct {
-	Title string `json:"title"` // displayed text
-	ID    string `json:"id"`    // anchor id
-	Depth int    `json:"depth"` // 2 for h2, 3 for h3
+	Title string `json:"title"`          // plain text (search, simple themes)
+	HTML  string `json:"html,omitempty"` // sanitized inline HTML of the heading
+	ID    string `json:"id"`             // anchor id
+	Depth int    `json:"depth"`          // 2 for h2, 3 for h3
 }
 
 // ExtractTOC parses rendered HTML and extracts the default heading range
@@ -76,6 +77,7 @@ func ExtractTOCLevels(html string, minLevel, maxLevel int) []TOCItem {
 
 		items = append(items, TOCItem{
 			Title: text,
+			HTML:  tocInlineHTML(html[contentStart : contentStart+closeIdx]),
 			ID:    idAttr,
 			Depth: depth,
 		})
@@ -183,4 +185,79 @@ func stripInlineHTML(s string) string {
 	// Decode entities so a heading `Components &amp; helpers` yields the plain
 	// text `Components & helpers` in the TOC/search index (not `&amp;`).
 	return strings.TrimSpace(html.UnescapeString(out.String()))
+}
+
+// tocInlineAllowed lists the inline tags kept in a TOC entry's html field.
+var tocInlineAllowed = map[string]bool{
+	"code": true, "em": true, "strong": true, "kbd": true,
+	"sub": true, "sup": true, "s": true,
+}
+
+// tocInlineHTML reduces heading inner HTML to a safe subset: the heading
+// anchor link is dropped, the allowed inline tags are kept without attributes,
+// other tags are removed (their text stays) and text is re-escaped. It returns
+// "" when the result has no markup beyond the plain title.
+func tocInlineHTML(s string) string {
+	var out strings.Builder
+	var stack []string // open allowed tags, innermost last
+	marked := false
+	skipAnchor := 0
+	for i := 0; i < len(s); {
+		if s[i] != '<' {
+			j := strings.IndexByte(s[i:], '<')
+			if j < 0 {
+				j = len(s) - i
+			}
+			if skipAnchor == 0 {
+				out.WriteString(escape.HTML(html.UnescapeString(s[i : i+j])))
+			}
+			i += j
+			continue
+		}
+		end := strings.IndexByte(s[i:], '>')
+		if end < 0 {
+			break
+		}
+		tag := s[i+1 : i+end]
+		i += end + 1
+		closing := strings.HasPrefix(tag, "/")
+		name := strings.TrimPrefix(tag, "/")
+		if k := strings.IndexAny(name, " \t\r\n/"); k >= 0 {
+			name = name[:k]
+		}
+		name = strings.ToLower(name)
+		if name == "a" {
+			if closing {
+				if skipAnchor > 0 {
+					skipAnchor--
+				}
+			} else if strings.Contains(tag, "heading-anchor") || skipAnchor > 0 {
+				skipAnchor++
+			}
+			continue
+		}
+		if skipAnchor > 0 || !tocInlineAllowed[name] {
+			continue
+		}
+		if closing {
+			if n := len(stack); n > 0 && stack[n-1] == name {
+				stack = stack[:n-1]
+				out.WriteString("</" + name + ">")
+			}
+			continue
+		}
+		if strings.HasSuffix(tag, "/") {
+			continue
+		}
+		stack = append(stack, name)
+		marked = true
+		out.WriteString("<" + name + ">")
+	}
+	for k := len(stack) - 1; k >= 0; k-- {
+		out.WriteString("</" + stack[k] + ">")
+	}
+	if !marked {
+		return ""
+	}
+	return strings.TrimSpace(out.String())
 }

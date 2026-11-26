@@ -18,10 +18,22 @@ const (
 	CodeChunkMissing Code = "KR7146"
 	// CodePublicStylesheet: a page links a .css file from public/ with rel=stylesheet.
 	CodePublicStylesheet Code = "KR7147"
+	// CodeDynamicRouteUnserved: a dynamic route with closed params that has no page and no server route.
+	CodeDynamicRouteUnserved Code = "KR7148"
 )
 
 func init() {
 	Register(
+		CodeInfo{
+			Code:  CodeDynamicRouteUnserved,
+			Title: "Dynamic route has no page to serve",
+			Explanation: "A dynamic route whose params are closed (`export const dynamicParams = false`, or `output: \"static\"`) " +
+				"is served only by the pages `generateStaticParams` lists: prerendered files, or server routes when the " +
+				"page or one of its layouts renders per request. Without a `generateStaticParams` the build can name no " +
+				"param, so the route would answer 404 for every URL and nothing would be written. This is a build " +
+				"error. Export `generateStaticParams` from the page (as a function or a const), or remove " +
+				"`dynamicParams = false` so the route renders any param on demand.",
+		},
 		CodeInfo{
 			Code:  CodePublicStylesheet,
 			Title: "Stylesheet linked from public/ is not minified or hashed",

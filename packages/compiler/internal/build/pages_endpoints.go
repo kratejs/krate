@@ -77,7 +77,7 @@ func findPagesStrays(dir string) pagesStrays {
 		}
 		rel = filepath.ToSlash(rel)
 		base := filepath.Base(path)
-		if strings.HasPrefix(base, "_") {
+		if strings.HasPrefix(base, "_") || isPagesRouteHandler(path) {
 			return nil
 		}
 		switch {
@@ -230,6 +230,8 @@ func (b *Builder) runEndpointBundle(abs, route string, bnd *bundler.Bundler) ([]
 		Sourcefile:    "krate-endpoint-bootstrap.ts",
 		Loader:        api.LoaderTS,
 		ResolveImport: resolve,
+
+		JSXImportSource: "@krate/runtime/server",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bundling: %w", err)
@@ -253,24 +255,27 @@ func (b *Builder) runEndpointBundle(abs, route string, bnd *bundler.Bundler) ([]
 		cmdName, args = "deno", []string{"run", "--allow-net", "--allow-read", "--allow-env", "--allow-sys", path}
 	}
 	cmd := execx.Command(ctx, cmdName, args...)
-	cmd.Dir = filepath.Dir(abs)
+	if b.Root != "" {
+		cmd.Dir = b.Root
+	} else {
+		cmd.Dir = filepath.Dir(abs)
+	}
 	if len(b.Env) > 0 {
 		cmd.Env = append(os.Environ(), environ.KVList(b.Env)...)
 	}
-	out, err := cmd.Output()
+	run, err := runBuildScript(ctx, cmd, "timed out after 30s")
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, errors.New("timed out after 30s")
-		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			stderr := strings.TrimSpace(string(exitErr.Stderr))
-			if strings.Contains(stderr, "KRATE_NO_GET") {
+			if strings.Contains(run.Stderr, "KRATE_NO_GET") {
 				return nil, &endpointExit{noGET: true, msg: "no GET export"}
 			}
-			return nil, &endpointExit{msg: stderr}
+			return nil, &endpointExit{msg: err.Error()}
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, err
 		}
 		return nil, fmt.Errorf("%s is required to build prerendered endpoints: %w", cmdName, err)
 	}
-	return out, nil
+	return run.Stdout, nil
 }

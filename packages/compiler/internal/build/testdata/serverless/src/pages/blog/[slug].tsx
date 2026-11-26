@@ -1,3 +1,5 @@
+// Keeps the [slug] fallback template so other slugs render at request time.
+export const dynamicParams = true;
 export function generateStaticParams() {
   return [{ slug: "first" }, { slug: "second" }];
 }

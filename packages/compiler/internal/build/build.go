@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kratejs/krate/packages/compiler/internal/routeconv"
 	"hash/fnv"
 	"io"
 	"os"
@@ -134,6 +135,18 @@ type PageResult struct {
 	// ServerPage is true when the page component itself is async: the whole
 	// page body renders per request in the SSR sidecar (no build-time body).
 	ServerPage bool
+	// Params holds the concrete route params of an expanded generateStaticParams
+	// page.
+	Params map[string]string
+	// Prerender marks an async page to render once through the staged SSR
+	// driver at build time and bake into its HTML output.
+	Prerender bool
+	// PrerenderRequired forbids falling back to request-time rendering when
+	// prerendering encounters request-only APIs (for example output: "static").
+	PrerenderRequired bool
+	// PrerenderSeedISR keeps RenderISR at runtime while seeding the initial
+	// baked HTML inside the coarse page region.
+	PrerenderSeedISR bool
 	// ServerExports lists the async server components rendered as regions of
 	// this page; the page server bundle exports each one (serverbundle.go).
 	ServerExports []ServerExport
@@ -444,6 +457,11 @@ type Builder struct {
 
 	segmentGenMu sync.Mutex
 	segmentGen   map[string]string // generated segment source path -> content written
+
+	// rootLayoutPages are the plugin-generated pages (outside pagesDir) that
+	// asked to be wrapped in the app's root layout. Set once per build, before
+	// any page is built.
+	rootLayoutPages map[string]bool
 }
 
 // shouldMinifyJS reports whether generated JavaScript should be minified.
@@ -1079,6 +1097,19 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	}
 	dl.Lap("7-shared-chunks")
 
+	// Prerender async pages that have concrete params (or static output) before
+	// writing HTML so their baked files carry the rendered body and metadata.
+	if hasPrerenderPages(results) {
+		preBundles := b.rebuildClientSSRModules(ssrBundlePages(results))
+		if err := b.writeHighlightTables(preBundles); err != nil {
+			return results, err
+		}
+		for _, perr := range b.prerenderAsyncPages(results, preBundles) {
+			fmt.Fprintf(b.stderr(), "\n  %sx Error:%s %v\n", cRed, cReset, perr)
+			pageErrs = append(pageErrs, perr)
+		}
+	}
+
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, globalCSS, runtimeJS)
 	dl.Lap("8-html")
@@ -1194,12 +1225,6 @@ func (b *Builder) BuildAll() error {
 	if err := validateRouteTree(pages, b.Cfg.PagesDir); err != nil {
 		return early.finish(err)
 	}
-	// Metadata routes (sitemap, robots, manifest, opengraph-image) run first:
-	// the pages' <head> carries the image URLs they produce. A failing route
-	// only leaves its own output (and image URLs) out.
-	for _, err := range b.buildMetadataRoutes(pages) {
-		early.add("Metadata route error", err)
-	}
 	// Intercepting slot pages are built as fragments the SPA router swaps
 	// into their slot (see parallel.go).
 	pages = append(pages, findInterceptPages(b.Cfg.PagesDir)...)
@@ -1230,8 +1255,15 @@ func (b *Builder) BuildAll() error {
 	}
 
 	// Add generated pages (from BeforeBuild hooks like docs plugin)
+	b.rootLayoutPages = nil
 	for _, gp := range genPages {
 		pages = append(pages, gp.Path)
+		if gp.RootLayout {
+			if b.rootLayoutPages == nil {
+				b.rootLayoutPages = map[string]bool{}
+			}
+			b.rootLayoutPages[gp.Path] = true
+		}
 	}
 
 	// Run GenerateRoutes hooks for plugin-generated virtual pages
@@ -1319,6 +1351,13 @@ func (b *Builder) BuildAll() error {
 		return early.finish(&ContentValidationError{Errors: cres.Validation})
 	}
 
+	// Metadata routes (sitemap, robots, manifest, opengraph-image) run after
+	// BeforeBuild and prepareContent (so they see krate/content and generated
+	// pages) and before page builds (so page <head> tags carry their images).
+	for _, err := range b.buildMetadataRoutes(pages) {
+		early.add("Metadata route error", err)
+	}
+
 	// Build the Go host (API routes + components) before pages, so pages that
 	// import Go components can render them through the host at build time.
 	if err := b.BuildAllGoAPI(); err != nil {
@@ -1329,16 +1368,24 @@ func (b *Builder) BuildAll() error {
 	if err := b.contextErr(); err != nil {
 		return err
 	}
-	// JS API routes do not depend on the pages: compile them while the pages
-	// build. Every return below waits for them.
-	jsAPIDone := make(chan error, 1)
+	// JS API routes do not depend on the pages: compile request-time routes
+	// while the pages build, and collect static API routes for build-time
+	// evaluation after HTML pages are written. Every return below waits for them.
+	type jsAPIResult struct {
+		staticRoutes []staticRouteSource
+		err          error
+	}
+	jsAPIDone := make(chan jsAPIResult, 1)
 	go pprof.Do(context.Background(), pprof.Labels("phase", "api-routes"), func(context.Context) {
 		defer b.phase("parallel:api-routes")()
-		var err error
-		if perr := safe.Run(func() error { err = b.buildJSAPI(); return nil }); perr != nil {
-			err = perr
+		var res jsAPIResult
+		if perr := safe.Run(func() error {
+			res.staticRoutes, res.err = b.buildJSAPIWithStatic()
+			return nil
+		}); perr != nil {
+			res.err = perr
 		}
-		jsAPIDone <- err
+		jsAPIDone <- res
 	})
 	totalPages := len(pages) + len(routes)
 	resultsCh := make(chan pageBuildResult, totalPages)
@@ -1485,10 +1532,12 @@ func (b *Builder) BuildAll() error {
 	{
 		filtered := results[:0]
 		var dropped []string
+		var droppedResults []*PageResult
 		for _, r := range results {
 			if r != nil && r.StaticOnly && r.IsDynamicTemplate {
 				pat := routeFromOutName(r.OutName)
 				dropped = append(dropped, pat)
+				droppedResults = append(droppedResults, r)
 				b.staticOnlyMu.Lock()
 				b.staticOnlyRoutes = append(b.staticOnlyRoutes, pat)
 				b.staticOnlyMu.Unlock()
@@ -1497,6 +1546,13 @@ func (b *Builder) BuildAll() error {
 			filtered = append(filtered, r)
 		}
 		results = filtered
+		for _, r := range droppedResults {
+			if err := b.unservedDynamicRoute(r, results); err != nil {
+				fmt.Fprintf(b.stderr(), "  %sx Error:%s %s\n", cRed, cReset, errWithHint(err))
+				failureMessages = append(failureMessages, "  "+errWithHint(err))
+				failureErrs = append(failureErrs, err)
+			}
+		}
 		if len(dropped) > 0 {
 			printf("  %s*%s Static-only dynamic routes (no fallback template): %s\n", cCyan, cReset, strings.Join(dropped, ", "))
 		}
@@ -1592,6 +1648,31 @@ func (b *Builder) BuildAll() error {
 	}
 	wl.Lap("shared-chunks")
 
+	// Prerender eligible async pages (generateStaticParams entries and static
+	// output async pages) through the staged SSR driver before writing HTML, so
+	// head merging, SEO/CSP, minification, content-hashing and chunk checks all
+	// run on the final prerendered documents.
+	implsWaited := false
+	highlightsWritten := false
+	if hasPrerenderPages(results) {
+		<-implsDone
+		implsWaited = true
+		if err := b.writeHighlightTables(serverBundles); err != nil {
+			failOutput(err)
+		}
+		highlightsWritten = true
+		if len(serverBundleErrs) == 0 {
+			for _, perr := range b.prerenderAsyncPages(results, serverBundles) {
+				detail := errWithHint(perr)
+				fmt.Fprintf(b.stderr(), "\n  %sx Error:%s %s\n", cRed, cReset, detail)
+				failureMessages = append(failureMessages, "  "+detail)
+				failureErrs = append(failureErrs, perr)
+			}
+			serverBundles = b.pruneUnusedServerArtifacts(results, serverBundles)
+		}
+		wl.Lap("prerender")
+	}
+
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, globalCSS, runtimeJS)
 	wl.Lap("html")
@@ -1669,8 +1750,16 @@ func (b *Builder) BuildAll() error {
 		failureErrs = append(failureErrs, err)
 	}
 	tl.Lap("endpoints")
-	apiErr := <-jsAPIDone
+	jsAPIRes := <-jsAPIDone
+	apiErr := jsAPIRes.err
 	tl.Lap("api-wait")
+	staticRouteSources := append(findPagesRouteHandlers(b.Cfg.PagesDir), jsAPIRes.staticRoutes...)
+	for _, err := range b.buildStaticRoutes(staticRouteSources) {
+		fmt.Fprintf(b.stderr(), "  %sStatic route error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{err}), "\n", "\n    "))
+		failureMessages = append(failureMessages, "  static-route: "+err.Error())
+		failureErrs = append(failureErrs, err)
+	}
+	tl.Lap("static-routes")
 	if apiErr == nil {
 		apiErr = b.BuildAllGoAPI()
 	}
@@ -1712,10 +1801,14 @@ func (b *Builder) BuildAll() error {
 	tl.Lap("manifest")
 
 	// Compile server bundles for SSR/ISR/streaming pages
-	<-implsDone
+	if !implsWaited {
+		<-implsDone
+	}
 	tl.Lap("server-bundles-wait")
-	if err := b.writeHighlightTables(serverBundles); err != nil {
-		failOutput(err)
+	if !highlightsWritten {
+		if err := b.writeHighlightTables(serverBundles); err != nil {
+			failOutput(err)
+		}
 	}
 	for _, err := range serverBundleErrs {
 		failureMessages = append(failureMessages, "  "+err.Error())
@@ -1973,6 +2066,23 @@ func (b *Builder) tailwindOptions() css.TailwindOptions {
 	}
 }
 
+// moduleSourceFiles returns the project files the pages built so far depend
+// on (pages, layouts and local modules), so Tailwind sees classes in files
+// outside src/. Dependencies in node_modules or outside the root are skipped.
+func (b *Builder) moduleSourceFiles() []string {
+	b.depMu.Lock()
+	defer b.depMu.Unlock()
+	files := make([]string, 0, len(b.depGraph))
+	for f := range b.depGraph {
+		if !isWithin(f, b.Root) || strings.Contains(filepath.ToSlash(f), "/node_modules/") {
+			continue
+		}
+		files = append(files, f)
+	}
+	sort.Strings(files)
+	return files
+}
+
 // twPageInfo is the Tailwind state one page's authored CSS contributes: its
 // CSS-first directives and the @keyframes/@property blocks that @apply expanded
 // (carried by the shared Tailwind sheet instead of every page sheet).
@@ -2102,6 +2212,7 @@ func (b *Builder) tailwindCSS() string {
 		return ""
 	}
 	opts := b.tailwindOptions()
+	opts.SourceFiles = b.moduleSourceFiles()
 	twCfg := css.LoadTailwindConfigWithOptions(b.Root, opts)
 	// v4 CSS-first config: directives from project CSS files plus those seen
 	// in the authored CSS processed so far (covers CSS outside the scan dirs).
@@ -2414,7 +2525,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				}
 				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
 				if b.Cfg.SEO.BaseURL != "" || b.Cfg.SEO.Description != "" {
-					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO, seoCtx{BasePath: b.Cfg.BaseURLPath(), ErrorPage: r.IsErrorPage})
+					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO, seoCtx{BasePath: b.Cfg.BaseURLPath(), Slash: b.Cfg.TrailingSlashMode(), ErrorPage: r.IsErrorPage})
 					if seoTags != "" {
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}
@@ -2828,7 +2939,25 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	serverPage, serverErr := b.applyServerComponentMode(page, entryModule, ann, staticMode, layoutCut, &renderMode, &revalidate)
+	hasGSP := isDynRoute && (hasGenerateStaticParams(entryModule.Program) || gspExportRe.MatchString(entryModule.SourceCode))
+	scPlan, serverErr := b.applyServerComponentMode(page, entryModule, ann, serverComponentOpts{
+		staticMode: staticMode,
+		isDynRoute: isDynRoute,
+		hasGSP:     hasGSP,
+		staticOnly: staticOnly,
+		isExpanded: false,
+		cfg:        parsePageConfig(entryModule.Program),
+		dataUsage:  dataUsage,
+		cut:        layoutCut,
+	}, &renderMode, &revalidate)
+	serverPage := scPlan.serverPage
+	// With the final render mode known: a prerendered dynamic route that
+	// generateStaticParams enumerates, and that nothing serves at request time,
+	// has no use for a fallback template.
+	if allowDynamic && isDynRoute && !isSegment && b.fallbackTemplateUnused(entryModule.Program, renderMode, serverPage, hasGSP) {
+		allowDynamic = false
+		staticOnly = true
+	}
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}
@@ -2924,6 +3053,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		pageOpts.ActionURLs = bundle.ActionImports
 		if isDynamicRoute(page, b.Cfg.PagesDir) {
 			pageOpts.PageParams = dynamicRouteSentinels(extractParamNames(page, b.Cfg.PagesDir))
+			pageOpts.PageParamsDynamic = true
 		}
 		if _, isSeg := segmentKindOfFile(page); !isSeg {
 			pageOpts.RoutePath = routePathFor(page, b.Cfg.PagesDir, pageOpts.PageParams)
@@ -3158,7 +3288,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 			return nil, "", err
 		}
 		b.recordDeps(page, deps)
-		pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
+		pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, nil, emitResult.HTML)
 		return &PageResult{
 			Page:              page,
 			OutName:           outName,
@@ -3386,7 +3516,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	loadingHTML := b.renderLoadingComponent(page)
 	pl.Lap("loading")
 
-	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML, dceJS...)
+	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, islandClasses(islandStyles), emitResult.HTML, dceJS...)
 	pl.Lap("css-dce")
 
 	// Return data structures without triggering an intermediate disk write
@@ -3423,6 +3553,9 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		Program:           entryModule.Program,
 		GoBaked:           goBaked,
 		ServerPage:        serverPage,
+		Prerender:         scPlan.prerender,
+		PrerenderRequired: scPlan.prerenderRequired,
+		PrerenderSeedISR:  scPlan.prerenderSeedISR,
 		ServerExports:     serverExportsOf(regions),
 		MetadataSegments:  metaSegs,
 		MetadataPageFiles: metaPageFiles,
@@ -4166,6 +4299,9 @@ func findPages(dir string) ([]string, error) {
 		if isMetadataRouteFile(base) {
 			return nil // sitemap.ts, robots.ts, opengraph-image.tsx...: built by buildMetadataRoutes
 		}
+		if isPagesRouteHandler(path) {
+			return nil // route.ts / route.tsx: build-time static route handler, built by buildStaticRoutes
+		}
 		if !strings.HasPrefix(base, "_") && !isRouteConventionFile(base) && !isUseServerFile(path) {
 			pages = append(pages, path)
 		}
@@ -4333,6 +4469,19 @@ func findRouteStack(pagePath, pagesDir string) []routeBoundary {
 		dir = parent
 	}
 	return stack
+}
+
+// rootLayoutBoundaries returns the layouts directly in pagesDir (the app's
+// root layout); route-group and nested layouts do not apply to a generated
+// page. It is appended after a generated page's own boundaries, outermost.
+func rootLayoutBoundaries(pagesDir string) []routeBoundary {
+	var out []routeBoundary
+	for _, name := range layoutNames {
+		if p := firstExisting(pagesDir, []string{name}); p != "" {
+			out = append(out, routeBoundary{Path: p, Kind: "layout", Dir: pagesDir})
+		}
+	}
+	return out
 }
 
 // firstExisting returns the first dir/name that exists (memoized in
@@ -4622,12 +4771,10 @@ func escapeJSONForScript(s string) string {
 }
 
 var (
-	layoutNames   = []string{"_layout.tsx", "_layout.ts", "_layout.jsx", "_layout.js"}
-	templateNames = []string{"_template.tsx", "_template.ts", "_template.jsx", "_template.js", "template.tsx", "template.ts", "template.jsx", "template.js"}
-	loadingNames  = []string{"loading.tsx", "loading.ts", "loading.jsx", "loading.js"}
-	// errorBoundaryNames are the files that become a client error boundary. 500.tsx
-	// is only the server error page, so existing static 500 pages stay static.
-	errorBoundaryNames = []string{"error.tsx", "error.ts", "error.jsx", "error.js"}
+	layoutNames        = routeconv.LayoutNames
+	templateNames      = routeconv.TemplateNames
+	loadingNames       = routeconv.LoadingNames
+	errorBoundaryNames = routeconv.ErrorBoundaryNames
 )
 
 // findLayoutFile walks up from pagePath toward pagesDir checking each directory
@@ -5577,23 +5724,56 @@ func apiRouteSourceFiles(apiSrcDir string) ([]string, error) {
 	return out, err
 }
 
-// buildJSAPI compiles the JS/TS API routes.
+// buildJSAPI compiles JS/TS API routes and evaluates any static ones at build time.
 func (b *Builder) buildJSAPI() error {
+	staticRoutes, err := b.buildJSAPIWithStatic()
+	if err != nil {
+		return err
+	}
+	if errs := b.buildStaticRoutes(staticRoutes); len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
+}
+
+// buildJSAPIWithStatic compiles request-time JS/TS API routes and returns any
+// routes that should be evaluated at build time as static route handlers.
+func (b *Builder) buildJSAPIWithStatic() ([]staticRouteSource, error) {
 	apiSrcDir := filepath.Join(b.Root, filepath.FromSlash(gohost.DefaultAPIDir))
 	if _, err := os.Stat(apiSrcDir); os.IsNotExist(err) {
-		return nil // No API directory present, skip silently
+		return nil, nil // No API directory present, skip silently
 	}
 
 	jsRoutes, err := apiRouteSourceFiles(apiSrcDir)
 	if err != nil {
-		return fmt.Errorf("scanning api routes: %w", err)
+		return nil, fmt.Errorf("scanning api routes: %w", err)
 	}
-	b.pruneRuntimeCompatWarnings(jsRoutes)
+	staticOutput := b.Cfg != nil && strings.EqualFold(b.Cfg.Output, "static")
+	var dynamicRoutes []string
+	var staticRoutes []staticRouteSource
+	for _, r := range jsRoutes {
+		if shouldBuildStaticAPIRoute(r, staticOutput) {
+			pat, perr := apiFileToURLPattern(apiSrcDir, r)
+			if perr != nil {
+				return nil, perr
+			}
+			staticRoutes = append(staticRoutes, staticRouteSource{
+				Path:       r,
+				URLPattern: pat,
+				FromAPI:    true,
+			})
+			continue
+		}
+		dynamicRoutes = append(dynamicRoutes, r)
+	}
+	b.pruneRuntimeCompatWarnings(dynamicRoutes)
 
-	if len(jsRoutes) > 0 {
-		return b.CompileAPIRoutes(jsRoutes)
+	if len(dynamicRoutes) > 0 {
+		if err := b.CompileAPIRoutes(dynamicRoutes); err != nil {
+			return staticRoutes, err
+		}
 	}
-	return nil
+	return staticRoutes, nil
 }
 
 // CompileAPIRoutes processes the specified list of API paths in parallel.

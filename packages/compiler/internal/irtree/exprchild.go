@@ -1,6 +1,9 @@
 package irtree
 
-import "github.com/kratejs/krate/packages/compiler/ast"
+import (
+	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+)
 
 // buildExprContainerChildrenMode routes a {expr} JSX container child to the
 // correct slot type. When `doEscape` is true the statically-evaluated result is
@@ -233,7 +236,11 @@ func (b *builder) controlFlowChild(expr ast.Expr, parentID string, doEscape bool
 func (b *builder) nonReactiveChild(expr ast.Expr, parentID string, doEscape bool) []SlotNode {
 	id, isIdent := expr.(*ast.Identifier)
 	if !isIdent {
-		if nodes, ok := staticChildNodes(b.evalValue(expr), doEscape); ok {
+		v := b.evalValue(expr)
+		if nodes, ok := staticChildNodes(v, doEscape); ok {
+			return nodes
+		}
+		if nodes, ok := b.jsxNodeValueChild(v, parentID, doEscape); ok {
 			return nodes
 		}
 		return []SlotNode{b.buildExprSlot(expr, parentID)}
@@ -260,4 +267,49 @@ func (b *builder) nonReactiveChild(expr ast.Expr, parentID string, doEscape bool
 		}
 	}
 	return []SlotNode{b.buildExprSlot(expr, parentID)}
+}
+
+// jsxNodeValueChild renders a build-time value that holds JSX kept as source
+// (an element read out of a module constant: `{item.icon}`) the way the same
+// JSX written in place renders. Text and numbers in an array render as text.
+// It declines when the value is not fully known or the JSX reads a name the
+// component binds differently.
+func (b *builder) jsxNodeValueChild(v jsvalue.Value, parentID string, doEscape bool) ([]SlotNode, bool) {
+	if !v.ContainsJSXNode() || v.ContainsUnknown() {
+		return nil, false
+	}
+	var parts []ast.Expr
+	var collect func(v jsvalue.Value) bool
+	collect = func(v jsvalue.Value) bool {
+		switch v.Kind() {
+		case jsvalue.KindUndefined, jsvalue.KindNull, jsvalue.KindBool:
+			return true
+		case jsvalue.KindJSX:
+			src, ok := v.JSXSource()
+			if !ok || b.capturedAtUse(src, map[string]bool{}, false) {
+				return false
+			}
+			parts = append(parts, src)
+			return true
+		case jsvalue.KindArray:
+			for _, el := range v.Elems() {
+				if !collect(el) {
+					return false
+				}
+			}
+			return true
+		case jsvalue.KindString, jsvalue.KindNumber:
+			parts = append(parts, jsvalue.ToAST(v))
+			return true
+		}
+		return false
+	}
+	if !collect(v) {
+		return nil, false
+	}
+	var nodes []SlotNode
+	for _, p := range parts {
+		nodes = append(nodes, b.exprChild(p, parentID, doEscape)...)
+	}
+	return nodes, true
 }

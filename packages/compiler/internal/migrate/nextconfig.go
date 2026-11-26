@@ -48,6 +48,8 @@ type nextConfigData struct {
 	// DeployTarget is "node" for output: 'standalone'; it becomes
 	// deploy.target.
 	DeployTarget string `json:"-"`
+	// Output is "static" for output: 'export'; it becomes output.
+	Output string `json:"-"`
 	// OutputFileTracingRoot is outputFileTracingRoot as a path relative to the
 	// project (for example "../.."); TracingDepth is how many levels it is up
 	// and TracingRel the project's path below it ("packages/web").
@@ -489,6 +491,9 @@ func configJSON(entry string, next nextConfigData) []byte {
 	}
 	if next.DeployTarget != "" {
 		opts["deploy"] = map[string]any{"target": next.DeployTarget}
+	}
+	if next.Output != "" {
+		opts["output"] = next.Output
 	}
 	if next.MiddlewareRuntime != "" {
 		opts["ssr"] = map[string]any{"middlewareRuntime": next.MiddlewareRuntime}

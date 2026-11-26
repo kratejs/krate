@@ -5,7 +5,7 @@ import { ATTR_ALIASES } from './htmlspec-attributes.js';
 import { withBase } from './base-path.js';
 import { highlight as highlightCode, trimSpace } from './highlight.js';
 import { sealBoundArgs } from './action-seal.js';
-import { accessDeniedStatus, isNotFoundSignal, redirectTarget } from './request-context.js';
+import { accessDeniedStatus, isDynamicUsageError, isNotFoundSignal, redirectTarget } from './request-context.js';
 import { sha256Hex } from './sha256.js';
 import { currentRenderScope, markErrorCaught } from './cache-scope.js';
 import { encodeProp } from './flight-props.js';
@@ -391,7 +391,7 @@ export class ServerErrorBoundary {
     this.props = props;
   }
   static getDerivedStateFromError(error: unknown) {
-    if (isNotFoundSignal(error) || accessDeniedStatus(error) || redirectTarget(error)) throw error;
+    if (isNotFoundSignal(error) || accessDeniedStatus(error) || redirectTarget(error) || isDynamicUsageError(error)) throw error;
     return { error: describeBoundaryError(error) };
   }
   render(): JSXNode {

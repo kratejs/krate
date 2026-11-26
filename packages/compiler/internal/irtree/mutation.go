@@ -56,8 +56,8 @@ var pureMethods = map[string]bool{
 	"toLocaleString": true, "toLowerCase": true, "toReversed": true,
 	"toSorted": true, "toSpliced": true, "toString": true, "toUpperCase": true,
 	"trim": true, "trimEnd": true, "trimStart": true, "valueOf": true,
-	"with": true, "getTime": true, "toISOString": true, "test": true,
-	"exec": true, "call": true, "apply": true, "bind": true,
+	"with": true, "getTime": true, "toISOString": true,
+	"call": true, "apply": true, "bind": true,
 	"values": true,
 	// Date readers and formatters (the setters are not listed).
 	"getFullYear": true, "getMonth": true, "getDate": true, "getDay": true,
@@ -430,7 +430,7 @@ func rootIdentName(e ast.Expr) string {
 // statement can change.
 func isPrimitiveValue(v jsvalue.Value) bool {
 	switch v.Kind() {
-	case jsvalue.KindMap, jsvalue.KindSet, jsvalue.KindDate, jsvalue.KindIterator:
+	case jsvalue.KindMap, jsvalue.KindSet, jsvalue.KindDate, jsvalue.KindIterator, jsvalue.KindRegExp:
 		return false
 	}
 	return !v.IsUnknown() && !v.IsArray() && !v.IsObject() && !v.IsFunction() && !v.IsJSX()

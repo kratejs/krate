@@ -342,7 +342,7 @@ func inlineConstLocals(prefix []ast.Stmt, ret ast.Expr) (ast.Expr, []ast.Stmt) {
 				break
 			}
 		}
-		if used {
+		if used || jsxTagUses(ret, locals[i].name) {
 			declared[locals[i].at] = &ast.VarStmt{Kind: ast.VarConst, Decls: []*ast.VarDecl{{Name: locals[i].name, Init: locals[i].init}}}
 			continue
 		}
@@ -357,6 +357,18 @@ func inlineConstLocals(prefix []ast.Stmt, ret ast.Expr) (ast.Expr, []ast.Stmt) {
 		}
 	}
 	return ret, kept
+}
+
+// jsxTagUses reports whether a JSX element under e names a tag held in the
+// variable name (`<View/>`, `<View.Item/>`): a tag name is not an expression,
+// so the variable cannot be replaced by its initializer.
+func jsxTagUses(e ast.Expr, name string) bool {
+	for _, tag := range JSXElementNames(e) {
+		if tag == name || strings.HasPrefix(tag, name+".") {
+			return true
+		}
+	}
+	return false
 }
 
 func stmtMentions(stmt ast.Stmt, name string) bool {

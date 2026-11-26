@@ -156,6 +156,10 @@ func (c *reactCtx) isPropsRead(sc *scope, name string) bool {
 // statement by statement.
 func (c *reactCtx) rewriteFnBody(body *[]ast.Stmt, sc *scope, kind frameKind, params []*ast.Param) {
 	f := c.frame()
+	if !c.react && kind == frameHook {
+		c.rewriteNativeHookBody(*body, sc)
+		return
+	}
 	if !c.react || kind == frameOther || f == nil {
 		c.rewriteStmts(*body, sc)
 		return
@@ -909,4 +913,64 @@ func renderPhaseEffect(s *ast.IfStmt) ast.Stmt {
 			Body:     []ast.Stmt{s},
 		}},
 	}}
+}
+
+// rewriteNativeHookBody rewrites the body of a custom hook in a Krate-native
+// module. Its top-level return hands the state getters the hook created to the
+// caller as getters (`return { on, toggle }`), not as their current values, so
+// the component calls `on()` and reads the live state.
+func (c *reactCtx) rewriteNativeHookBody(body []ast.Stmt, sc *scope) {
+	last := -1
+	for i, stmt := range body {
+		if _, ok := stmt.(*ast.ReturnStmt); ok {
+			last = i
+		}
+	}
+	for i, stmt := range body {
+		if i != last {
+			c.rewriteStmt(stmt, sc)
+			continue
+		}
+		ret := stmt.(*ast.ReturnStmt)
+		ret.Value = c.rewriteReturnedGetters(ret.Value, sc)
+	}
+}
+
+// rewriteReturnedGetters rewrites a returned expression, leaving the getters
+// declared in the hook's own scope bare where they are returned directly, as
+// an object property, an array element or a spread source.
+func (c *reactCtx) rewriteReturnedGetters(e ast.Expr, sc *scope) ast.Expr {
+	switch x := e.(type) {
+	case nil:
+		return nil
+	case *ast.Identifier:
+		if sc.getters[x.Name] {
+			return x
+		}
+	case *ast.ParenExpr:
+		x.Expr = c.rewriteReturnedGetters(x.Expr, sc)
+		return x
+	case *ast.TypeAssertion:
+		x.Expr = c.rewriteReturnedGetters(x.Expr, sc)
+		return x
+	case *ast.ArrayExpr:
+		for i, el := range x.Elements {
+			x.Elements[i] = c.rewriteReturnedGetters(el, sc)
+		}
+		return x
+	case *ast.ObjectExpr:
+		for _, p := range x.Properties {
+			if p == nil {
+				continue
+			}
+			p.Value = c.rewriteReturnedGetters(p.Value, sc)
+			if p.Shorthand {
+				if id, ok := p.Value.(*ast.Identifier); !ok || id.Name != p.Key {
+					p.Shorthand = false
+				}
+			}
+		}
+		return x
+	}
+	return c.rewriteExpr(e, sc)
 }

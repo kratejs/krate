@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"reflect"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -23,8 +24,26 @@ func evalConstValue(expr ast.Expr, signals map[string]ast.Expr, props valueMap) 
 	return newConstInterp(signals, props).Eval(expr)
 }
 
+// signalMemoKey identifies one signal initial under one props map.
+type signalMemoKey struct {
+	initial ast.Expr
+	props   uintptr
+}
+
+// signalMemo keeps the object and array initials of signals, so every read of
+// a signal during a build sees one value and `a === a` holds.
+type signalMemo map[signalMemoKey]jsvalue.Value
+
 func newConstInterp(signals map[string]ast.Expr, props valueMap) *jsvalue.Interp {
+	return newConstInterpMemo(signals, props, nil)
+}
+
+func newConstInterpMemo(signals map[string]ast.Expr, props valueMap, memo signalMemo) *jsvalue.Interp {
 	in := jsvalue.New(jsvalue.Hooks{})
+	var propsID uintptr
+	if props != nil {
+		propsID = reflect.ValueOf(props).Pointer()
+	}
 	resolving := map[string]bool{}
 	signalInitial := func(name string) (jsvalue.Value, bool) {
 		initial, ok := signals[name]
@@ -37,9 +56,16 @@ func newConstInterp(signals map[string]ast.Expr, props valueMap) *jsvalue.Interp
 		if resolving[name] {
 			return jsvalue.Dynamic("recursive signal initial " + name), true
 		}
+		key := signalMemoKey{initial, propsID}
+		if v, ok := memo[key]; ok && memo != nil {
+			return v, true
+		}
 		resolving[name] = true
 		v := in.EvalIn(jsvalue.NewScope(nil), initial)
 		delete(resolving, name)
+		if memo != nil && (v.IsArray() || v.IsObject()) && !v.ContainsUnknown() {
+			memo[key] = v
+		}
 		return v, true
 	}
 	contextDefault := func(ctx string) (jsvalue.Value, bool) {
@@ -253,13 +279,16 @@ func valueJSLiteral(v jsvalue.Value) string {
 }
 
 // typedModuleConsts folds module-level constant initializers to typed values.
-// Initializers may reference each other (evaluated lazily, cycles yield
-// Unknown). Only fully-known, non-function values are kept; names that only
-// have a legacy string value (no initializer) are decoded from it.
+// Initializers may reference each other (evaluated lazily in sorted key order,
+// cycles yield Unknown without poisoning unrelated bindings). Only fully-known,
+// non-function values are kept; names that only have a legacy string value (no
+// initializer) are decoded from it.
 func typedModuleConsts(inits map[string]ast.Expr, legacy map[string]string, run *ModuleRun) valueMap {
 	out := make(valueMap, len(inits))
 	state := map[string]int{} // 1 = evaluating, 2 = done
+	depth := map[string]int{} // evaluation stack depth while state == 1
 	values := map[string]jsvalue.Value{}
+	retries := map[string]int{}
 	if run != nil {
 		// Top-level code ran: its final values replace the initializer folds,
 		// and a binding it left unknown stays unknown.
@@ -271,9 +300,20 @@ func typedModuleConsts(inits map[string]ast.Expr, legacy map[string]string, run 
 		}
 	}
 	in := jsvalue.New(jsvalue.Hooks{})
+	// JSX inside a constant stays source (see jsvalue.JSXFromNode) so the
+	// fields around it still read at build time.
+	in.Hooks.JSX = func(expr ast.Expr) jsvalue.Value { return jsvalue.JSXFromNode(expr) }
+	curDepth := 0
+	var ancestorHit []int // min ancestor depth hit by each active frame
 	resolve := func(name string) (jsvalue.Value, bool) {
 		switch state[name] {
 		case 1:
+			if d := depth[name]; len(ancestorHit) > 0 {
+				top := len(ancestorHit) - 1
+				if ancestorHit[top] == 0 || d < ancestorHit[top] {
+					ancestorHit[top] = d
+				}
+			}
 			return jsvalue.Dynamic("cyclic module constant " + name), true
 		case 2:
 			return values[name], true
@@ -285,14 +325,36 @@ func typedModuleConsts(inits map[string]ast.Expr, legacy map[string]string, run 
 			}
 			return jsvalue.Value{}, false
 		}
+		curDepth++
+		myDepth := curDepth
 		state[name] = 1
+		depth[name] = myDepth
+		ancestorHit = append(ancestorHit, 0)
 		v := in.EvalIn(jsvalue.NewScope(nil), init)
+		hit := ancestorHit[len(ancestorHit)-1]
+		ancestorHit = ancestorHit[:len(ancestorHit)-1]
+		if hit > 0 && hit < myDepth && len(ancestorHit) > 0 {
+			top := len(ancestorHit) - 1
+			if ancestorHit[top] == 0 || hit < ancestorHit[top] {
+				ancestorHit[top] = hit
+			}
+		}
+		delete(depth, name)
+		curDepth--
+		// If this frame only failed because it hit an outer binding still on
+		// the stack, leave it uncached once so it evaluates cleanly after the
+		// outer binding finishes.
+		if hit > 0 && hit < myDepth && v.ContainsUnknown() && retries[name] == 0 {
+			retries[name] = 1
+			state[name] = 0
+			return v, true
+		}
 		state[name] = 2
 		values[name] = v
 		return v, true
 	}
 	in.Hooks.Ident = resolve
-	for name := range inits {
+	for _, name := range sortedKeysExpr(inits) {
 		v, _ := resolve(name)
 		if v.ContainsUnknown() || v.IsFunction() || v.IsJSX() {
 			continue

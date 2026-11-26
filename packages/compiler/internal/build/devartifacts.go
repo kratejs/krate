@@ -208,11 +208,20 @@ func (b *Builder) serverManifestOutOfStep(results []*PageResult) bool {
 			}
 		}
 	}
+	needsServer := map[string]bool{}
 	for _, r := range results {
 		if r.SourcePath == "" {
 			continue
 		}
-		if (r.Mode != RenderSSG) != known[filepath.ToSlash(r.SourcePath)] {
+		src := filepath.ToSlash(r.SourcePath)
+		if r.Mode != RenderSSG {
+			needsServer[src] = true
+		} else if _, ok := needsServer[src]; !ok {
+			needsServer[src] = false
+		}
+	}
+	for src, need := range needsServer {
+		if need != known[src] {
 			return true
 		}
 	}

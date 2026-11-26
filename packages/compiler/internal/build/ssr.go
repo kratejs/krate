@@ -48,6 +48,7 @@ type SSRServer struct {
 	pprRevalidate   int
 	rendererWorkers int
 	outDir          string
+	manifestPath    string
 	// secret authenticates the mutating internal endpoints
 	// (/__krate/ssr/revalidate, /refresh, /invalidate, /cache-invalidate).
 	secret string
@@ -172,6 +173,20 @@ func (s *SSRServer) SetOutDir(dir string) {
 	s.outDir = dir
 }
 
+// SetManifestPath overrides the server-manifest.json path read by the sidecar.
+func (s *SSRServer) SetManifestPath(path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.manifestPath = path
+}
+
+func (s *SSRServer) manifestPathLocked() string {
+	if s.manifestPath != "" {
+		return s.manifestPath
+	}
+	return ResolveManifestPath(s.outputDirLocked(), "server-manifest.json")
+}
+
 // outputDirLocked returns the build output directory. The caller must hold s.mu.
 func (s *SSRServer) outputDirLocked() string {
 	if s.outDir != "" {
@@ -215,8 +230,7 @@ var errServerManifestMissing = errors.New("server-manifest.json not found in dis
 // readServerManifest loads and parses the server manifest under outDir. A
 // missing file wraps errServerManifestMissing; an unreadable or corrupt one
 // returns an error naming the path.
-func readServerManifest(outDir string) (*ServerManifest, error) {
-	path := ResolveManifestPath(outDir, "server-manifest.json")
+func readServerManifestFile(path string) (*ServerManifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -231,10 +245,14 @@ func readServerManifest(outDir string) (*ServerManifest, error) {
 	return m, nil
 }
 
+func readServerManifest(outDir string) (*ServerManifest, error) {
+	return readServerManifestFile(ResolveManifestPath(outDir, "server-manifest.json"))
+}
+
 // loadManifestLocked reads the server manifest into s.manifest. The caller must
 // hold s.mu. On any error the previously loaded manifest is kept.
 func (s *SSRServer) loadManifestLocked() error {
-	m, err := readServerManifest(s.outputDirLocked())
+	m, err := readServerManifestFile(s.manifestPathLocked())
 	if err != nil {
 		return err
 	}
@@ -299,7 +317,7 @@ func (s *SSRServer) Start() error {
 		s.mu.Unlock()
 		return err
 	}
-	manifestPath := ResolveManifestPath(s.outputDirLocked(), "server-manifest.json")
+	manifestPath := s.manifestPathLocked()
 
 	runtimeCmd, runtimeArgs, err := ssrRuntimeCommand(s.runtime, rendererPath)
 	if err != nil {
@@ -616,7 +634,14 @@ func (s *SSRServer) FindPageForRoute(urlPath string) (*ManifestPage, map[string]
 		if params, ok := e.pattern.match(parts); ok {
 			p := &idx.manifest.Pages[e.page]
 			if len(params) == 0 {
-				params = idx.patternParams(p, parts)
+				if len(p.Params) > 0 {
+					params = make(map[string]string, len(p.Params))
+					for k, v := range p.Params {
+						params[k] = v
+					}
+				} else {
+					params = idx.patternParams(p, parts)
+				}
 			}
 			return p, params
 		}

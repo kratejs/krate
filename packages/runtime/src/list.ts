@@ -68,7 +68,31 @@ interface ListState {
 function keyOf(keyFn: KeyFn, item: unknown, i: number): string {
   if (!keyFn) return String(i);
   const k = keyFn(item, i);
-  return k == null ? String(i) : '$' + String(k);
+  if (k == null) return String(i);
+  if (typeof k === 'object' || typeof k === 'function') return objectKey(k as object);
+  return '$' + String(k);
+}
+
+// Object keys (a DOM node, say) have no useful string form, so they are keyed
+// by identity: a stable id per object.
+let objectIds: WeakMap<object, number> | undefined;
+let nextObjectId = 0;
+let warnedObjectKey = false;
+
+function objectKey(k: object): string {
+  const ids = objectIds || (objectIds = new WeakMap());
+  let id = ids.get(k);
+  if (id === undefined) {
+    id = ++nextObjectId;
+    ids.set(k, id);
+  }
+  if (!warnedObjectKey) {
+    warnedObjectKey = true;
+    console.error(
+      'A list key is a DOM node or object. Use a string or number as the key; Krate keys the row by object identity instead.',
+    );
+  }
+  return '@o' + id;
 }
 
 function decodeKey(s: string): string {

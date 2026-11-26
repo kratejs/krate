@@ -60,6 +60,8 @@ type ManifestPage struct {
 	// Segment marks a segment page rendered per request. It answers only the
 	// requests the server hands it and is never matched against a URL.
 	Segment bool `json:"segment,omitempty"`
+	// Params mirrors PageMeta.Params.
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // ServerManifest is the on-disk format read by the Node.js renderer server.
@@ -94,6 +96,7 @@ func BuildManifest(results []*PageResult, cssFile string, runtimeJS string) *Man
 			StaticOnly:    r.StaticOnly,
 
 			ServerComponents: len(r.ServerExports) > 0 || r.ServerPage,
+			Params:           r.Params,
 		}
 		if r.isDynamicSegment() {
 			m.SegmentPages = append(m.SegmentPages, meta)
@@ -208,6 +211,7 @@ func WriteManifest(m *Manifest, outDir string, serverBundles map[string]string) 
 			ServerComponents: p.ServerComponents,
 			SegDir:           p.SegDir,
 			Segment:          segment,
+			Params:           p.Params,
 		}
 		serverPages = append(serverPages, sp)
 	}

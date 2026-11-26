@@ -37,6 +37,9 @@ export default defineConfig({
 | `sidebar` | Custom sidebar override |
 | `links` | Social links rendered in the navbar |
 | `search` | Search bar options (see [Search](/docs/features/search/)) |
+| `rootLayout` | Wrap generated docs pages in the app's root `_layout` (default `false`, see [Using the app's root layout](#using-the-apps-root-layout)) |
+| `defaultTheme` | Colour mode when none is stored: `"light"`, `"dark"` or `"system"` (default, follows `prefers-color-scheme`) |
+| `themeScript` | Inject the pre-paint colour-mode script (default `true`, see [Colour mode](#colour-mode)) |
 
 ## What the plugin generates
 
@@ -72,15 +75,88 @@ src/content/docs/
 
 Sidebar sections come from directories; page order within a directory comes
 from the frontmatter `order` field. Each directory's `index.md` becomes the
-section landing page.
+section landing page and names the section:
+
+- The section title is the index page's `sidebar.label`, else its `title`, else
+  the folder name ("cli" becomes "Cli").
+- The section position is the index page's `sidebar.order` (or `order`). It sorts
+  among the sibling pages by that number, and on a tie the page comes before the
+  section. A section whose index sets no order stays after the pages, sorted by title.
+
+Prev/next links follow the sidebar a reader sees, including a `sidebar` array or
+`{ from: "file" }` override, walked depth-first with a section's index page first.
+A page the sidebar does not list (for example `sidebar: { hidden: true }`) gets no
+prev/next links; with `sidebar: "none"` they follow the page order instead.
+
+Docs URLs follow the site's `trailingSlash` setting: they end in `/` by default and
+carry none with `trailingSlash: "never"`. This covers the sidebar, prev/next,
+breadcrumbs, the language and version switchers, `sidebar.json` and the search index.
+
+A page whose file name is a route convention name (`template`, `loading`, `error`,
+`404`, `not-found`, `500`, `403`, `401`, `forbidden`, `unauthorized`, or anything
+starting with `_`) still renders as an ordinary docs page at its own URL.
+
+## Using the app's root layout
+
+Generated docs pages live under `.krate/gen/docs/`, outside `pagesDir`, so by
+default none of your app's layouts wrap them: the docs theme owns the whole shell.
+That means the fonts, global CSS, and `<html>`/`<body>` attributes you set in
+`src/pages/_layout.tsx` do not reach the docs. Opt in with `rootLayout`:
+
+```ts
+docs({ contentDir: "src/content/docs", theme: baseDocsTheme(), rootLayout: true })
+```
+
+Every generated page (including the tag and category pages) is then wrapped in
+`pagesDir/_layout.*`, the same way a page at `src/pages/docs/...` would be: the root
+layout's markup is outermost, the theme's layout is inside it, and the root layout's
+`<Head>` content (`<html lang>`, `<body>` attributes, metadata, stylesheets) is merged
+into the docs page. Only the root layout applies: layouts in route groups or in
+other directories do not.
+
+With `rootLayout` on, a theme should render its shell as a plain element such as
+`<div>` or `<main>`, and leave `<html>`, `<body>` and the document `<title>`
+chrome to the root layout; set `<html>`/`<body>` attributes through `<Head>`.
+`@krate/base-docs-theme` and `@krate/simple-docs-theme` already do this, so
+the page has exactly one `<html>` and one `<body>`. The default (`false`) leaves
+existing sites unchanged.
+
+## Colour mode
+
+The docs plugin adds a small script to every page's `<head>` that sets
+`data-theme` on `<html>` before first paint, from the choice stored in
+`localStorage` (key `theme`, or the theme's `themeStorageKey`) or, when nothing is
+stored, from `defaultTheme`:
+
+| `defaultTheme` | Nothing stored |
+|----------------|----------------|
+| `"system"` (default) | follow `prefers-color-scheme` |
+| `"light"` | light |
+| `"dark"` | dark |
+
+A visitor's stored choice always wins. Set `themeScript: false` to drop the script
+entirely, for a theme or root layout that manages the colour mode itself. The
+plugin passes the same settings to the theme as `props.colorMode`
+(`{ default, prePaint, storageKey }`), and `@krate/base-docs-theme`'s toggle
+starts from them. If the root layout renders `ThemePrePaint` from
+`@krate/base-docs-theme/shell` (which takes `defaultTheme` too), the two scripts
+carry the same `data-krate-once="theme-prepaint"` marker and the page keeps one.
+A custom script you want kept once per page can use the same attribute.
 
 ## The layout component
 
 The layout is a normal Krate TSX component receiving a single `DocsLayoutProps`
 object (`pageTitle`, `siteTitle`, `sidebarItems`, `tocItems`, `breadcrumbs`,
-`prev`/`next`, `socialLinks`, `currentPath`, `routeBase`, tag/category links, and
-optional `options`). It renders `{children}` for the content and owns all
+`prev`/`next`, `socialLinks`, `currentPath`, `routeBase`, tag/category links,
+`colorMode`, and optional `options`). It renders `{children}` for the content and owns all
 surrounding chrome.
+
+Each `tocItems` entry is `{ title, id, depth, html? }`. `title` is the heading's
+plain text. `html` is set only when the heading has inline formatting, and holds
+sanitized inline HTML (text escaped; only `code`, `em`, `strong`, `kbd`, `sub`,
+`sup` and `s`, without attributes; the heading anchor is removed). A theme
+renders it with `dangerouslySetInnerHTML` when present and falls back to
+`title`; `@krate/base-docs-theme` does.
 
 A page's `# Heading` is part of `children`, so a layout cannot put the frontmatter
 `description` below the title by itself. A theme can opt in with

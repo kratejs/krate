@@ -244,11 +244,20 @@ The bootstrap is emitted as ESM and run on the configured runtime.
 
 ## Static output & dynamic params
 
-By default a dynamic route (`[slug].tsx`) keeps a **fallback template**, so any
+A dynamic route (`[slug].tsx`) that exports `generateStaticParams` and is
+prerendered (no SSR, ISR or streaming) is built as the concrete pages the
+function returns. Nothing serves the `[param]` template at request time, so it
+is not written to the output (`dist/compare/[item]/index.html` does not exist)
+and other params 404, the same as with `dynamicParams = false`. The dev server
+keeps the template.
+
+A route that is rendered at request time (SSR, ISR, streaming), or that opts in
+with `export const dynamicParams = true`, keeps a **fallback template**, so any
 URL matching the pattern is answered at request time. That answer has status
 200: a slug with no entry renders the page's own not-found branch
-(`if (!post) return <h1>Not found</h1>`), not an HTTP 404. When the set of valid
-params is closed, turn that off with `dynamicParams`:
+(`if (!post) return <h1>Not found</h1>`), not an HTTP 404. A route with no
+`generateStaticParams` keeps its template too. To close the set explicitly,
+whatever the render mode, use `dynamicParams`:
 
 ```tsx
 // src/pages/blog/[slug].tsx
@@ -268,6 +277,16 @@ With `dynamicParams = false`:
 The equivalent forms are `export const dynamicParams = false` or
 `export const config = { dynamicParams: false }`.
 
+`generateStaticParams` may be a function or a const (`export const generateStaticParams = () => [...]`).
+
+When the page is async and it, or a layout above it, reads request data
+(`cookies()`, `headers()`), the listed params cannot be prerendered. They stay
+server routes that render per request with their params, and any other param
+404s, as in Next.js. The listed pages work in `krate serve`, the dev server and
+the Node and serverless targets. A closed route that exports no
+`generateStaticParams` would have no page at all, so the build fails with
+`[KR7148]`.
+
 ### Site-wide static output
 
 Add `output: "static"` to `krate.config.ts` to make the whole site static:
@@ -284,7 +303,11 @@ This does two things:
    `dynamicParams = false` unless it opts back in with
    `export const dynamicParams = true`.
 2. **Request-time rendering is disabled** - pages that would have been SSR, ISR,
-   or streaming are built as plain static pages.
+   or streaming are built as plain static pages. Async pages without dynamic
+   segments and dynamic async pages with `generateStaticParams` are prerendered
+   at build time (with no SSR server in the output); pages that genuinely need a
+   server (`dynamic = "force-dynamic"`, `headers()`, `cookies()`, `searchParams`,
+   or dynamic async routes without `generateStaticParams`) fail with `[KR7103]`.
 
 `output: "static"` is the way to guarantee that *only* statically renderable
 routes exist in the build.

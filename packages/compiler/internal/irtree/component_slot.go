@@ -83,7 +83,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	defer leave()
 
 	b.addContextProps(attrs)
-	b.inlineJSXConstAttrs(attrs)
+	typedAttrs := b.inlineJSXConstAttrs(attrs)
 	// CSS signal components must go through buildComponentNode so their
 	// analyzer is installed and triggers/panels are rewritten. A panels-only
 	// component has no signals/handlers and would otherwise take the SSREval
@@ -91,7 +91,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	// applies to components using first-class scope-handle spreads, and to
 	// components handed a scope handle, which they may pass further down.
 	if !renderer && len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !b.passesScopeHandle(attrs) && !hasComponentChildren(el.Children) && !b.isLazyComponent(childName) {
-		if !b.componentNeedsClient(childFn, attrs) {
+		if !b.componentNeedsClient(childFn, attrs) && !b.inUseClient(childName) {
 			// A signal-less component that renders a parent's signal value
 			// (e.g. <Display value={display()}/>) must stay reactive, so its
 			// return JSX is inlined with the props substituted by their
@@ -109,6 +109,9 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 		}
 	}
 	b.rendererKids = rendererKids
+	for name, orig := range typedAttrs {
+		attrs[name] = orig
+	}
 	return b.buildClientComponentSlot(el, childFn, childID, attrs, provider)
 }
 
@@ -286,7 +289,7 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 	b.callSiteChildren = savedCS
 
 	if ret := findReturnStmt(childFn.Body); ret != nil && ret.Value != nil {
-		childNode.ReturnSlots = b.discoverReturnSlots(childFn, childID, attrs, ret.Value)
+		childNode.ReturnSlots = b.discoverReturnSlots(childFn, childID, attrs, childNode.LocalVars, ret.Value)
 	}
 	// Components in a JSX prop are evaluated first (ResolveJSXProps), so their
 	// slots lead the queue the emitter matches by name.
@@ -438,17 +441,56 @@ func useIdSequence(id SlotID) func() string {
 // child's internal bindings never leak into the caller's signature; only the
 // props registrations of the client components found are kept, since they
 // are emitted with them in the caller's scope.
-func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs map[string]ast.Expr, ret ast.Expr) []SlotNode {
+func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs map[string]ast.Expr, localVars valueMap, ret ast.Expr) []SlotNode {
 	b.pushComponentCtx()
 	b.pendingHandlers, b.pendingAttrs, b.pendingRefs = nil, nil, nil
 	b.localProps = b.propBindingsToLocalProps(childFn, attrs, b.localProps)
+	for k, v := range localVars {
+		if !v.IsUnknown() {
+			b.localProps[k] = v
+		}
+	}
+	for k, v := range b.moduleConsts {
+		if _, isLocal := localVars[k]; isLocal {
+			continue
+		}
+		if _, exists := b.localProps[k]; !exists {
+			b.localProps[k] = v
+		}
+	}
+	for k, v := range b.routeHooks {
+		if _, isLocal := localVars[k]; isLocal {
+			continue
+		}
+		if _, exists := b.localProps[k]; !exists {
+			b.localProps[k] = v
+		}
+	}
+	for k, v := range b.contextDefaults {
+		key := contextMarkerPrefix + k
+		if _, exists := b.localProps[key]; !exists {
+			b.localProps[key] = v
+		}
+	}
+	b.localParamNames = make(map[string]bool)
+	for _, name := range extractParamNames(childFn) {
+		b.localParamNames[name] = true
+	}
 	b.propKeys = make(map[string]bool, len(attrs))
 	for name := range attrs {
 		b.propKeys[name] = true
 	}
-	b.restProps = b.restPropsFor(fnRestParamName(childFn), childFn, attrs)
+	switch {
+	case fnRestParamName(childFn) != "":
+		b.restProps = b.restPropsFor(fnRestParamName(childFn), childFn, attrs)
+	case plainPropsParamName(childFn) != "":
+		b.restProps = map[string]map[string]ast.Expr{plainPropsParamName(childFn): callSiteAttrs(attrs)}
+	default:
+		b.restProps = nil
+	}
 	b.liveProps, b.livePropsParam = nil, ""
 	b.localFnBody = childFn.Body
+	b.localJSXInits = nil
 	b.locateOnly++
 	slots := b.buildSlotNodes(ret, string(childID))
 	b.locateOnly--
@@ -1037,6 +1079,9 @@ func slotsReadAny(slots []SlotNode, reads func(string) bool) bool {
 			}
 		case *ListSlot:
 			if reads(v.ExprSource) {
+				return true
+			}
+			if v.Bind != nil && (reads(v.Bind.Source) || reads(v.Bind.Key) || reads(v.Bind.Render)) {
 				return true
 			}
 			for _, it := range v.Items {

@@ -25,9 +25,11 @@ export default function ServerTime() {
 
 A synchronous server component sees what the build can compute, including the
 time of the build. A server component that is `async` (it `await`s a `fetch`, a
-database call) is rendered per request by the SSR sidecar and streamed into the
-static shell (`KR7104`, informational); use it for data that changes, and
-`output: "static"` rejects it (`KR7103`).
+database call) renders via the SSR renderer; an async child of a synchronous
+page streams per request (`KR7104`, informational) and `output: "static"`
+rejects it (`KR7103`), while an async page with `generateStaticParams` (or a
+non-dynamic async page under `output: "static"`) is prerendered at build time
+unless it uses request-only APIs or opts into `force-dynamic`.
 
 ### Dates and times at build time
 
@@ -67,10 +69,60 @@ output on every machine:
   `new Set(values)`, `arr.entries()`, `arr.keys()`, `map.values()` and the like
   return real iterators (`.next()`, `.toArray()`, `.map()`) that also work with
   `for...of`, spread, `Array.from` and destructuring.
+- Regular expressions work at build time with JavaScript semantics (via the
+  embedded QuickJS engine): regex literals (`/pattern/flags`) and
+  `new RegExp(...)` can be stored in module constants and objects, passed to
+  `exec`, `test`, `String.prototype.match`, `matchAll`, `replace`, `replaceAll`
+  (with string or function replacers), `search` and `split`, and honour
+  `lastIndex`, `g`/`y`/`d` flags, lookbehind, backreferences and named capture
+  groups (`match.groups`).
 - A local such as `const now = new Date()` is a build value in a server or
   static component. In a client component it is evaluated by the browser when
   the page loads, so write the expression in the JSX
   (`{new Date().getFullYear()}`) to have a build value in the HTML.
+
+### Values built by statements at build time
+
+A component body can build up a value with statements, not only with one
+expression, and the build still evaluates it:
+
+```tsx
+function Nav({ pages }) {
+  const groups = [];
+  for (const p of pages) {
+    let g = groups.find((x) => x.dir === p.dir);
+    if (!g) { g = { dir: p.dir, items: [] }; groups.push(g); }
+    g.items.push({ title: p.title, href: p.href });
+  }
+  return <nav>{groups.map((g) => <section><h2>{g.dir}</h2>{/* ... */}</section>)}</nav>;
+}
+```
+
+- **Statements.** `for`, `for...of`, `for...in`, `while`, `do...while`,
+  `switch`, `try`/`catch`/`finally`, `if`, `break`, `continue` (labelled ones too),
+  `let` reassignment, `+=` on strings and numbers, and nested loops.
+- **Changing values in place.** `push`, `pop`, `shift`, `unshift`, `splice`,
+  `sort`, `reverse`, index and property assignment, `delete`, `Map.set` and
+  `Set.add` work on arrays, objects, Maps and Sets the component creates, and
+  push objects, arrays and JSX. An object reached from an array is the same
+  object as the variable that holds it (`g` above is an element of `groups`), so
+  a change through one shows through the other.
+- **Module values are copied when they change.** A module constant, or a prop
+  that came from one, is shared by every component and page. Build-time
+  evaluation never changes it: the first statement that changes such a value
+  works on a copy that belongs to that component's render. The component sees its
+  own change (including through another name for the same object); other
+  components and pages, and the module constant itself, keep the original.
+  This differs from JavaScript, where the change would be visible to all.
+- **Limits.** A component may run 100000 loop iterations in total at build time. A
+  `return` inside a loop is evaluated in a component without state; in one with
+  state the loop is left to the browser.
+- **When the build gives up.** A statement the build cannot run because it uses an
+  unsupported construct, or passes the iteration limit, is reported as a
+  `KR8356` warning that names the statement and the reason; the value it builds is
+  then computed in the browser (or, in a component without state, reported as
+  `KR8352`). A statement that depends on state, such as a loop over a signal, is
+  computed in the browser as before and does not warn.
 
 ## Per-request data (runtime components)
 
@@ -154,7 +206,13 @@ export function generateStaticParams() {
 
 Each `{ id: ... }` set is expanded into a static page (`/video/abc-123`,
 `/video/def-456`) whose component renders with `params.id` set to the matching
-value. Directly destructured params (`{ id }`) work the same way.
+value. Directly destructured params (`{ id }`) work the same way. Async pages
+with `generateStaticParams` (and `generateMetadata`) are also prerendered at
+build time for every returned param set (with `params` readable both as
+`params.id` and `await params`) and marked **SSG**, including with
+`output: "static"`. Pages that export `dynamic = "force-dynamic"` or read
+`headers()`, `cookies()`, or `searchParams` stay request-time (or report
+`KR7103` under `output: "static"`).
 
 ## Client-side data (`createResource`)
 

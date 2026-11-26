@@ -407,6 +407,13 @@ These React patterns compile to live DOM, not a one-time snapshot:
 - **`dangerouslySetInnerHTML`** that reads state re-applies when it changes;
   **SVG** elements created at runtime (list rows, conditional `<g>`) keep the
   SVG namespace, and a `<foreignObject>` is HTML again.
+- **`innerHTML` and `textContent`** on an element are shorthand for
+  `dangerouslySetInnerHTML={{ __html: value }}` and for a single `{value}`
+  child: `<div innerHTML={html} />` sets raw HTML (not escaped, so only pass
+  markup you trust) and `<p textContent={text} />` sets escaped text. Both
+  render in the static page and SSR and update when the value reads state. An
+  element that also has children is an error (KR8032). On a component they stay
+  ordinary props.
 - **Context in list rows**: rows of a list inside `<Ctx.Provider value={...}>`
   read the provider's live value.
 - **Store hooks made by a module-level factory** (`const useStore = create(...)`,

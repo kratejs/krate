@@ -318,7 +318,7 @@ Only async components (server components) can await: they render per request in 
 
 **Server components need request-time rendering**
 
-An async component renders per request, but `output: "static"` disables the SSR sidecar, so the page cannot render it. Remove `output: "static"` or make the component synchronous.
+With `output: "static"`, async pages without dynamic segments and dynamic async pages with `generateStaticParams` are prerendered at build time. Pages that require a server at request time (dynamic routes without `generateStaticParams`, `export const dynamic = "force-dynamic"`, `headers()`, `cookies()`, `searchParams`, or async child components of a synchronous page) cannot be prerendered statically. Remove `output: "static"`, add `generateStaticParams`, stop reading request-only APIs, or make the component synchronous.
 
 ### KR7104
 
@@ -434,6 +434,12 @@ A named import from `@krate/runtime` (or one of its subpaths) asks for something
 
 A package can list browser code that Krate bundles with esbuild like an npm dependency, instead of compiling it as Krate source: `"krate": { "vendor": ["src/engine/"] }`. Each entry is a path prefix relative to the package directory; an entry ending in `/` matches every file under that directory. The list must be an array of strings that stay inside the package (no absolute paths or `..`). Fix the package.json of the package named in the message. This is an error.
 
+### KR7128
+
+**Named import is not exported by the project module**
+
+`import { name } from "./data"` asks a file in your project (a relative path or a tsconfig path alias) for a name it does not export. The bundle would bind `name` to nothing, so the page fails in the browser (or renders blank) instead of at build time. Check the spelling against the module's exports; the hint lists close matches. Types count as exports, `export *` is followed through project files, and a module whose exports the build cannot enumerate (CommonJS, ambient declarations, `export *` from a package) is not checked. This is an error.
+
 ### KR7130
 
 **Metadata route could not be built**
@@ -463,6 +469,12 @@ An `opengraph-image` or `twitter-image` file inside a dynamic segment (`blog/[sl
 **dynamic or revalidate on a metadata route that cannot run per request**
 
 A `sitemap.ts`, `robots.ts` or `manifest.ts` that exports `dynamic = "force-dynamic"` or a `revalidate` runs per request on the server. This one sits in a dynamic segment (`blog/[slug]/`), where a per-request route has no URL to answer, so it still runs once at build time and the export is ignored. Move the file to a static directory or remove the export. This is a warning.
+
+### KR7135
+
+**Static route handler failed or needs request-time execution**
+
+A build-time route handler (`src/pages/**/route.ts`, or a `src/api/**` route under `output: "static"` or with `export const dynamic = "force-static"` or `generateStaticParams`) runs at build time and writes its GET response to `dist/`. It must export `GET` only (no POST, PUT, PATCH, DELETE or default handler), provide `generateStaticParams` for any dynamic segment, return a 2xx Response or ImageResponse, and avoid reading request-only APIs (`headers()`, `cookies()`, `request.headers`, `request.cookies`, `searchParams`). For request-time handlers, place the file in `src/api/` without `output: "static"` or `dynamic = "force-static"`.
 
 ### KR7140
 
@@ -511,6 +523,12 @@ After writing the output, Krate checks that every quoted `/chunks/...` URL in th
 **Stylesheet linked from public/ is not minified or hashed**
 
 A page or layout links a `.css` file that lives in `public/` with `<link rel="stylesheet">`. Files in `public/` are copied as written, so the stylesheet is neither minified nor given a content hash, cannot be cached as immutable, and is a separate render-blocking request in front of the bundled styles. Move the file under `src/` and import it from the layout or page (`import "../styles/site.css"`) so it goes through the CSS pipeline. Import it before other stylesheets if it used to be linked before them, since the bundled order follows import order. This is a warning.
+
+### KR7148
+
+**Dynamic route has no page to serve**
+
+A dynamic route whose params are closed (`export const dynamicParams = false`, or `output: "static"`) is served only by the pages `generateStaticParams` lists: prerendered files, or server routes when the page or one of its layouts renders per request. Without a `generateStaticParams` the build can name no param, so the route would answer 404 for every URL and nothing would be written. This is a build error. Export `generateStaticParams` from the page (as a function or a const), or remove `dynamicParams = false` so the route renders any param on demand.
 
 ### KR7150
 
@@ -1090,6 +1108,12 @@ Preact islands and real-React islands (those that use a library built on react-r
 
 `<Activity>` supports `mode="visible"` and `mode="hidden"`. `<ViewTransition>` supports `name`, `default`, `enter`, `exit`, `update` and `share` as strings, and ignores the event callbacks (`onEnter`, `onExit`, `onUpdate`, `onShare`). `<SuspenseList>` renders its children and ignores `revealOrder` and `tail`. Other props have no effect and are reported once per element. This is a warning: the children always render.
 
+### KR8032
+
+**innerHTML or textContent used together with children**
+
+`<div innerHTML={html} />` sets the element's content to the HTML string (it is not escaped, like `dangerouslySetInnerHTML={{ __html: html }}`), and `<p textContent={text} />` sets it to plain text. Either prop replaces the element's content, so an element that also has children is ambiguous and the build fails. Remove the children or the prop.
+
 ### KR8301
 
 **Render value keeps its first value**
@@ -1179,6 +1203,12 @@ A prop that holds JSX with a component that has state (`slot={<Probe />}`, where
 **Route source uses a regex feature Go cannot run**
 
 The `source` of a redirect, rewrite or header rule, or the `value` of one of its `has` or `missing` conditions, uses a regular-expression feature that Go's RE2 engine does not have: lookbehind, a backreference, or a lookahead that is not the start of a parameter pattern. Krate refuses to load the config rather than keep a rule that never matches. A leading negative lookahead inside a parameter, such as `/store/:slug((?!compare$)[^/]+)`, is supported. Otherwise rewrite the pattern without the feature, or handle the request in `middleware.ts`. This is an error.
+
+### KR8356
+
+**Build-time evaluation of a statement stopped**
+
+The build runs the statements of a component body that build up a value (loops, `switch`, `try`, labelled blocks, `push`, `splice`, `sort`, `Map.set` and so on) so the result is rendered into the page. This statement uses a construct the build cannot run, or ran past the limit of 100000 loop iterations per component, so the value it builds is left to the browser (the markup is empty until the page hydrates, or the build reports KR8352 for a component without state). The message names the statement and the reason. Rewrite the statement with plain loops, array methods, `Map` and `Set` over props, locals and module constants, or compute the value in one expression. A value that depends on state, such as a signal, is expected to be computed in the browser and does not produce this warning.
 
 ### KR8360
 

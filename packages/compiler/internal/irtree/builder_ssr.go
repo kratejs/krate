@@ -184,7 +184,10 @@ func (b *builder) evalValueVolatile(expr ast.Expr) jsvalue.Value {
 // constInterp returns a const-folding interpreter over props that also knows
 // the builder's cva factories and server-action URLs.
 func (b *builder) constInterp(props valueMap) *jsvalue.Interp {
-	in := newConstInterp(b.sigMap(), props)
+	if b.signalMemo == nil {
+		b.signalMemo = make(signalMemo)
+	}
+	in := newConstInterpMemo(b.sigMap(), props, b.signalMemo)
 	in.Volatile = b.bakesOnly()
 	ident, call := in.Hooks.Ident, in.Hooks.Call
 	callables := map[string]jsvalue.Value{}
@@ -745,17 +748,41 @@ func (b *builder) restPropsFor(restName string, fn *ast.FnDecl, attrs map[string
 }
 
 // propBindingsToLocalProps builds the child component's local-prop scope from
-// its call-site attrs: each parameter name resolves to the evaluated call-site
-// value (or "undefined" when omitted). Used when walking a signal-less
-// component's own return JSX so className={cn(...)} etc. fold correctly.
+// its call-site attrs: whole-props components (`function C(props)`, including
+// components normalized from destructuring) receive every call-site attribute
+// under its key, and destructured parameters resolve each bound name with its
+// default or nested pattern value. Constant context markers from parent are
+// preserved. Used when walking a signal-less component's own return JSX so
+// props, className={cn(...)} etc. fold correctly.
 func (b *builder) propBindingsToLocalProps(fn *ast.FnDecl, attrs map[string]ast.Expr, parent valueMap) valueMap {
-	out := make(valueMap)
-	for _, name := range extractParamNames(fn) {
+	out := make(valueMap, len(attrs))
+	for k, v := range parent {
+		if strings.HasPrefix(k, contextMarkerPrefix) {
+			out[k] = v
+		}
+	}
+	paramNames := extractParamNames(fn)
+	if len(paramNames) == 1 && paramNames[0] == "props" {
+		for name, expr := range attrs {
+			out[name] = b.resolveBindingValue(expr, parent)
+		}
+		return out
+	}
+	for _, name := range paramNames {
 		if expr, ok := attrs[name]; ok {
 			out[name] = b.resolveBindingValue(expr, parent)
+		} else if fn != nil {
+			out[name] = b.paramDefaultValue(fn, name)
 		} else {
 			out[name] = jsvalue.Undefined()
 		}
+	}
+	propsObj := jsvalue.NewObject()
+	for name, expr := range attrs {
+		propsObj.Set(name, b.resolveBindingValue(expr, parent))
+	}
+	for name, v := range b.nestedPatternValues(fn, propsObj) {
+		out[name] = v
 	}
 	return out
 }
@@ -981,8 +1008,8 @@ func (b *builder) buildPropBindings(paramNames []string, attrs map[string]ast.Ex
 	// Names inside a renamed or nested pattern come from destructuring the
 	// props, not from attributes of the same name.
 	propsObj := jsvalue.NewObject()
-	for name, expr := range attrs {
-		propsObj.Set(name, b.resolveBindingValue(expr, props))
+	for _, name := range sortedKeysExpr(attrs) {
+		propsObj.Set(name, b.resolveBindingValue(attrs[name], props))
 	}
 	for name, v := range b.nestedPatternValues(fn, propsObj) {
 		bindings[name] = v

@@ -72,6 +72,21 @@ If a `tailwind.config.{ts,js,mjs}` file exists, or your CSS uses `@tailwind` or
 without the reset or utilities. A directive added while `krate dev` is running
 takes effect after a restart.
 
+### Class detection
+
+With no `content` or `scanDirs`, Krate looks for class names in `src/` and in
+every project source file the build compiles: the pages, layouts and the
+modules they import, wherever they live (a top-level `components/` folder
+reached through a `@/*` alias, for example). Files in `node_modules` are not
+scanned. Arbitrary values (`h-[1.3rem]`), variants and `md:` prefixes are
+found as in any other file.
+
+- `@source "../shared-ui"` adds a directory (or a glob such as
+  `"../ui/**/*.tsx"`) to the default; it does not replace it.
+- `@import "tailwindcss" source(none)` turns automatic detection off, and
+  `source("../app")` replaces it with that directory.
+- Setting `content` or `scanDirs` scans exactly those paths.
+
 ### CSS-first directives
 
 Krate reads the Tailwind v4 CSS-first directives from your stylesheets (files
@@ -90,7 +105,7 @@ configure the generator, and **removes them from the shipped CSS**:
   @keyframes fadein { from { opacity: 0 } to { opacity: 1 } }
 }
 
-@source "../shared-ui";               /* extra directory to scan */
+@source "../shared-ui";               /* extra directory or glob, added to the default */
 @source not "../shared-ui/legacy";    /* excluded directory */
 @source inline("underline p-{1,2}");  /* always generate these */
 
@@ -370,6 +385,18 @@ file cannot swallow the rules of the next. Fix the source: the rest of the file
 is shipped as written.
 
 ## Global CSS & code splitting
+
+Keep site-wide styles in a stylesheet under `src/` and import it from the root
+layout, as `create-krate-app` does:
+
+```tsx
+// src/pages/_layout.tsx
+import "../styles/global.css";
+```
+
+It then goes through the same pipeline as every other stylesheet (Tailwind,
+minification, content-hashed file names). A file in `public/` is served as
+written and skips all of that, so keep `public/` for static assets.
 
 Plain CSS imported or referenced in pages is collected per page, in source and
 import order, and **split by source**: the syntax-highlighting sheet, each

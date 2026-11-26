@@ -256,6 +256,138 @@ func (a autoHeaders) capped(outDir string, userRules, limit int) autoHeaders {
 	return out
 }
 
+// StaticRouteEntry mirrors build.StaticRouteEntry in dist/.krate/static-routes.json.
+type StaticRouteEntry struct {
+	URL         string `json:"url"`
+	File        string `json:"file"`
+	ContentType string `json:"contentType,omitempty"`
+}
+
+// LoadStaticRoutes reads dist/.krate/static-routes.json emitted by build-time
+// static route handlers.
+func LoadStaticRoutes(outDir string) []StaticRouteEntry {
+	data, err := os.ReadFile(filepath.Join(outDir, ".krate", "static-routes.json"))
+	if err != nil {
+		return nil
+	}
+	var entries []StaticRouteEntry
+	if json.Unmarshal(data, &entries) != nil {
+		return nil
+	}
+	return entries
+}
+
+// staticRouteHeaderRules builds Content-Type header rules for extensionless
+// (or non-matching extension) static route outputs, collapsing uniform
+// directories into a single /dir/* rule when every file in the directory shares
+// the same Content-Type.
+func staticRouteHeaderRules(cfg *config.Config, outDir string, entries []StaticRouteEntry) []config.HeaderRule {
+	if len(entries) == 0 {
+		return nil
+	}
+	byURL := make(map[string]string, len(entries))
+	for _, e := range entries {
+		if e.ContentType != "" && strings.HasPrefix(e.URL, "/") {
+			byURL[e.URL] = e.ContentType
+		}
+	}
+	if len(byURL) == 0 {
+		return nil
+	}
+	// Group files per directory on disk to see if an entire directory shares one Content-Type.
+	type dirCT struct {
+		ct      string
+		uniform bool
+		count   int
+	}
+	dirInfo := map[string]*dirCT{}
+	_ = filepath.WalkDir(outDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, rerr := filepath.Rel(outDir, p)
+		if rerr != nil || rel == "." {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			if rel == ".krate" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		url := "/" + rel
+		ct := byURL[url]
+		for dir := path.Dir(url); dir != "/" && dir != "."; dir = path.Dir(dir) {
+			st := dirInfo[dir]
+			if st == nil {
+				st = &dirCT{ct: ct, uniform: ct != ""}
+				dirInfo[dir] = st
+			}
+			st.count++
+			if ct == "" || ct != st.ct {
+				st.uniform = false
+			}
+		}
+		return nil
+	})
+	var splats []string
+	for dir, st := range dirInfo {
+		if st.uniform && st.count > 1 {
+			splats = append(splats, dir)
+		}
+	}
+	sort.Strings(splats)
+	var roots []string
+	for _, d := range splats {
+		if len(roots) > 0 && strings.HasPrefix(d, roots[len(roots)-1]+"/") {
+			continue
+		}
+		roots = append(roots, d)
+	}
+	under := func(u string) bool {
+		for _, r := range roots {
+			if strings.HasPrefix(u, r+"/") {
+				return true
+			}
+		}
+		return false
+	}
+	var rules []config.HeaderRule
+	for _, r := range roots {
+		rules = append(rules, config.HeaderRule{
+			Source:  r + "/*",
+			Headers: map[string]string{"Content-Type": dirInfo[r].ct},
+		})
+	}
+	urls := make([]string, 0, len(byURL))
+	for u := range byURL {
+		if !under(u) {
+			urls = append(urls, u)
+		}
+	}
+	sort.Strings(urls)
+	for _, u := range urls {
+		rules = append(rules, config.HeaderRule{
+			Source:  u,
+			Headers: map[string]string{"Content-Type": byURL[u]},
+		})
+	}
+	return rules
+}
+
+// staticRouteRewrites returns internal 200 rewrites for static routes whose
+// output had to be stored at <url>/index.<ext> due to a child directory.
+func staticRouteRewrites(entries []StaticRouteEntry) []config.Rewrite {
+	var out []config.Rewrite
+	for _, e := range entries {
+		if e.URL != "" && e.File != "" && e.File != e.URL {
+			out = append(out, config.Rewrite{Source: e.URL, Destination: e.File})
+		}
+	}
+	return out
+}
+
 // withImmutable puts the automatic rules ahead of the user's, so a later user
 // rule overrides them on hosts that apply rules in order.
 func withImmutable(cfg *config.Config, auto autoHeaders) []config.HeaderRule {

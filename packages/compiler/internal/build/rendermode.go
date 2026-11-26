@@ -59,6 +59,10 @@ type PageMeta struct {
 	// groups kept ("" for the root). LookupSegmentPage walks up from it to find
 	// the page's nearest not-found or error page.
 	SegDir string `json:"segDir,omitempty"`
+	// Params holds the route params of a page expanded from generateStaticParams
+	// whose route is a plain path, so a request-time render has them without
+	// a [param] page to match.
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // pageConfig holds the merged page-level render config extracted from
@@ -366,6 +370,17 @@ func dynamicParamsAllowed(prog *ast.Program, staticMode bool) bool {
 		return *cfg.dynamicParams
 	}
 	return !staticMode
+}
+
+// fallbackTemplateUnused reports whether a dynamic route's `[param]` template
+// has no consumer: the page is prerendered (not SSR/ISR/streaming), lists its
+// params with generateStaticParams, does not opt in with an explicit
+// `dynamicParams = true`, and this is not a dev build.
+func (b *Builder) fallbackTemplateUnused(prog *ast.Program, mode RenderMode, serverPage, hasGSP bool) bool {
+	if b.DevMode || !hasGSP || serverPage || mode != RenderSSG {
+		return false
+	}
+	return parsePageConfig(prog).dynamicParams == nil
 }
 
 // usesSuspense reports whether the page AST contains a <Suspense> JSX element

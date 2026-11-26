@@ -127,6 +127,7 @@ func declaredLocalNames(node *ComponentNode, fn *ast.FnDecl) map[string]bool {
 
 func extraVarName(ev string) string {
 	s := strings.TrimSpace(ev)
+	s = strings.TrimSpace(strings.TrimPrefix(s, PureVarBegin))
 	if !strings.HasPrefix(s, "var ") {
 		return ""
 	}
@@ -237,6 +238,11 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	// level factory, `const useStore = create(...)`) holds state of its own,
 	// so the component hydrates instead of rendering once at build time.
 	if b.callsOpaqueHook(fn.Body) {
+		return true
+	}
+	// A project function that creates state (a hook defined in the project)
+	// gives the component state of its own.
+	if b.callsStateHook(fn.Body) {
 		return true
 	}
 	// Module-level values the build-time interpreter cannot compute are

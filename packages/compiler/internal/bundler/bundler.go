@@ -666,6 +666,9 @@ func (b *Bundler) resolveModuleImports(mod *Module) error {
 	if err := b.checkRuntimeImports(mod); err != nil {
 		return err
 	}
+	if err := b.checkNamedImports(mod); err != nil {
+		return err
+	}
 	for _, imp := range mod.Imports {
 		if err := checkUnsupportedStylesheet(mod, imp); err != nil {
 			return err
@@ -1500,18 +1503,20 @@ func (b *Bundler) rewriteCSSModuleRefs() {
 			if !strings.Contains(src, ".module.css") {
 				continue
 			}
-			resolved := src
+			// Resolve like every other import (relative, tsconfig paths,
+			// baseUrl) so the key matches the cssModules map.
+			var resolved string
+			if filepath.IsAbs(src) {
+				resolved = filepath.Clean(src)
+			} else if r := b.resolveImportForModule(mod.Path, src); r != "" {
+				resolved = r
+			} else if strings.HasPrefix(src, ".") {
+				resolved = filepath.Join(filepath.Dir(mod.Path), src)
+			} else {
+				resolved = filepath.Join(b.root, src)
+			}
 			if !filepath.IsAbs(resolved) {
 				resolved = filepath.Join(b.root, resolved)
-			}
-			// Relative imports are resolved relative to the importing module,
-			// matching resolveImportForModule, so the key matches cssModules.
-			if strings.HasPrefix(src, ".") {
-				modDir := filepath.Dir(mod.Path)
-				resolved = filepath.Join(modDir, src)
-				if !filepath.IsAbs(resolved) {
-					resolved = filepath.Join(b.root, resolved)
-				}
 			}
 			resolved = filepath.Clean(resolved)
 			if info, ok := b.cssModules[resolved]; ok {

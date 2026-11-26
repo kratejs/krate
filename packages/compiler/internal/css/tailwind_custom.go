@@ -587,7 +587,7 @@ func utilityWarnings(name, body string) []string {
 				strings.HasPrefix(a, "--"), strings.HasPrefix(a, "\""), strings.HasPrefix(a, "'"):
 			case strings.HasPrefix(a, "[") && strings.HasSuffix(a, "]"):
 				if t := a[1 : len(a)-1]; t != "*" && !twDataTypes[t] {
-					out = append(out, fmt.Sprintf("@utility %s: %s(%s) names an unknown type; use one of %s", name, call, a, "color, length, percentage, ratio, number, integer, url, position, bg-size, line-width, image, family-name, generic-name, absolute-size, relative-size, angle, vector"))
+					out = append(out, fmt.Sprintf("@utility %s: %s(%s) names an unknown type; use one of %s", name, call, a, "color, length, percentage, ratio, number, integer, url, position, bg-size, line-width, image, family-name, generic-name, absolute-size, relative-size, angle, vector, duration"))
 				}
 			default:
 				out = append(out, fmt.Sprintf("@utility %s: %s(%s) is not a supported argument; use number, integer, ratio, percentage, [type], \"literal\" or --theme-namespace-*", name, call, a))

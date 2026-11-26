@@ -196,6 +196,9 @@ func (b *Builder) boundaryLayout(errFile string) (string, error) {
 // then fails the page's build with its own diagnostic.
 func (b *Builder) routeStack(page string) []routeBoundary {
 	stack := findRouteStack(page, b.Cfg.PagesDir)
+	if b.rootLayoutPages[page] {
+		stack = append(stack, rootLayoutBoundaries(b.Cfg.PagesDir)...)
+	}
 	for i, rb := range stack {
 		if rb.Kind != "error" {
 			continue

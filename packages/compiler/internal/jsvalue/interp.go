@@ -30,6 +30,21 @@ func (s *Scope) Lookup(name string) (Value, bool) {
 	return Value{}, false
 }
 
+// LookupScope is Lookup that also returns the scope holding the binding.
+func (s *Scope) LookupScope(name string) (Value, *Scope, bool) {
+	for c := s; c != nil; c = c.parent {
+		if v, ok := c.vars[name]; ok {
+			return v, c, true
+		}
+	}
+	return Value{}, nil, false
+}
+
+// Remove deletes the binding of name made directly in this scope.
+func (s *Scope) Remove(name string) {
+	delete(s.vars, name)
+}
+
 // Define binds name in this scope.
 func (s *Scope) Define(name string, v Value) {
 	s.vars[name] = v
@@ -104,6 +119,23 @@ type Interp struct {
 	// run for their effects (a call that pushes an unknown value onto a list
 	// has done nothing the build can see).
 	StrictStatements bool
+	// InPlace lets in-place array methods (sort, reverse, pop, shift, unshift,
+	// splice) and `delete` change the value they are called on. A host sets it
+	// only when the values the code can reach are private copies, because
+	// build-time values may otherwise be shared between pages. Without it
+	// sort and reverse return a changed copy and the others are unsupported.
+	InPlace bool
+	// LoopLimit, when positive, caps the loop iterations the interpreter runs
+	// in total (instead of the per-loop cap of maxLoopIterations).
+	LoopLimit int
+	loopCount int
+	// LoopCap, when positive, replaces the cap of maxLoopIterations on the
+	// iterations of one loop.
+	LoopCap int
+	// ctlLabel is the label of the break or continue being propagated.
+	ctlLabel string
+	// ownLabels are the labels written directly before the loop about to run.
+	ownLabels []string
 }
 
 // New returns an interpreter with a fresh root scope.
@@ -256,8 +288,10 @@ func literalValue(e *ast.Literal) Value {
 			return Undefined()
 		}
 		return Null()
+	case ast.RegexpLit:
+		return parseRegExpLiteral(e.Value)
 	}
-	return Unsupported("regular expression literals are not supported")
+	return Unsupported("unsupported literal " + e.Value)
 }
 
 func (in *Interp) ident(name string) Value {
@@ -324,7 +358,19 @@ func (in *Interp) unary(e *ast.UnaryExpr) Value {
 	case "...":
 		return Unsupported("spread outside an array literal or call")
 	case "delete":
-		return Unsupported("delete")
+		if !in.InPlace {
+			return Unsupported("delete")
+		}
+		m, ok := e.Arg.(*ast.MemberExpr)
+		if !ok {
+			return Unsupported("delete")
+		}
+		obj := in.Eval(m.Object)
+		key, ok := in.propertyKey(m)
+		if !ok {
+			return Unsupported("computed member delete")
+		}
+		return deleteMember(obj, key)
 	case "typeof":
 		// typeof on an unbound identifier is "undefined" in JS, but here an
 		// unbound name may be a runtime value the build cannot see.
@@ -388,6 +434,28 @@ func (in *Interp) binary(e *ast.BinaryExpr) Value {
 		in.Eval(e.Left)
 		return in.Eval(e.Right)
 	case "instanceof":
+		left := in.Eval(e.Left)
+		right := in.Eval(e.Right)
+		if left.IsUnknown() {
+			return left
+		}
+		if right.IsUnknown() {
+			return right
+		}
+		if right.kind == KindFunction && right.fn != nil && right.fn.Builtin {
+			switch right.fn.Name {
+			case "RegExp":
+				return Bool(left.kind == KindRegExp)
+			case "Array":
+				return Bool(left.kind == KindArray)
+			case "Date":
+				return Bool(left.kind == KindDate)
+			case "Map":
+				return Bool(left.kind == KindMap)
+			case "Set":
+				return Bool(left.kind == KindSet)
+			}
+		}
 		return Unsupported("instanceof")
 	}
 	left := in.Eval(e.Left)
@@ -429,6 +497,11 @@ func (in *Interp) assignTo(target ast.Expr, v Value) Value {
 				obj.arr.Elems[idx] = v
 				return v
 			}
+		case KindRegExp:
+			if key == "lastIndex" && obj.re != nil {
+				obj.re.lastIndex = v
+				return v
+			}
 		case KindUnknown:
 			return obj
 		}
@@ -442,6 +515,9 @@ func (in *Interp) assignTo(target ast.Expr, v Value) Value {
 }
 
 func (in *Interp) array(e *ast.ArrayExpr) Value {
+	if v, ok := in.refValue(e.Ref); ok {
+		return v
+	}
 	elems := make([]Value, 0, len(e.Elements))
 	for _, el := range e.Elements {
 		if el == nil {
@@ -469,7 +545,20 @@ func unknownOr(v Value, reason string) Value {
 	return Unsupported(reason)
 }
 
+// refValue returns the value a literal was made from (see ToASTRef). An
+// interpreter that changes values in place builds a fresh one instead.
+func (in *Interp) refValue(ref any) (Value, bool) {
+	if ref == nil || in.InPlace {
+		return Value{}, false
+	}
+	v, ok := ref.(Value)
+	return v, ok
+}
+
 func (in *Interp) object(e *ast.ObjectExpr) Value {
+	if v, ok := in.refValue(e.Ref); ok {
+		return v
+	}
 	obj := NewObject()
 	for _, p := range e.Properties {
 		if p == nil {
@@ -487,7 +576,7 @@ func (in *Interp) object(e *ast.ObjectExpr) Value {
 				for i, v := range src.Elems() {
 					obj.Set(NumberToString(float64(i)), v)
 				}
-			case KindUndefined, KindNull, KindBool, KindNumber, KindDate, KindMap, KindSet, KindIterator:
+			case KindUndefined, KindNull, KindBool, KindNumber, KindDate, KindMap, KindSet, KindIterator, KindRegExp:
 			case KindString:
 				for i, r := range []rune(src.s) {
 					obj.Set(NumberToString(float64(i)), String(string(r)))
@@ -939,6 +1028,68 @@ const (
 // maxLoopIterations bounds statically evaluated loops.
 const maxLoopIterations = 10000
 
+func isLoopStmt(s ast.Stmt) bool {
+	switch s.(type) {
+	case *ast.ForStmt, *ast.WhileStmt, *ast.DoWhileStmt, *ast.ForInStmt:
+		return true
+	}
+	return false
+}
+
+// takeLabels returns the labels written directly before the loop starting now.
+func (in *Interp) takeLabels() []string {
+	l := in.ownLabels
+	in.ownLabels = nil
+	return l
+}
+
+// loopTick counts one loop iteration; it returns an Unsupported value when a
+// limit is exceeded. iter is the iteration index within the current loop.
+func (in *Interp) loopTick(iter int) (Value, bool) {
+	if in.LoopLimit > 0 {
+		in.loopCount++
+		if in.loopCount > in.LoopLimit {
+			return Unsupported(fmt.Sprintf("loop iteration limit exceeded (%d iterations in total)", in.LoopLimit)), false
+		}
+	}
+	limit := maxLoopIterations
+	if in.LoopCap > 0 {
+		limit = in.LoopCap
+	}
+	if iter >= limit {
+		return Unsupported(fmt.Sprintf("loop iteration limit exceeded (%d iterations)", limit)), false
+	}
+	return Value{}, true
+}
+
+// loopCtl decides what a loop does with a non-normal body result. It returns
+// done=true with the result to hand to the caller, or done=false to carry on
+// with the next iteration.
+func (in *Interp) loopCtl(own []string, v Value, ctl control) (Value, control, bool) {
+	switch ctl {
+	case ctlReturn, ctlError:
+		return v, ctl, true
+	case ctlBreak, ctlContinue:
+		if in.ctlLabel != "" && !hasLabel(own, in.ctlLabel) {
+			return Undefined(), ctl, true
+		}
+		in.ctlLabel = ""
+		if ctl == ctlBreak {
+			return Undefined(), ctlNormal, true
+		}
+	}
+	return Value{}, ctlNormal, false
+}
+
+func hasLabel(labels []string, l string) bool {
+	for _, x := range labels {
+		if x == l {
+			return true
+		}
+	}
+	return false
+}
+
 func (in *Interp) exec(stmts []ast.Stmt) (Value, control) {
 	for _, stmt := range stmts {
 		v, ctl := in.execStmt(stmt)
@@ -947,6 +1098,35 @@ func (in *Interp) exec(stmts []ast.Stmt) (Value, control) {
 		}
 	}
 	return Undefined(), ctlNormal
+}
+
+// Flow is how a statement finished.
+type Flow int
+
+const (
+	// FlowNormal means the statement ran to the end.
+	FlowNormal Flow = iota
+	// FlowReturn means a return statement ran; the value is its result.
+	FlowReturn
+	// FlowFailed means the statement could not be run in full; the value says why.
+	FlowFailed
+)
+
+// ExecTop runs one statement in the current scope and reports how it
+// finished. A break or continue that escapes the statement counts as normal.
+func (in *Interp) ExecTop(stmt ast.Stmt) (Value, Flow) {
+	if in.Scope == nil {
+		in.Scope = NewScope(nil)
+	}
+	v, ctl := in.execStmt(stmt)
+	in.ctlLabel, in.ownLabels = "", nil
+	switch ctl {
+	case ctlReturn:
+		return v, FlowReturn
+	case ctlError:
+		return v, FlowFailed
+	}
+	return Undefined(), FlowNormal
 }
 
 // ExecStmt runs one statement in the current scope, for its effects on the
@@ -1005,14 +1185,10 @@ func (in *Interp) execStmt(stmt ast.Stmt) (Value, control) {
 	case *ast.ForInStmt:
 		return in.execForIn(s)
 	case *ast.BreakStmt:
-		if s.Label != "" {
-			return Unsupported("labeled break"), ctlError
-		}
+		in.ctlLabel = s.Label
 		return Undefined(), ctlBreak
 	case *ast.ContinueStmt:
-		if s.Label != "" {
-			return Unsupported("labeled continue"), ctlError
-		}
+		in.ctlLabel = s.Label
 		return Undefined(), ctlContinue
 	case *ast.FnDecl:
 		in.Scope.Define(s.Name, in.Closure(s.Name, s.Params, s.Body))
@@ -1022,8 +1198,13 @@ func (in *Interp) execStmt(stmt ast.Stmt) (Value, control) {
 	case *ast.EmptyStmt, *ast.DebuggerStmt:
 		return Undefined(), ctlNormal
 	case *ast.LabeledStmt:
+		if isLoopStmt(s.Body) {
+			in.ownLabels = append(in.ownLabels, s.Label)
+		}
 		v, ctl := in.execStmt(s.Body)
-		if ctl == ctlBreak {
+		in.ownLabels = nil
+		if ctl == ctlBreak && in.ctlLabel == s.Label {
+			in.ctlLabel = ""
 			return Undefined(), ctlNormal
 		}
 		return v, ctl
@@ -1140,6 +1321,7 @@ func (in *Interp) Declare(d *ast.VarDecl) Value {
 }
 
 func (in *Interp) execFor(s *ast.ForStmt) (Value, control) {
+	own := in.takeLabels()
 	saved := in.Scope
 	in.Scope = NewScope(saved)
 	defer func() { in.Scope = saved }()
@@ -1165,8 +1347,8 @@ func (in *Interp) execFor(s *ast.ForStmt) (Value, control) {
 		copyScope()
 	}
 	for iter := 0; ; iter++ {
-		if iter >= maxLoopIterations {
-			return Unsupported("loop iteration limit exceeded"), ctlError
+		if bad, ok := in.loopTick(iter); !ok {
+			return bad, ctlError
 		}
 		if s.Test != nil {
 			test := in.Eval(s.Test)
@@ -1182,11 +1364,8 @@ func (in *Interp) execFor(s *ast.ForStmt) (Value, control) {
 		in.Scope = NewScope(body)
 		v, ctl := in.exec(s.Body)
 		in.Scope = body
-		switch ctl {
-		case ctlReturn, ctlError:
-			return v, ctl
-		case ctlBreak:
-			return Undefined(), ctlNormal
+		if rv, rctl, done := in.loopCtl(own, v, ctl); done {
+			return rv, rctl
 		}
 		if perIteration {
 			copyScope()
@@ -1201,11 +1380,12 @@ func (in *Interp) execFor(s *ast.ForStmt) (Value, control) {
 }
 
 func (in *Interp) execWhile(test ast.Expr, body []ast.Stmt, doFirst bool) (Value, control) {
+	own := in.takeLabels()
 	saved := in.Scope
 	defer func() { in.Scope = saved }()
 	for iter := 0; ; iter++ {
-		if iter >= maxLoopIterations {
-			return Unsupported("loop iteration limit exceeded"), ctlError
+		if bad, ok := in.loopTick(iter); !ok {
+			return bad, ctlError
 		}
 		if !doFirst || iter > 0 {
 			t := in.Eval(test)
@@ -1219,11 +1399,8 @@ func (in *Interp) execWhile(test ast.Expr, body []ast.Stmt, doFirst bool) (Value
 		}
 		in.Scope = NewScope(saved)
 		v, ctl := in.exec(body)
-		switch ctl {
-		case ctlReturn, ctlError:
-			return v, ctl
-		case ctlBreak:
-			return Undefined(), ctlNormal
+		if rv, rctl, done := in.loopCtl(own, v, ctl); done {
+			return rv, rctl
 		}
 	}
 }
@@ -1265,6 +1442,9 @@ func (in *Interp) execSwitch(s *ast.SwitchStmt) (Value, control) {
 		v, ctl := in.exec(c.Body)
 		switch ctl {
 		case ctlBreak:
+			if in.ctlLabel != "" {
+				return v, ctl
+			}
 			return Undefined(), ctlNormal
 		case ctlNormal:
 			continue
@@ -1275,6 +1455,7 @@ func (in *Interp) execSwitch(s *ast.SwitchStmt) (Value, control) {
 }
 
 func (in *Interp) execForIn(s *ast.ForInStmt) (Value, control) {
+	own := in.takeLabels()
 	src := in.Eval(s.Right)
 	var items []Value
 	var next func() (Value, bool)
@@ -1322,8 +1503,8 @@ func (in *Interp) execForIn(s *ast.ForInStmt) (Value, control) {
 		if !more {
 			break
 		}
-		if count >= maxLoopIterations {
-			return Unsupported("loop iteration limit exceeded"), ctlError
+		if bad, ok := in.loopTick(count); !ok {
+			return bad, ctlError
 		}
 		in.Scope = NewScope(saved)
 		if pattern != nil {
@@ -1334,11 +1515,8 @@ func (in *Interp) execForIn(s *ast.ForInStmt) (Value, control) {
 			in.Scope.Define(name, it)
 		}
 		v, ctl := in.exec(s.Body)
-		switch ctl {
-		case ctlReturn, ctlError:
-			return v, ctl
-		case ctlBreak:
-			return Undefined(), ctlNormal
+		if rv, rctl, done := in.loopCtl(own, v, ctl); done {
+			return rv, rctl
 		}
 	}
 	return Undefined(), ctlNormal

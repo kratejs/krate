@@ -15,7 +15,7 @@ MDX files become pages, and directories become sidebar sections.
 - **Table of contents** - extracted from your headings.
 - **Breadcrumbs** and **prev/next** navigation.
 - **Light/dark theme** toggle.
-- **Full-text search** - a WASM index embedded at build time.
+- **Full-text search** - indexed at build time with Pagefind.
 - **Code highlighting** and GFM tables, task lists, and admonitions.
 
 ## A taste

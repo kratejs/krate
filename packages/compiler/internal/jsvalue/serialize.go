@@ -49,6 +49,10 @@ func renderChild(b *strings.Builder, v Value) error {
 	case KindString:
 		b.WriteString(escape.HTML(v.s))
 	case KindJSX:
+		if v.jsx != nil {
+			// Kept as source: only the builder can render it.
+			return &UnknownChildError{Value: Dynamic("JSX element kept as source")}
+		}
 		b.WriteString(v.s)
 	case KindArray:
 		for _, e := range v.Elems() {
@@ -56,7 +60,7 @@ func renderChild(b *strings.Builder, v Value) error {
 				return err
 			}
 		}
-	case KindObject:
+	case KindObject, KindRegExp:
 		return ErrObjectChild
 	default:
 		return &UnknownChildError{Value: v}
@@ -145,6 +149,8 @@ func writeJSSource(b *strings.Builder, v Value) bool {
 		} else {
 			b.WriteString("new Date(" + NumberToString(v.date.ms) + ")")
 		}
+	case KindRegExp:
+		b.WriteString(v.re.String())
 	case KindMap, KindSet:
 		if v.kind == KindMap {
 			b.WriteString("new Map([")
@@ -369,7 +375,7 @@ func writeJSON(b *strings.Builder, v Value, gap, indent string) jsonResult {
 		} else {
 			writeJSONString(b, dateISO(v.date.ms))
 		}
-	case KindMap, KindSet, KindIterator:
+	case KindMap, KindSet, KindIterator, KindRegExp:
 		b.WriteString("{}")
 	case KindJSX:
 		// A React element serializes as its (opaque) object form; there is no
@@ -412,8 +418,22 @@ func writeJSONString(b *strings.Builder, s string) {
 
 // ToAST converts a statically-known value back to a literal AST expression
 // (nil for JSX, functions and Unknown values).
-func ToAST(v Value) ast.Expr {
+func ToAST(v Value) ast.Expr { return toAST(v, false) }
+
+// ToASTRef is ToAST with every array and object literal remembering the value
+// it was made from: evaluating the literal (or a copy of it) with an
+// interpreter that does not change values in place gives that same value back,
+// so `item === current` still holds for an element substituted into a list
+// row. Use it only for values the build does not change afterwards.
+func ToASTRef(v Value) ast.Expr { return toAST(v, true) }
+
+func toAST(v Value, ref bool) ast.Expr {
 	switch v.kind {
+	case KindJSX:
+		if v.jsx != nil {
+			return v.jsx.Expr
+		}
+		return nil
 	case KindUndefined:
 		return &ast.Identifier{Name: "undefined"}
 	case KindNull:
@@ -439,30 +459,40 @@ func ToAST(v Value) ast.Expr {
 	case KindArray:
 		elems := make([]ast.Expr, 0, len(v.Elems()))
 		for _, e := range v.Elems() {
-			x := ToAST(e)
+			x := toAST(e, ref)
 			if x == nil {
 				return nil
 			}
 			elems = append(elems, x)
 		}
-		return &ast.ArrayExpr{Elements: elems}
+		out := &ast.ArrayExpr{Elements: elems}
+		if ref {
+			out.Ref = v
+		}
+		return out
 	case KindObject:
 		props := make([]*ast.ObjectProp, 0, len(v.obj.keys))
 		for _, k := range v.Keys() {
 			p, _ := v.Get(k)
-			x := ToAST(p)
+			x := toAST(p, ref)
 			if x == nil {
 				return nil
 			}
 			props = append(props, &ast.ObjectProp{Key: k, Value: x})
 		}
-		return &ast.ObjectExpr{Properties: props}
+		out := &ast.ObjectExpr{Properties: props}
+		if ref {
+			out.Ref = v
+		}
+		return out
 	case KindDate:
 		arg := ast.Expr(&ast.Identifier{Name: "NaN"})
 		if !math.IsNaN(v.date.ms) {
 			arg = ToAST(Number(v.date.ms))
 		}
 		return &ast.NewExpr{Callee: &ast.Identifier{Name: "Date"}, Args: []ast.Expr{arg}}
+	case KindRegExp:
+		return &ast.Literal{Kind: ast.RegexpLit, Value: v.re.String()}
 	}
 	return nil
 }

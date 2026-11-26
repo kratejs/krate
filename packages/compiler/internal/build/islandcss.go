@@ -15,6 +15,21 @@ type islandCSSSink struct {
 	mu    sync.Mutex
 	files []string
 	seen  map[string]bool
+	// classes are the scoped classes of the CSS modules the islands import.
+	classes map[string]bool
+}
+
+func (s *islandCSSSink) addClasses(mapping map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.classes == nil {
+		s.classes = map[string]bool{}
+	}
+	for _, scoped := range mapping {
+		for _, cls := range strings.Fields(scoped) {
+			s.classes[cls] = true
+		}
+	}
 }
 
 func (s *islandCSSSink) add(path string) {
@@ -34,6 +49,9 @@ type islandStyles struct {
 	CSS    string
 	Assets map[string]string // asset source path -> hashed site URL
 	Deps   []string          // stylesheets and every file they read
+	// Classes are the scoped classes of the CSS modules the islands import;
+	// page CSS pruning keeps them all.
+	Classes map[string]bool
 }
 
 // islandCSSPlugin turns stylesheet imports of an island bundle into empty
@@ -71,6 +89,7 @@ func islandCSSPlugin(sink *islandCSSSink) api.Plugin {
 					if err != nil {
 						return api.OnLoadResult{}, err
 					}
+					sink.addClasses(mapping)
 					contents = moduleMappingJS(mapping)
 				}
 				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS}, nil
@@ -84,7 +103,7 @@ func (b *Builder) buildIslandStyles(sink *islandCSSSink) (*islandStyles, error) 
 	if len(sink.files) == 0 {
 		return nil, nil
 	}
-	out := &islandStyles{Assets: map[string]string{}}
+	out := &islandStyles{Assets: map[string]string{}, Classes: sink.classes}
 	var sb strings.Builder
 	for _, file := range sink.files {
 		res, err := bundler.BuildStylesheet(b.Root, file)

@@ -2,6 +2,9 @@ interface VideoProps {
   params?: { id: string }
 }
 
+// Opt in to the fallback template: other ids render from the template at request time.
+export const dynamicParams = true
+
 export function generateStaticParams() {
   return [
     { id: 'abc123' },

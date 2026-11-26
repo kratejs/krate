@@ -52,7 +52,7 @@ export default async function Post({ params }: { params: Promise<{ slug: string 
 | Page | `generateMetadata` runs | Tags are |
 |------|-------------------------|----------|
 | Static (SSG) | once at build time | baked into `index.html` |
-| Static from `generateStaticParams` | once per generated entry (one run for all entries) | baked into each entry's HTML |
+| Static from `generateStaticParams` (sync or async) | once per generated entry | baked into each entry's HTML |
 | Dynamic route that stays a template | at build time, with the route's placeholders; the server fills in each request's value | baked into the template |
 | SSR, ISR, async page | on every render, next to the page, in the same request and cache scope | sent in the head of the response; an ISR entry stores them with the body |
 
@@ -90,7 +90,10 @@ rules are Next.js's:
   the layout's own `default`).
 - `openGraph.title` and `twitter.title` have their own templates, declared as
   `openGraph: { title: { default, template } }`; the page `title.template` does not
-  apply to them.
+  apply to them. An `openGraph` or `twitter` object without its own `title` takes the
+  page's resolved title (after `title.template`), as in Next.js; `twitter` takes
+  `openGraph`'s title and description first. The page `description` is not copied into
+  them, so set `openGraph.description` to get `og:description`.
 - `metadataBase` resolves relative URLs in `alternates`, `openGraph`, `twitter`,
   `icons` and `manifest`; its path is a prefix.
 - An explicit `<Head>` on the page still wins over its metadata for the same tag, and

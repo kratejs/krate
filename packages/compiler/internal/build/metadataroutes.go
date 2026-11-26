@@ -170,7 +170,12 @@ func (b *Builder) buildMetadataRoutes(pages []string) []error {
 		var err error
 		switch f.Kind {
 		case mrSitemap, mrRobots, mrManifest:
-			if isDyn, revalidate := b.dynamicMetaRoute(f); isDyn {
+			isDyn, revalidate, derr := b.dynamicMetaRoute(f)
+			if derr != nil {
+				err = derr
+				break
+			}
+			if isDyn {
 				var entry metaRouteEntry
 				if entry, err = b.buildDynamicDataRoute(f, revalidate); err == nil {
 					dynamic = append(dynamic, entry)
@@ -308,8 +313,8 @@ console.log(JSON.stringify(out));
 
 // paramSetsFor returns the param sets an image route in urlDir is built for:
 // one empty set for a static directory, else the generateStaticParams entries
-// of the page that serves the directory.
-func (b *Builder) paramSetsFor(f metaRouteFile, pages []string) ([]map[string]string, bool) {
+// of the page that serves the directory (or of the image route itself).
+func (b *Builder) paramSetsFor(f metaRouteFile, pages []string, bnd *bundler.Bundler) ([]map[string]string, bool) {
 	if !strings.Contains(f.URLDir, "[") {
 		return []map[string]string{{}}, true
 	}
@@ -327,6 +332,11 @@ func (b *Builder) paramSetsFor(f metaRouteFile, pages []string) ([]map[string]st
 			sets = append(sets, e.Params)
 		}
 		return sets, true
+	}
+	if src, err := os.ReadFile(f.Path); err == nil && gspExportRe.Match(src) {
+		if sets, err := b.executeGenerateStaticParams(f.Path, bnd); err == nil && len(sets) > 0 {
+			return sets, true
+		}
 	}
 	return nil, false
 }
@@ -355,7 +365,7 @@ func (b *Builder) buildImageRoute(f metaRouteFile, pages []string, bnd *bundler.
 	if err != nil {
 		return err
 	}
-	sets, ok := b.paramSetsFor(f, pages)
+	sets, ok := b.paramSetsFor(f, pages, bnd)
 	if !ok {
 		d := diag.Diagnostic{File: b.display(f.Path), Code: diag.CodeImageRouteParams, Severity: diag.SeverityWarning,
 			Message: filepath.Base(f.Path) + " is in a dynamic segment (" + f.URLDir + ") but the segment's page has no generateStaticParams, so no image was built",

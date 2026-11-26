@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
+	"github.com/kratejs/krate/packages/compiler/internal/routeconv"
 )
 
 type DocsPluginOptions struct {
@@ -39,6 +41,16 @@ type DocsPluginOptions struct {
 	Breadcrumbs *bool `json:"breadcrumbs,omitempty"`
 	// Pagination toggles prev/next links (default true).
 	Pagination *bool `json:"pagination,omitempty"`
+	// RootLayout wraps every generated docs page in the app's root layout
+	// (pagesDir/_layout.*), so the app's fonts, global CSS and <html>/<body>
+	// attributes apply. Default false: the theme owns the whole shell.
+	RootLayout bool `json:"rootLayout,omitempty"`
+	// DefaultTheme is the colour mode used when none is stored: "light",
+	// "dark" or "system" (default, follow prefers-color-scheme).
+	DefaultTheme string `json:"defaultTheme,omitempty"`
+	// ThemeScript toggles the pre-paint script that sets data-theme on <html>
+	// (default true). Turn it off for themes that manage colour mode.
+	ThemeScript *bool `json:"themeScript,omitempty"`
 
 	// titleSlot is set from the resolved theme: the layout renders the page's
 	// leading <h1> itself (props.titleHTML), so the plugin removes it from the
@@ -56,6 +68,31 @@ type DocsPluginOptions struct {
 func (o *DocsPluginOptions) TOCEnabled() bool         { return o.TOC == nil || *o.TOC }
 func (o *DocsPluginOptions) BreadcrumbsEnabled() bool { return o.Breadcrumbs == nil || *o.Breadcrumbs }
 func (o *DocsPluginOptions) PaginationEnabled() bool  { return o.Pagination == nil || *o.Pagination }
+func (o *DocsPluginOptions) ThemeScriptEnabled() bool { return o.ThemeScript == nil || *o.ThemeScript }
+
+// DefaultThemeMode returns the configured default colour mode, "system" when
+// unset or not one of light/dark/system.
+func (o *DocsPluginOptions) DefaultThemeMode() string {
+	switch o.DefaultTheme {
+	case "light", "dark":
+		return o.DefaultTheme
+	}
+	return "system"
+}
+
+// themePrePaintScript returns the script that applies the stored colour mode
+// (or def when nothing valid is stored) to <html> before first paint. def is
+// "light", "dark" or "system".
+func themePrePaintScript(storageKey, def string) string {
+	keyJSON, _ := json.Marshal(storageKey)
+	fallback := "window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'"
+	if def == "light" || def == "dark" {
+		fallback = "'" + def + "'"
+	}
+	return "(function(){try{var k=" + string(keyJSON) +
+		";var s=localStorage.getItem(k);if(s!=='dark'&&s!=='light'){s=" + fallback + ";}" +
+		"document.documentElement.setAttribute('data-theme',s);}catch(e){}})();"
+}
 
 // SidebarConfig configures the docs sidebar. It accepts:
 //   - "auto" (default): build from the filesystem/frontmatter
@@ -292,11 +329,24 @@ func parseDocsOptions(cfg *config.Config) *DocsPluginOptions {
 	return nil
 }
 
+// genPageFile is the generated page file for a route, relative to the gen
+// root. A route whose last segment is a route convention name (template,
+// loading, error, 404, _x ...) goes to <route>/index.tsx: the build would
+// otherwise treat <route>.tsx as a layout, template or segment page. The URL
+// is the same because the build drops a trailing /index.
+func genPageFile(route string) string {
+	if routeconv.ReservedBase(path.Base(route)) {
+		route += "/index"
+	}
+	return filepath.FromSlash(route) + ".tsx"
+}
+
 func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 	cfg, ok := ctx.Config.(*config.Config)
 	if !ok {
 		return nil
 	}
+	slashMode := cfg.TrailingSlashMode()
 
 	opts := parseDocsOptions(cfg)
 	if opts == nil {
@@ -336,7 +386,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 			for i := range ps {
 				ps[i].Locale = loc
 				ps[i].Version = ver
-				ps[i].URL = docsURL(loc, defaultLocale, ver, currentVersion, ps[i].Path)
+				ps[i].URL = docs.ApplyTrailingSlash(docsURL(loc, defaultLocale, ver, currentVersion, ps[i].Path), slashMode)
 				lk := ver + "\x00" + ps[i].Path
 				if localeAlts[lk] == nil {
 					localeAlts[lk] = map[string]string{}
@@ -410,15 +460,27 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 	var wg sync.WaitGroup
 
 	for _, b := range bundles {
-		for i, page := range b.pages {
+		// Prev/next follow the sidebar a reader sees (including a custom
+		// sidebar); with no sidebar they fall back to the page order.
+		navPages, inSidebar := docs.SidebarOrderedPages(b.pages, b.sections)
+		if !inSidebar {
+			navPages = b.pages
+		}
+		navIndex := make(map[string]int, len(navPages))
+		for i, np := range navPages {
+			navIndex[np.URL] = i
+		}
+		for _, page := range b.pages {
 			var prevTitle, prevLink, nextTitle, nextLink string
-			if i > 0 {
-				prevTitle = b.pages[i-1].Title
-				prevLink = b.pages[i-1].URL
-			}
-			if i < len(b.pages)-1 {
-				nextTitle = b.pages[i+1].Title
-				nextLink = b.pages[i+1].URL
+			if i, found := navIndex[page.URL]; found {
+				if i > 0 {
+					prevTitle = navPages[i-1].Title
+					prevLink = navPages[i-1].URL
+				}
+				if i < len(navPages)-1 {
+					nextTitle = navPages[i+1].Title
+					nextLink = navPages[i+1].URL
+				}
 			}
 
 			li := docsLocaleInfo{
@@ -431,11 +493,14 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 				VersionBanner:  cfg.Versions.Enabled() && cfg.Versions.BannerEnabled() && page.Version != currentVersion,
 			}
 
+			li.Locales = slashLinks(li.Locales, slashMode)
+			li.Versions = slashLinks(li.Versions, slashMode)
+
 			// The build derives a generated page's route from its path under
 			// .krate/gen, so the file path must mirror the final route exactly
 			// (e.g. route "fr/docs/getting-started" -> .krate/gen/fr/docs/getting-started.tsx).
 			route := docsRoute(page.Locale, defaultLocale, page.Version, currentVersion, page.Path)
-			tsxPath := filepath.Join(genRoot, filepath.FromSlash(route)+".tsx")
+			tsxPath := filepath.Join(genRoot, genPageFile(route))
 
 			wg.Add(1)
 			go func(page docs.Page, b docsBundle, li docsLocaleInfo, prevTitle, prevLink, nextTitle, nextLink string) {
@@ -443,9 +508,12 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 
 				tocItems := pageTocItems(page)
 				breadcrumbs := docs.BuildBreadcrumbsTitled(page.Locale, defaultLocale, page.Path, b.pages)
+				for i := range breadcrumbs {
+					breadcrumbs[i].URL = docs.ApplyTrailingSlash(breadcrumbs[i].URL, slashMode)
+				}
 
 				fileLayoutRel := theme.importSpecifier(filepath.Dir(tsxPath))
-				tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, searchEnabled, b.sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, li, opts, themeOptions, cfg.Markdown, docs.DocsBasePath)
+				tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, filepath.Dir(tsxPath), searchEnabled, b.sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, li, opts, themeOptions, cfg.Markdown, docs.DocsBasePath)
 
 				_ = os.MkdirAll(filepath.Dir(tsxPath), 0755)
 				_ = os.WriteFile(tsxPath, []byte(tsxSource), 0644)
@@ -462,7 +530,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 
 	for res := range resultsCh {
 		if ctx.GeneratedPages != nil {
-			*ctx.GeneratedPages = append(*ctx.GeneratedPages, GeneratedPage{Path: res.tsxPath, Route: res.route})
+			*ctx.GeneratedPages = append(*ctx.GeneratedPages, GeneratedPage{Path: res.tsxPath, Route: res.route, RootLayout: opts.RootLayout})
 		}
 	}
 
@@ -715,7 +783,7 @@ func applyNavOverride(override *docs.NavOverride, autoTitle, autoLink string) (t
 	return title, link, link != ""
 }
 
-func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page docs.Page, layoutRel string, searchEnabled bool, sections []docs.SidebarItem, tocItems []docs.TOCItem, breadcrumbs []docs.Breadcrumb, prevTitle, prevLink, nextTitle, nextLink string, li docsLocaleInfo, opts *DocsPluginOptions, themeOptions json.RawMessage, mdConfig markdown.Config, routeBase string) string {
+func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page docs.Page, layoutRel, genDir string, searchEnabled bool, sections []docs.SidebarItem, tocItems []docs.TOCItem, breadcrumbs []docs.Breadcrumb, prevTitle, prevLink, nextTitle, nextLink string, li docsLocaleInfo, opts *DocsPluginOptions, themeOptions json.RawMessage, mdConfig markdown.Config, routeBase string) string {
 	prevTitle, prevLink, prevOk := applyNavOverride(page.Prev, prevTitle, prevLink)
 	nextTitle, nextLink, nextOk := applyNavOverride(page.Next, nextTitle, nextLink)
 	if !opts.PaginationEnabled() {
@@ -741,7 +809,10 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	if data, err := os.ReadFile(page.SourcePath); err == nil {
 		rawSrc = string(data)
 		res := markdown.Compile(rawSrc, siteMarkdown(cfg, mdConfig), markdown.Options{MDX: strings.HasSuffix(page.SourcePath, ".mdx")})
-		mdxImports = res.ESM
+		mdxImports = make([]string, len(res.ESM))
+		for i, stmt := range res.ESM {
+			mdxImports[i] = relocateImports(stmt, filepath.Dir(page.SourcePath), genDir)
+		}
 		segments = res.Segments
 		mdxFrontmatter = markdown.FrontmatterDecl(res.Frontmatter, res.ESM)
 	}
@@ -794,7 +865,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	socialJSON := marshalJSONArray(socialLinks)
 	pageTitleJSON, _ := json.Marshal(page.Title)
 	siteTitleJSON, _ := json.Marshal(siteTitle)
-	currentPathJSON, _ := json.Marshal(page.Path)
+	currentPathJSON, _ := json.Marshal(docs.NormalizePagePath(page.Path))
 	templateJSON, _ := json.Marshal(page.Template)
 	routeBaseJSON, _ := json.Marshal(strings.TrimRight(routeBase, "/"))
 
@@ -991,6 +1062,15 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	sb.WriteString(string(routeBaseJSON))
 	sb.WriteString(",\n")
 
+	colorJSON, _ := json.Marshal(map[string]any{
+		"default":    opts.DefaultThemeMode(),
+		"prePaint":   opts.ThemeScriptEnabled(),
+		"storageKey": themeStorageKey(themeOptions),
+	})
+	sb.WriteString("    colorMode: ")
+	sb.WriteString(string(colorJSON))
+	sb.WriteString(",\n")
+
 	if len(strings.TrimSpace(string(themeOptions))) > 2 {
 		sb.WriteString("    options: ")
 		sb.WriteString(string(themeOptions))
@@ -1043,22 +1123,14 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	// Pre-paint theme script: apply the persisted/preferred colour scheme before
 	// the stylesheet paints, so the page never flashes the wrong theme. Runs
 	// before the hydration bundle; the layout later reconciles the signal.
-	themeKey := "theme"
-	if len(themeOptions) > 0 {
-		var to struct {
-			ThemeStorageKey string `json:"themeStorageKey"`
-		}
-		if json.Unmarshal(themeOptions, &to) == nil && to.ThemeStorageKey != "" {
-			themeKey = to.ThemeStorageKey
-		}
+	themeKey := themeStorageKey(themeOptions)
+	if opts.ThemeScriptEnabled() {
+		// data-krate-once lets the head merge keep one copy when the app's
+		// root layout renders the same script.
+		sb.WriteString("        <script data-krate-once=\"theme-prepaint\">{`")
+		sb.WriteString(escapeTemplateLit(themePrePaintScript(themeKey, opts.DefaultThemeMode())))
+		sb.WriteString("`}</script>\n")
 	}
-	keyJSON, _ := json.Marshal(themeKey)
-	prepaint := "(function(){try{var k=" + string(keyJSON) +
-		";var s=localStorage.getItem(k);if(s!=='dark'&&s!=='light'){s=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}" +
-		"document.documentElement.setAttribute('data-theme',s);}catch(e){}})();"
-	sb.WriteString("        <script>{`")
-	sb.WriteString(escapeTemplateLit(prepaint))
-	sb.WriteString("`}</script>\n")
 	sb.WriteString("      </Head>\n")
 
 	sb.WriteString("      <DocsLayout {...docsProps} >")
@@ -1099,6 +1171,20 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	sb.WriteString("}\n")
 
 	return sb.String()
+}
+
+// themeStorageKey is the localStorage key for the colour mode: the theme's
+// themeStorageKey option, "theme" by default.
+func themeStorageKey(themeOptions json.RawMessage) string {
+	if len(themeOptions) > 0 {
+		var to struct {
+			ThemeStorageKey string `json:"themeStorageKey"`
+		}
+		if json.Unmarshal(themeOptions, &to) == nil && to.ThemeStorageKey != "" {
+			return to.ThemeStorageKey
+		}
+	}
+	return "theme"
 }
 
 // leadingTitleRe matches a heading 1 at the very start of rendered markdown.

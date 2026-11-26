@@ -104,7 +104,12 @@ export interface DocsLayoutProps<Options = DocsThemeOptions> {
   /** Recursive sidebar tree (enriched: active/expanded/collapsible filled in). */
   sidebarItems: DocsSidebarItem[];
   /** Table-of-contents headings extracted from the rendered page. */
-  tocItems: { title: string; id: string; depth: number }[];
+  /**
+   * `title` is plain text; `html` (present only when the heading has inline
+   * formatting) is sanitized inline HTML limited to code, em, strong, kbd,
+   * sub, sup and s.
+   */
+  tocItems: { title: string; id: string; depth: number; html?: string }[];
   /** Breadcrumb trail for the current page. */
   breadcrumbs: { label: string; url: string; isLast: boolean }[];
   /** Previous page title/link in sidebar order. */
@@ -117,7 +122,7 @@ export interface DocsLayoutProps<Options = DocsThemeOptions> {
   socialLinks: { icon?: string; url?: string }[];
   /** Search UI hints from `docs({ search })`. */
   search?: { placeholder?: string; hotkey?: string };
-  /** Current page path (e.g. "getting-started"). */
+  /** Current page path without a trailing "index" (e.g. "getting-started", "cli" for cli/index; "" for the root). */
   currentPath: string;
   /** URL prefix the docs are mounted under (default "/docs"). */
   routeBase?: string;
@@ -163,6 +168,15 @@ export interface DocsLayoutProps<Options = DocsThemeOptions> {
   };
   /** Rendered markdown content. */
   children?: unknown;
+  /** Colour-mode settings from `docs({ defaultTheme, themeScript })`. */
+  colorMode?: {
+    /** Mode used when nothing is stored. */
+    default: "light" | "dark" | "system";
+    /** Whether the plugin injects the pre-paint script (false: the theme owns it). */
+    prePaint: boolean;
+    /** localStorage key the choice is persisted under. */
+    storageKey: string;
+  };
   /** Theme options forwarded when the descriptor declares them. */
   options?: Options;
 }
@@ -206,6 +220,26 @@ export interface DocsOptions {
   pagination?: boolean;
   /** Fill "last updated" from git history (default true). */
   lastUpdated?: boolean;
+  /**
+   * Wrap every generated docs page in the app's root layout
+   * (`pagesDir/_layout.*`), so its fonts, global CSS and `<html>`/`<body>`
+   * attributes apply. Route-group and nested layouts do not apply. Default
+   * false: the docs theme owns the whole shell. The theme must then render
+   * its shell as a plain element (no `<html>`, `<body>` or document title
+   * chrome of its own).
+   */
+  rootLayout?: boolean;
+  /**
+   * Colour mode used when none is stored: `"light"`, `"dark"` or `"system"`
+   * (default, follows `prefers-color-scheme`).
+   */
+  defaultTheme?: "light" | "dark" | "system";
+  /**
+   * Inject the pre-paint script that sets `data-theme` on `<html>` before
+   * first paint (default true). Set false for a theme or root layout that
+   * manages the colour mode itself.
+   */
+  themeScript?: boolean;
 }
 
 /**

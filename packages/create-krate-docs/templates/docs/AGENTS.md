@@ -6,8 +6,8 @@ __PROJECT_DISPLAY_NAME__ is a [Krate](https://github.com/kratejs/krate)
 documentation site. Content is Markdown/MDX under `src/content/docs/`; each file
 becomes a page and each directory becomes a sidebar section. It ships with a
 sidebar, table of contents, breadcrumbs, prev/next navigation, light/dark theme,
-and WASM-powered full-text search (docfind). It's built with the Krate `docs`
-plugin.
+and full-text search (Pagefind in production builds). It's built with the Krate
+`docs` plugin.
 
 ## Commands
 
@@ -23,10 +23,11 @@ npm run serve    # build and serve the production output
 ```
 krate.config.ts          # Krate config: entry, outDir (dist), pagesDir, plugins (docs, sitemap)
 tsconfig.json            # targets ES2022, jsx preserve, @/* -> src/* alias
-public/                  # static assets (site.css, search script, favicon, robots)
+public/                  # static assets served as-is (search script, favicon, robots)
 src/
   content/docs/          # the documentation pages (Markdown/MDX)
   pages/                 # index.tsx (home), _layout.tsx shell, 404.tsx
+  styles/site.css        # site styles, imported by _layout.tsx (bundled and minified)
   components/            # project components (docs shell comes from @krate/base-docs-theme)
 ```
 
@@ -58,7 +59,7 @@ order: 1
   baseDocsTheme()` in `krate.config.ts`. The `docs` plugin only passes render
   props to the theme; it does not generate chrome components. Prefer
   configuring behavior in `krate.config.ts` (docs plugin options, e.g.
-  `theme`/`layout`, `links`, `search`) and styling in `site.css`.
+  `theme`/`layout`, `links`, `search`) and styling in `src/styles/site.css`.
 
 ## Configuring the site
 
@@ -67,7 +68,7 @@ order: 1
 - `site.url` / `site.name` - production URL and site name.
 - `plugins` - `sitemap(...)` and `docs(...)`: `contentDir`, `theme`
   (`baseDocsTheme()` from `@krate/base-docs-theme`, or your own layout/theme),
-  `search` (docfind, `maxResults`), `links`
+  `search` (`enabled`, `engine`, `maxResults`; Pagefind by default), `links`
   (social links, e.g. `lucide:github`).
 - `devServer.port` - default 3000.
 

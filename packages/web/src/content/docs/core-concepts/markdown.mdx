@@ -183,6 +183,18 @@ element; the element's closing tag still closes it:
 </Note>
 ```
 
+A component tag alone on its line is a block element, so no blank line is
+needed between a paragraph and the tag that closes it (or opens one):
+
+```mdx
+<Note>
+Some text
+</Note>
+```
+
+A tag that starts in the middle of a line (`see <Badge>x`) stays inline, and
+its closing tag may sit on a later line of the same paragraph.
+
 If compiled markdown is not valid JSX, the error says its line and column refer
 to the generated code, not your file.
 
@@ -206,6 +218,10 @@ import { Callout } from '../../components/callout';
 
 <Callout type="tip">Imports work too.</Callout>
 ```
+
+A relative import resolves from the `.mdx` file's own directory, also in docs-plugin
+pages (which the build generates under `.krate/gen/`): the same `../../components/callout`
+works wherever the file sits. Aliases (`@/`, `~/`), packages and URLs are used as written.
 
 ## Configuration
 

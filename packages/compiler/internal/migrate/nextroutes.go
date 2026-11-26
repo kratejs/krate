@@ -47,7 +47,7 @@ func rewriteNextModuleImports(rep *Report, root string) {
 				rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: item, Hint: "see the next/script section of the migration guide"})
 			}
 		}
-		if f.Kind != KindAPI && f.Kind != KindMiddleware && strings.Contains(src, "next/server") {
+		if f.Kind != KindAPI && f.Kind != KindStaticRoute && f.Kind != KindMiddleware && strings.Contains(src, "next/server") {
 			if rewritten, ok := rewriteNextServerAfter(src); ok {
 				src = rewritten
 				f.Rewrites = append(f.Rewrites, "mapped next/server after() to @krate/runtime/server: it runs after the response is sent")

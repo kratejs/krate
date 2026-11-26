@@ -28,10 +28,11 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	if fn == nil {
 		return &ComponentNode{Name: "_nil", Tier: TierStatic}
 	}
+	isPageRoot := parentID == ""
 	node := b.newComponentNode(fn, parentID)
-	res := b.buildComponentScoped(fn, node, parentID == "")
+	res := b.buildComponentScoped(fn, node, isPageRoot)
 	if node.Tier == TierClient {
-		b.finishClientComponent(node, fn, res)
+		b.finishClientComponent(node, fn, res, isPageRoot)
 	}
 	return node
 }
@@ -95,11 +96,19 @@ func (b *builder) buildComponentScoped(fn *ast.FnDecl, node *ComponentNode, isPa
 	// declarations and its scope-valued props are visible while building it.
 	b.scopeHandles = make(map[string]scopeRef)
 	b.currentNode = node
+	if b.ann.UseClient[fn.Name] {
+		b.useClientDepth++
+		defer func() { b.useClientDepth-- }()
+	}
 
 	// Signal declarations are collected against the caller's signal table;
 	// everything after runs against this component's own.
 	node.Signals = b.collectSignalDecls(fn)
 	b.installSignalTable(node.Signals)
+	if node.Tier == TierClient && b.callsStateHook(fn.Body) {
+		node.StateHooks = true
+		b.registerHookLocals(fn)
+	}
 	node.BodyUses = b.collectBodySignalUses(fn.Body, node.Signals)
 	b.signalSetters = make(map[string]bool, len(node.Signals))
 	for _, sig := range node.Signals {
@@ -209,6 +218,7 @@ func (b *builder) enterComponentBody(fn *ast.FnDecl) {
 	b.pendingRefs = nil
 	b.pendingPropsRegs = nil
 	b.localFnBody = fn.Body
+	b.localJSXInits = nil
 	// Locals that are useRef {current:...} objects: `ref={myRef}` assigns
 	// `.current` instead of clobbering the object.
 	b.refObjectVars = collectRefObjectVars(fn.Body)
@@ -267,14 +277,22 @@ func (b *builder) installComponentProps(fn *ast.FnDecl, node *ComponentNode) {
 	}
 	// Module-level constants (const X = <literal>) resolve in JSX text such
 	// as {hexNum} instead of leaking the identifier name.
+	b.moduleSeeded = nil
+	seedModule := func(k string, v jsvalue.Value) {
+		if _, exists := b.localProps[k]; !exists {
+			b.localProps[k] = v
+			if b.moduleSeeded == nil {
+				b.moduleSeeded = make(map[string]bool)
+			}
+			b.moduleSeeded[k] = true
+		}
+	}
 	if len(b.moduleConsts) > 0 {
 		if b.localProps == nil {
 			b.localProps = make(valueMap)
 		}
 		for k, v := range b.moduleConsts {
-			if _, exists := b.localProps[k]; !exists {
-				b.localProps[k] = v
-			}
+			seedModule(k, v)
 		}
 	}
 	// Router hooks fold to the page's route.
@@ -283,9 +301,7 @@ func (b *builder) installComponentProps(fn *ast.FnDecl, node *ComponentNode) {
 			b.localProps = make(valueMap)
 		}
 		for k, v := range b.routeHooks {
-			if _, exists := b.localProps[k]; !exists {
-				b.localProps[k] = v
-			}
+			seedModule(k, v)
 		}
 	}
 	// `createContext(default)` bindings are seeded under a reserved key so
@@ -354,13 +370,15 @@ func (b *builder) foldComponentLocals(fn *ast.FnDecl, node *ComponentNode, isPag
 		// promoted to the static tier.
 		if client && !isPageRoot {
 			preLocals, postLocals = b.localDecls(fn, node, fold, body.order)
+		} else if client && isPageRoot && len(b.pageParams) > 0 {
+			preLocals, postLocals = b.pagePropsLocalDecls(fn, node, fold, body.order)
 		}
 	}
 	if client {
 		// Destructured names without a build-time value are declared by
 		// replaying the declaration, also in a page root (whose other locals
 		// are baked into the HTML).
-		pre, post := b.leakedDestructDecls(fold, body.order)
+		pre, post := b.leakedDestructDecls(node, fold, body.order, isPageRoot)
 		preLocals = append(preLocals, pre...)
 		postLocals = append(postLocals, post...)
 	}
@@ -385,6 +403,8 @@ func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 	// useId() resolves to a per-component-instance build-time literal, stable
 	// across SSR and hydration.
 	fold := collectLocalVarsWithBuilder(fn.Body, b.sigMap(), b.localProps, b.useIDSequence(node.ID), b)
+	b.localJSXInits = fold.jsxInits
+	b.reportFoldNotes(fold)
 	// A changed local replaces any same-named binding: with its final folded
 	// value, or (when it has none) by removal so reads defer to hydration.
 	for name := range fold.changed {
@@ -394,11 +414,12 @@ func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 			b.localProps[name] = fold.locals[name]
 		}
 	}
-	// Re-fold locals whose initializer needs the cva/cn table (e.g. shadcn's
-	// `const classes = cn(buttonVariants({ variant }), className)`), so JSX
-	// attributes reference the class value instead of the variable name.
+	// Re-fold locals in declaration order so a local that depends on an
+	// earlier local (for example `cn(buttonVariants(...), className)`) sees
+	// the earlier binding deterministically.
 	destructured := destructNames(fold.destructs)
-	for name, init := range fold.inits {
+	for _, name := range fold.order {
+		init := fold.inits[name]
 		if init == nil || fold.changed[name] || destructured[name] {
 			continue
 		}
@@ -410,10 +431,12 @@ func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 		}
 		if v := b.evalAttrConst(init); !v.ContainsUnknown() && !v.IsFunction() && !v.IsJSX() {
 			fold.locals[name] = v
+			delete(fold.leaked, name)
 			if b.localProps == nil {
 				b.localProps = make(valueMap)
 			}
 			b.localProps[name] = v
+			delete(b.moduleSeeded, name)
 		}
 	}
 	if len(fold.locals) > 0 {
@@ -465,19 +488,32 @@ func (b *builder) liveContextLocals(fold *localFold) {
 		}
 		fold.locals[name] = jsvalue.Dynamic("context " + ctx)
 		fold.leaked[name] = true
+		if !b.propKeys[name] {
+			delete(b.localProps, name)
+		}
 	}
 }
 
-// bindFoldedLocals adds folded locals to the local-prop scope. Leaked locals
-// have no known value and stay OUT of it, so guards referencing them fold as
-// unknown (a ConditionalSlot is emitted) instead of dropping a branch.
+// bindFoldedLocals adds folded locals to the local-prop scope. Component
+// locals shadow module constants and route hooks. Leaked locals have no known
+// value and stay OUT of localProps (removing any shadowed module constant), so
+// guards referencing them fold as unknown instead of reading an outer binding.
 func (b *builder) bindFoldedLocals(fold *localFold) {
-	for k, v := range fold.locals {
+	for _, k := range fold.order {
 		if fold.leaked[k] {
+			if b.moduleSeeded[k] {
+				delete(b.localProps, k)
+				delete(b.moduleSeeded, k)
+			}
 			continue
 		}
-		if _, exists := b.localProps[k]; !exists {
+		v, ok := fold.locals[k]
+		if !ok {
+			continue
+		}
+		if _, exists := b.localProps[k]; !exists || b.moduleSeeded[k] {
 			b.localProps[k] = v
+			delete(b.moduleSeeded, k)
 		}
 	}
 }
@@ -514,6 +550,55 @@ func (b *builder) localDecls(fn *ast.FnDecl, node *ComponentNode, fold *localFol
 	return pre, post
 }
 
+// pagePropsLocalDecls emits hydration declarations for non-destructured locals
+// of a dynamic-route page root whose initializer references `props` (skipped by
+// collectExtraVarJS), such as `const p = props.params`.
+func (b *builder) pagePropsLocalDecls(fn *ast.FnDecl, node *ComponentNode, fold *localFold, order *bodyOrder) (pre, post []bodyJS) {
+	declared := declaredLocalNames(node, fn)
+	destructured := destructNames(fold.destructs)
+	for _, name := range fold.order {
+		if _, ok := fold.locals[name]; !ok || declared[name] || destructured[name] {
+			continue
+		}
+		init := fold.inits[name]
+		if init == nil || !referencesProps(init) {
+			continue
+		}
+		var js string
+		var pure bool
+		if !b.pageParamsDynamic && !fold.leaked[name] && !fold.changed[name] && !b.referencesSignal(init) && !fold.locals[name].ContainsUnknown() && !fold.locals[name].IsFunction() && !fold.locals[name].IsJSX() {
+			js = "var " + name + "=" + valueJSLiteral(fold.locals[name])
+			pure = true
+		} else {
+			js, pure = b.localDeclJS(name, init, fold)
+		}
+		if pure {
+			node.addPureDecl(js, name)
+		}
+		frag := bodyJS{ord: order.ofName(name), js: js}
+		if b.referencesSignal(init) {
+			post = append(post, frag)
+		} else {
+			pre = append(pre, frag)
+		}
+	}
+	return pre, post
+}
+
+// shouldReplayDestruct reports whether d must be evaluated as written in the
+// hydration scope.
+func (b *builder) shouldReplayDestruct(d *ast.VarDecl, fold *localFold) bool {
+	if d.Init != nil && (referencesProps(d.Init) || referencesAnyLocal(d.Init, b.sigMap(), fold.locals) || isReferenceInit(d.Init)) {
+		return true
+	}
+	for _, n := range d.Names {
+		if fold.leaked[n] || fold.changed[n] {
+			return true
+		}
+	}
+	return false
+}
+
 // replayedDestructs returns the destructuring declarations the hydration
 // scope evaluates as written: one with a name that has no build-time value or
 // is changed later, or whose initializer reads props, another local or a
@@ -521,17 +606,34 @@ func (b *builder) localDecls(fn *ast.FnDecl, node *ComponentNode, fold *localFol
 func (b *builder) replayedDestructs(fold *localFold) []*ast.VarDecl {
 	var out []*ast.VarDecl
 	for _, d := range fold.destructs {
-		replay := d.Init != nil && (referencesProps(d.Init) || referencesAnyLocal(d.Init, b.sigMap(), fold.locals) || isReferenceInit(d.Init))
-		for _, n := range d.Names {
-			if fold.leaked[n] || fold.changed[n] {
-				replay = true
-			}
-		}
-		if replay {
+		if b.shouldReplayDestruct(d, fold) {
 			out = append(out, d)
 		}
 	}
 	return out
+}
+
+// canFoldPageDestruct reports whether every name bound by d in a concrete page
+// root folded to a static build-time value and does not depend on signals.
+func (b *builder) canFoldPageDestruct(d *ast.VarDecl, fold *localFold) bool {
+	if d.Init == nil || b.referencesSignal(d.Init) {
+		return false
+	}
+	hasName := false
+	for _, n := range d.Names {
+		if n == "" || n == "children" {
+			continue
+		}
+		hasName = true
+		if fold.leaked[n] || fold.changed[n] {
+			return false
+		}
+		v, ok := fold.locals[n]
+		if !ok || v.ContainsUnknown() || v.IsFunction() || v.IsJSX() {
+			return false
+		}
+	}
+	return hasName
 }
 
 // destructNames returns the names bound by the declarations.
@@ -547,8 +649,41 @@ func destructNames(decls []*ast.VarDecl) map[string]bool {
 
 // leakedDestructDecls renders each replayed destructuring declaration as one
 // `var {a, b: c} = init` fragment, split like localDecls into those that may
-// precede the signal declarations and those that read signals.
-func (b *builder) leakedDestructDecls(fold *localFold, order *bodyOrder) (pre, post []bodyJS) {
+// precede the signal declarations and those that read signals. For a concrete
+// page root whose destructured names all folded, each bound name is emitted as
+// a pure literal so unused locals can be dropped and static pages need no JS.
+func (b *builder) leakedDestructDecls(node *ComponentNode, fold *localFold, order *bodyOrder, isPageRoot bool) (pre, post []bodyJS) {
+	if isPageRoot && !b.pageParamsDynamic {
+		for _, d := range fold.destructs {
+			if b.canFoldPageDestruct(d, fold) {
+				for _, n := range d.Names {
+					if n == "" || n == "children" {
+						continue
+					}
+					js := "var " + n + "=" + valueJSLiteral(fold.locals[n])
+					node.addPureDecl(js, n)
+					pre = append(pre, bodyJS{ord: order.of(d), js: js})
+				}
+				continue
+			}
+			if !b.shouldReplayDestruct(d, fold) {
+				continue
+			}
+			pattern := d.Pattern
+			if d.Target != nil {
+				pattern = renderPattern(d.Target, b.sigMap())
+			} else if pattern == "" {
+				pattern = "[" + strings.Join(d.Names, ",") + "]"
+			}
+			frag := bodyJS{ord: order.of(d), js: "var " + pattern + "=" + generateExprJS(d.Init, b.sigMap())}
+			if b.referencesSignal(d.Init) {
+				post = append(post, frag)
+			} else {
+				pre = append(pre, frag)
+			}
+		}
+		return pre, post
+	}
 	for _, d := range b.replayedDestructs(fold) {
 		pattern := d.Pattern
 		if d.Target != nil {
@@ -724,7 +859,7 @@ func (b *builder) enterCSSScope(fn *ast.FnDecl, node *ComponentNode, returnStmt 
 // references, and promotes it to the static tier when it needs no client JS.
 // It runs in the caller's context: helper declarations are rendered against
 // the caller's signal table.
-func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res componentResult) {
+func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res componentResult, isPageRoot bool) {
 	if b.pendingLazy != nil && fn == b.pendingLazyFn {
 		// A lazy() instance always hydrates: it suspends until its chunk or
 		// loader is ready.
@@ -747,6 +882,13 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 			}
 		}
 	}
+	// Promote before pulling in helper functions and module constants that are
+	// only referenced by folded local declarations.
+	if needsNoClientJS(node, fn, b.localFuncProps, isPageRoot) && !res.forceClient && !b.rendersLiveProps(node) && !node.Lazy {
+		node.ExtraVars, node.PreSignalVars = nil, nil
+		node.Tier = TierStatic
+		return
+	}
 	// Local and module-level functions referenced by handlers, effects, memos
 	// and dynamic list slot expressions must be in hydration scope, and so
 	// must the module-level constants they (and the hydration code) read,
@@ -761,7 +903,13 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 				continue
 			}
 			emittedFns[fnDecl.Name] = true
-			if fnJS := b.reactifier().renderFnDeclJS(fnDecl, b.sigMap()); fnJS != "" {
+			sigs := b.sigMap()
+			if b.stateFns[fnDecl] && !declaresLocalFn(fn.Body, fnDecl) {
+				// A hook has its own bindings; the component's getters of
+				// the same name are not in its scope.
+				sigs = nil
+			}
+			if fnJS := b.reactifier().renderFnDeclJS(fnDecl, sigs); fnJS != "" {
 				node.ExtraVars = append(node.ExtraVars, fnJS)
 				node.addPureDecl(fnJS, fnDecl.Name)
 				b.noteFnPos(node, fn, fnDecl, fnJS)
@@ -783,8 +931,10 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 	dropShadowedFunctions(node, constDecls)
 	restoreUndeclaredHandlers(node, inlined)
 	b.checkUnbundledImports(node)
-	if needsNoClientJS(node, fn, b.localFuncProps) && !res.forceClient && !b.rendersLiveProps(node) && !node.Lazy {
-		node.Tier = TierStatic
+	if isPageRoot {
+		if paramDecls := b.pageParamHydrationDecls(node, fn); len(paramDecls) > 0 {
+			node.PreSignalVars = append(paramDecls, node.PreSignalVars...)
+		}
 	}
 }
 
@@ -895,15 +1045,22 @@ func dropShadowedFunctions(node *ComponentNode, constDecls []string) {
 //
 // funcProps names the props that hold functions at this call site: build-time
 // evaluation cannot call them, so a slot that reads one needs the client.
-func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl, funcProps map[string]bool) bool {
+func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl, funcProps map[string]bool, isPageRoot bool) bool {
 	hasComponentRef := false
 	if ret := findReturnStmt(fn.Body); ret != nil {
 		hasComponentRef = hasRefAttrExpr(ret.Value)
 	}
 	_, _, providesScope := providedScopeContext(fn)
-	return !slotsHaveExpr(node.Children, paramBindingSet(fn), funcProps) &&
+	params := paramBindingSet(fn)
+	liveParams := params
+	if isPageRoot {
+		// A page root's route params are fixed per page, not reactive props
+		// from a parent component; only hooks keep it hydrated.
+		liveParams = nil
+	}
+	return !node.StateHooks && !slotsHaveExpr(node.Children, params, funcProps) &&
 		len(node.Signals) == 0 && len(node.Effects) == 0 &&
-		len(node.Memos) == 0 && onlyFoldedVars(node, paramBindingSet(fn)) &&
+		len(node.Memos) == 0 && onlyFoldedVars(node, liveParams) &&
 		len(node.Handlers) == 0 && len(node.AttrBindings) == 0 &&
 		len(node.RefBindings) == 0 && !hasComponentRef && !providesScope
 }
@@ -911,8 +1068,7 @@ func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl, funcProps map[string]b
 // onlyFoldedVars reports whether the component declares nothing the hydration
 // scope needs: no body vars, or only vars whose value was folded at build time
 // (they are baked into the HTML, so a hydration script would only repeat
-// them) in a component without a hydrating child, which may read them. It
-// drops the vars when it holds.
+// them) in a component without a hydrating child, which may read them.
 func onlyFoldedVars(node *ComponentNode, params map[string]bool) bool {
 	if len(node.ExtraVars) == 0 && len(node.PreSignalVars) == 0 {
 		return true
@@ -927,7 +1083,6 @@ func onlyFoldedVars(node *ComponentNode, params map[string]bool) bool {
 			}
 		}
 	}
-	node.ExtraVars, node.PreSignalVars = nil, nil
 	return true
 }
 
@@ -935,6 +1090,45 @@ var (
 	callNameRe  = regexp.MustCompile(`([A-Za-z_$][\w$]*)\s*\(`)
 	identNameRe = regexp.MustCompile(`[A-Za-z_$][\w$]*`)
 )
+
+// splitVarDecl splits `var <lhs>=<init>` (stripping PureVar markers) at the
+// top-level assignment `=`, so destructuring defaults inside `{...}` or `[...]`
+// are not mistaken for the initializer separator.
+func splitVarDecl(v string) (lhs, init string, ok bool) {
+	v = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(v), PureVarBegin), PureVarEnd))
+	rest, hasVar := strings.CutPrefix(v, "var ")
+	if !hasVar {
+		return "", "", false
+	}
+	depth := 0
+	var quote byte
+	for i := 0; i < len(rest); i++ {
+		c := rest[i]
+		if quote != 0 {
+			if c == '\\' {
+				i++
+			} else if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"', '`':
+			quote = c
+		case '{', '[', '(':
+			depth++
+		case '}', ']', ')':
+			if depth > 0 {
+				depth--
+			}
+		case '=':
+			if depth == 0 && (i+1 >= len(rest) || (rest[i+1] != '=' && rest[i+1] != '>')) {
+				return strings.TrimSpace(rest[:i]), strings.TrimSpace(rest[i+1:]), true
+			}
+		}
+	}
+	return "", "", false
+}
 
 // readsLiveValue reports whether a var declaration reads something that can
 // change after the build: a hook (use(Context) folds to the context default,
@@ -945,7 +1139,13 @@ func readsLiveValue(v string, params map[string]bool) bool {
 			return true
 		}
 	}
-	_, init, _ := strings.Cut(v, "=")
+	if len(params) == 0 {
+		return false
+	}
+	_, init, ok := splitVarDecl(v)
+	if !ok {
+		_, init, _ = strings.Cut(v, "=")
+	}
 	for _, id := range identNameRe.FindAllString(init, -1) {
 		if id == "props" || params[id] {
 			return true
@@ -954,25 +1154,35 @@ func readsLiveValue(v string, params map[string]bool) bool {
 	return false
 }
 
-// foldedVarDecl reports whether v is a `var name=...` declaration of a local
-// with a build-time value.
+// foldedVarDecl reports whether v is a `var name=...` (or destructuring
+// `var {a, b}=...` / `var [a]=...`) declaration whose bound locals all have a
+// build-time value.
 func foldedVarDecl(node *ComponentNode, v string) bool {
-	v = strings.TrimSuffix(strings.TrimPrefix(v, PureVarBegin), PureVarEnd)
-	rest, ok := strings.CutPrefix(v, "var ")
-	if !ok {
+	lhs, init, ok := splitVarDecl(v)
+	if !ok || lhs == "" {
 		return false
 	}
-	end := 0
-	for end < len(rest) && isIdentChar(rest[end]) {
-		end++
-	}
-	if end == 0 || end == len(rest) || rest[end] != '=' {
-		return false
-	}
-	if _, folded := node.LocalVars[rest[:end]]; folded {
+	if len(lhs) >= 2 && ((lhs[0] == '{' && lhs[len(lhs)-1] == '}') || (lhs[0] == '[' && lhs[len(lhs)-1] == ']')) {
+		names := destructuredParamNames(lhs)
+		if len(names) == 0 {
+			return false
+		}
+		for _, name := range names {
+			if _, folded := node.LocalVars[name]; !folded {
+				return false
+			}
+		}
 		return true
 	}
-	return node.JSXLocals[rest[:end]] && inertJSXVar(rest[end+1:])
+	for i := 0; i < len(lhs); i++ {
+		if !isIdentChar(lhs[i]) {
+			return false
+		}
+	}
+	if _, folded := node.LocalVars[lhs]; folded {
+		return true
+	}
+	return node.JSXLocals[lhs] && inertJSXVar(init)
 }
 
 var interactiveJSXRe = regexp.MustCompile(`=>|\bfunction\b|\bon[A-Z]\w*\s*:|\bref\s*:|\.\.\.|\bh\(\s*[A-Z]`)

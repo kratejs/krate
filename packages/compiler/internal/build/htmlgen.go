@@ -404,7 +404,7 @@ func generateSEOTags(headHTML, route string, seo config.SEOConfig, ctx ...seoCtx
 
 	// Canonical and og:url use the form the site is actually served at
 	// (trailing slash, base path), the same as the sitemap and hreflang links.
-	canonical := plugin.CanonicalURL(baseURL, sc.BasePath, route)
+	canonical := plugin.CanonicalURLMode(baseURL, sc.BasePath, route, sc.Slash)
 
 	var tags []string
 	if descTag != "" {
@@ -513,6 +513,7 @@ func fallbackHeadTags(headHTML string, seo config.SEOConfig) string {
 // seoCtx carries per-page context for generateSEOTags.
 type seoCtx struct {
 	BasePath  string
+	Slash     string // trailingSlash mode
 	ErrorPage bool
 }
 
@@ -547,6 +548,24 @@ func headKey(tag string) string {
 		return ""
 	}
 	switch {
+	case strings.HasPrefix(lower, "<script"):
+		// data-krate-once marks a script that must appear once per page.
+		open := lower
+		if gt := strings.IndexByte(open, '>'); gt >= 0 {
+			open = open[:gt]
+		}
+		if i := strings.Index(open, "data-krate-once="); i >= 0 {
+			rest := open[i+len("data-krate-once="):]
+			if len(rest) > 1 && (rest[0] == '"' || rest[0] == '\'') {
+				if j := strings.IndexByte(rest[1:], rest[0]); j >= 0 {
+					return "script:once:" + rest[1:1+j]
+				}
+			} else if j := strings.IndexAny(rest, " \t\r\n/"); j > 0 {
+				return "script:once:" + rest[:j]
+			} else if j < 0 && rest != "" {
+				return "script:once:" + rest
+			}
+		}
 	case strings.HasPrefix(lower, "<title"):
 		return "title"
 	case strings.HasPrefix(lower, "<meta"):

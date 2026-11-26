@@ -3,7 +3,7 @@
 Scaffold a new [Krate](https://github.com/kratejs/krate) documentation site in
 seconds. Ships with the same look and feel as the official
 [krate.js.org](https://krate.js.org) docs - sidebar, table of contents,
-breadcrumbs, prev/next navigation, dark/light theme, and WASM search.
+breadcrumbs, prev/next navigation, dark/light theme, and full-text search.
 
 ```bash
 npm create krate-docs@latest my-docs

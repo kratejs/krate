@@ -24,6 +24,8 @@ import (
 type SSREval struct {
 	functions map[string]*ast.FnDecl
 	depth     int
+	// isolate copies the values bound by SetBindings (see IsolateBindings).
+	isolate bool
 
 	// devMark marks the output of each component this evaluator renders
 	// itself for the dev component inspector (nil outside dev builds);
@@ -178,7 +180,9 @@ func NewSSREval(functions map[string]*ast.FnDecl) *SSREval {
 	e.frame = jsvalue.NewScope(e.module)
 	// Static and server components are baked into HTML, so the build clock and
 	// Math.random() may be read here.
-	e.in = &jsvalue.Interp{Scope: e.frame, Volatile: true}
+	// The evaluator's values are its own copies (see resolveIdent), so
+	// in-place array methods are safe.
+	e.in = &jsvalue.Interp{Scope: e.frame, Volatile: true, InPlace: true, LoopCap: 100_000}
 	e.in.Hooks = jsvalue.Hooks{
 		Ident: e.resolveIdent,
 		Call:  e.interceptCall,
@@ -319,11 +323,25 @@ func (e *SSREval) SetEvalJS(fn func(code string) (string, error)) {
 	e.evalJS = fn
 }
 
+// IsolateBindings makes SetBindings copy the values it binds. A host calls it
+// for a component whose body may change what it reads.
+func (e *SSREval) IsolateBindings() { e.isolate = true }
+
 // SetBindings binds the root component's props. Each name is bound directly
 // (destructured parameters) and the whole set is also exposed as a `props`
 // object (a single `props` parameter), matching how the IR builder flattens
 // call-site attributes.
 func (e *SSREval) SetBindings(bindings map[string]jsvalue.Value) {
+	if e.isolate {
+		// The caller's values may be shared with other components and pages;
+		// a body that changes them works on copies.
+		cl := jsvalue.NewCloner()
+		cp := make(map[string]jsvalue.Value, len(bindings))
+		for k, v := range bindings {
+			cp[k] = cl.Clone(v)
+		}
+		bindings = cp
+	}
 	names := make([]string, 0, len(bindings))
 	for k := range bindings {
 		names = append(names, k)
@@ -491,6 +509,7 @@ func (e *SSREval) renderChildExpr(expr ast.Expr) string {
 // renderValue renders an evaluated value in child position, reporting values
 // that cannot be rendered.
 func (e *SSREval) renderValue(expr ast.Expr, v jsvalue.Value) string {
+	v = e.renderJSXNodes(v)
 	html, err := jsvalue.RenderChild(v)
 	if err != nil {
 		if uerr, ok := err.(*jsvalue.UnknownChildError); ok {
@@ -507,6 +526,33 @@ func (e *SSREval) renderValue(expr ast.Expr, v jsvalue.Value) string {
 		}
 	}
 	return html
+}
+
+// renderJSXNodes replaces JSX kept as source (an element read out of a module
+// constant and passed in as a prop) by the markup it renders, so it prints like
+// the same JSX written in place. Arrays are rebuilt only when they hold one.
+func (e *SSREval) renderJSXNodes(v jsvalue.Value) jsvalue.Value {
+	if !v.ContainsJSXNode() || v.ContainsUnknown() {
+		return v
+	}
+	switch v.Kind() {
+	case jsvalue.KindJSX:
+		if src, ok := v.JSXSource(); ok {
+			return jsvalue.JSX(e.renderChildValue(src))
+		}
+	case jsvalue.KindArray:
+		elems := make([]jsvalue.Value, 0, len(v.Elems()))
+		for _, el := range v.Elems() {
+			elems = append(elems, e.renderJSXNodes(el))
+		}
+		return jsvalue.ArrayOf(elems)
+	}
+	return v
+}
+
+// renderChildValue renders JSX source written in the caller's scope.
+func (e *SSREval) renderChildValue(src ast.Expr) string {
+	return e.renderValue(src, e.callerValue(src))
 }
 
 // resolveIdent resolves identifiers not bound in the current scope chain:
@@ -605,7 +651,7 @@ func (e *SSREval) isBound(name string) bool {
 // nativeGlobals are the built-ins jsvalue implements itself. Their calls run
 // natively and only fall back to the JS engine for members jsvalue lacks.
 var nativeGlobals = map[string]bool{
-	"Date": true, "Math": true, "JSON": true, "String": true, "Number": true, "Boolean": true,
+	"Date": true, "RegExp": true, "Math": true, "JSON": true, "String": true, "Number": true, "Boolean": true,
 	"Object": true, "Array": true, "parseInt": true, "parseFloat": true,
 	"isNaN": true, "isFinite": true, "URL": true, "encodeURIComponent": true, "encodeURI": true, "decodeURIComponent": true,
 }
@@ -624,8 +670,9 @@ func (e *SSREval) maybeDelegate(expr ast.Expr, callee ast.Expr) (jsvalue.Value, 
 		// The embedded engine runs in the build machine's time zone and
 		// locale and reads its own clock, so a Date it computes would differ
 		// from the build environment jsvalue models. A Date expression the
-		// evaluator cannot reproduce stays unresolved instead.
-		if !v.IsUnsupported() || root == "Date" {
+		// evaluator cannot reproduce stays unresolved instead. RegExp runs
+		// through jsvalue's own QuickJS helper so its value stays a RegExp.
+		if !v.IsUnsupported() || root == "Date" || root == "RegExp" {
 			return v, true
 		}
 	}

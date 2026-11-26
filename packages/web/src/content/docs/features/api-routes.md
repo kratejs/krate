@@ -258,6 +258,47 @@ export default function handler(req, res) {
 }
 ```
 
+## Build-time (static) route handlers
+
+A GET-only route handler can run at build time and write its response directly
+to `dist/` as static files, so static hosts serve it with no runtime sidecar:
+
+- **Under `src/pages/`:** a `route.ts`, `route.tsx`, `route.js` or `route.jsx`
+  file maps directly to its public URL (route groups stripped), matching Next.js
+  App Router route handlers alongside metadata routes. For example,
+  `src/pages/llms.txt/route.ts` writes `dist/llms.txt`, and
+  `src/pages/cards/[...slug]/route.tsx` writes `dist/cards/<slug>` for each
+  entry returned by `generateStaticParams()`.
+- **Under `src/api/`:** any JS/TS route in `src/api/**` runs at build time when
+  the project sets `output: "static"`, or when the route exports
+  `export const dynamic = "force-static"`, or when it exports
+  `generateStaticParams` (without `dynamic = "force-dynamic"`). Request-time API
+  routes without those markers stay unchanged.
+
+Static route handlers support:
+
+- **Dynamic segments with `generateStaticParams`:** `[slug]`, `[...slug]` and
+  optional `[[...slug]]` segments are expanded from `generateStaticParams()` and
+  passed via `context.params` (which can be read directly or awaited).
+- **`ImageResponse`:** a `.tsx` handler returning `new ImageResponse(...)` from
+  `@krate/runtime/og` is drawn in pure Go at build time into PNG files.
+- **Extensionless `Content-Type` headers and directory collisions:** when an
+  output URL has no file extension (such as `/cards/intro` returning `image/png`
+  or `/notes/intro` returning `text/markdown; charset=utf-8`), Krate records the
+  `Content-Type` in `dist/.krate/static-routes.json` so `krate serve` sends it
+  and static deploy adapters (`cloudflare`, `netlify`, `vercel`) emit matching
+  `Content-Type` rules in `_headers` / `vercel.json`. If a route URL is also a
+  parent directory of child outputs (for example `[[...slug]]` producing both
+  `/notes` and `/notes/intro`), the parent is written to `notes/index.<ext>`
+  with a `200` rewrite from `/notes` in `krate serve`, `_redirects`, and
+  `vercel.json`.
+
+Non-GET exports (`POST`, `PUT`, `PATCH`, `DELETE`, `default`), `export const
+dynamic = "force-dynamic"`, missing `generateStaticParams` on a dynamic route,
+or reading request-only APIs (`headers()`, `cookies()`, `request.headers`,
+`request.cookies`, `request.nextUrl.searchParams`, or `new URL(request.url).searchParams`)
+fail the build with [`KR7135`](/docs/reference/diagnostics/#kr7135).
+
 ## Timeouts
 
 A JS/TS route has 30 seconds to return its `Response`. A handler that has not

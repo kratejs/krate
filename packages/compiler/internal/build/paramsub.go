@@ -82,6 +82,12 @@ func subParamExpr(expr ast.Expr, params map[string]string) ast.Expr {
 			return lit
 		}
 		e.Object = subParamExpr(e.Object, params)
+		if e.Computed && e.Property != nil {
+			e.Property = subParamExpr(e.Property, params)
+		}
+		return e
+	case *ast.ParenExpr:
+		e.Expr = subParamExpr(e.Expr, params)
 		return e
 	case *ast.CallExpr:
 		e.Callee = subParamExpr(e.Callee, params)
@@ -128,7 +134,7 @@ func subParamExpr(expr ast.Expr, params map[string]string) ast.Expr {
 		return e
 	case *ast.JSXElement:
 		for _, attr := range e.Opening.Attributes {
-			if attr.Spread || attr.Value == nil {
+			if attr.Value == nil {
 				continue
 			}
 			attr.Value = subParamExpr(attr.Value, params)

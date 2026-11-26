@@ -7,7 +7,7 @@
  */
 
 import { markNoStore } from './cache-scope.js';
-import { getRequestContext, requestCookies, thenable } from './request-context.js';
+import { dynamicUsageError, getRequestContext, requestCookies, thenable } from './request-context.js';
 
 /** Options for `cookies().set()`. HttpOnly, Path=/ and SameSite=Lax are the defaults. */
 export interface ActionCookieOptions {
@@ -95,6 +95,7 @@ export function headers(): Headers {
   if (action) return awaitableHeaders(action.headers);
   const req = getRequestContext();
   if (req) {
+    if (req.prerender) throw dynamicUsageError('headers()');
     markNoStore();
     return awaitableHeaders(req.headers);
   }
@@ -111,6 +112,7 @@ export function cookies(): ActionCookies {
   if (action) return awaitableActionCookies(action.cookies);
   const req = getRequestContext();
   if (req) {
+    if (req.prerender) throw dynamicUsageError('cookies()');
     markNoStore();
     return requestCookies(req.cookies) as unknown as ActionCookies;
   }

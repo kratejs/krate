@@ -629,11 +629,6 @@ func translateOtherKeys(file string, obj *ast.ObjectExpr, notes *nextConfigNotes
 }
 
 func outputNote(file string, v ast.Expr) ManualItem {
-	mode, _ := stringValue(v)
-	switch mode {
-	case "export":
-		return ManualItem{Source: file, Reason: "output: 'export' is not translated", Hint: "set output: \"static\" in krate.config.ts (see Output mode in the config reference)"}
-	}
 	return ManualItem{Source: file, Reason: "next.config output is not a static 'standalone' or 'export' string and was not translated", Hint: "use krate deploy --target node/docker for a server, or output: \"static\" in krate.config.ts for a static site"}
 }
 

@@ -2,6 +2,7 @@ package css
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -43,7 +44,7 @@ func NewTailwindScanner(root string) *TailwindScanner {
 // Tailwind's approach): every string and template literal is scanned and its
 // tokens filtered by shape, so classes inside `class={cond ? "a" : "b"}`,
 // `clsx()/cn()/cva()` arguments, and arrays are all found.
-func (s *TailwindScanner) ScanClasses(dirs []string) map[string]bool {
+func (s *TailwindScanner) ScanClasses(dirs []string, files ...string) map[string]bool {
 	classes := make(map[string]bool)
 	exts := map[string]bool{
 		".tsx": true, ".jsx": true, ".ts": true, ".js": true,
@@ -55,33 +56,46 @@ func (s *TailwindScanner) ScanClasses(dirs []string) map[string]bool {
 	}
 
 	names := namesSignature(s.Names)
+	visit := func(path string, info os.FileInfo) {
+		if s.excluded(path) {
+			return
+		}
+		scan, ok := scannedFiles.get(path, info, names)
+		if !ok {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return
+			}
+			text := string(data)
+			scan = &fileScan{tokens: candidateTokensNames(text, s.Names), refs: map[string]bool{}, decls: map[string]bool{}}
+			collectVars(text, scan.refs, scan.decls)
+			scannedFiles.put(path, info, names, scan)
+		}
+		for _, tok := range scan.tokens {
+			classes[tok] = true
+		}
+		for k := range scan.refs {
+			s.VarRefs[k] = true
+		}
+		for k := range scan.decls {
+			s.VarDecls[k] = true
+		}
+	}
 	for _, dir := range dirs {
 		_ = fsutil.WalkExt(dir, exts, skipDirs, func(path string, info os.FileInfo) error {
-			if s.excluded(path) {
-				return nil
-			}
-			scan, ok := scannedFiles.get(path, info, names)
-			if !ok {
-				data, err := os.ReadFile(path)
-				if err != nil {
-					return nil
-				}
-				text := string(data)
-				scan = &fileScan{tokens: candidateTokensNames(text, s.Names), refs: map[string]bool{}, decls: map[string]bool{}}
-				collectVars(text, scan.refs, scan.decls)
-				scannedFiles.put(path, info, names, scan)
-			}
-			for _, tok := range scan.tokens {
-				classes[tok] = true
-			}
-			for k := range scan.refs {
-				s.VarRefs[k] = true
-			}
-			for k := range scan.decls {
-				s.VarDecls[k] = true
-			}
+			visit(path, info)
 			return nil
 		})
+	}
+	// Individual files (the build's module graph) are scanned by extension too,
+	// so a stylesheet or image in the graph is not read as source.
+	for _, path := range files {
+		if !exts[strings.ToLower(filepath.Ext(path))] {
+			continue
+		}
+		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+			visit(path, info)
+		}
 	}
 
 	return classes

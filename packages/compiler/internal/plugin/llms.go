@@ -108,9 +108,9 @@ func generateLLMs(ctx *BuildResultHookCtx) error {
 	pageURL := func(p docs.Page) string {
 		u := docsPageURL(prefix, p.Path)
 		if baseURL == "" {
-			return sitepath.Join(cfg.BaseURLPath(), u)
+			return sitepath.Join(cfg.BaseURLPath(), docs.ApplyTrailingSlash(u, cfg.TrailingSlashMode()))
 		}
-		return CanonicalURL(baseURL, cfg.BaseURLPath(), u)
+		return CanonicalURLMode(baseURL, cfg.BaseURLPath(), u, cfg.TrailingSlashMode())
 	}
 
 	if err := os.WriteFile(path.Join(ctx.OutDir, "llms.txt"), []byte(renderLLMsIndex(title, description, visible, pageURL)), 0644); err != nil {

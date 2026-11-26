@@ -68,7 +68,10 @@ and `--update-package` is still accepted). The plan lists each change:
   `node dist/.krate/server/.../server.mjs` for `output: 'standalone'`). Other
   scripts keep their text with `next <command>` rewritten the same way:
   `next typegen` becomes `krate types`, and a `next lint` or other command Krate has no
-  equivalent for stays, with an info line, and keeps `next` installed.
+  equivalent for stays, with an info line, and keeps `next` installed. A `start`
+  script that only serves the static export (`serve out`, `npx serve ./out`,
+  optionally with `-s` and `-l <port>`) becomes `krate serve`, with an info line
+  in the report; other `serve` scripts are left alone.
 - Every `@krate/*` package the migrated code imports is added (`@krate/core`,
   `@krate/runtime`, `@krate/components`, and `@krate/auth`, `@krate/three` or
   `@krate/konva` when the code now uses them), plus `preact`. A release of the
@@ -95,7 +98,10 @@ The first pass:
   `(.)x` segments in place (the Krate file router understands them);
 - copies Pages Router `_app` and wraps it as the root `_layout.tsx` shell;
 - copies app-local relative imports under `src/migrated/` and rewrites the
-  migrated route imports to point at them;
+  migrated route imports to point at them. Private folders (`app/x/_components`,
+  any directory whose name starts with `_`) are ordinary modules: every file in
+  them moves to `src/migrated/app/` and none becomes a route, even one named
+  `page.tsx`, `layout.tsx` or `route.ts`;
 - follows imports from the migrated files to project modules outside `app/`
   (relative imports and tsconfig `paths` / `baseUrl` aliases such as `@/*`,
   including `extends`) and applies the same Next import rewrites to them
@@ -160,7 +166,8 @@ The first pass:
   same name (see [Self-hosting](/docs/guides/self-hosting/)); computed ones get an item.
   `output: 'standalone'` becomes `deploy: { target: "node" }`; in the package update
   the `build` script becomes `krate deploy` (it builds first, then bundles the
-  server) and `start` becomes `node dist/.krate/server/server.mjs`. A static
+  server) and `start` becomes `node dist/.krate/server/server.mjs`. `output: 'export'`
+  becomes `output: "static"` in `krate.config.ts`. A static
   `outputFileTracingRoot` (`path.resolve(import.meta.dirname, '../..')` and the
   `__dirname`, `process.cwd()` and `fileURLToPath` forms) becomes the
   `outputFileTracingRoot` key, `start` points at
@@ -197,12 +204,17 @@ The first pass:
   (`<link rel="icon">`, `<link rel="apple-touch-icon">`). Icons inside a
   segment are copied but need their `<link>` added by hand. Dynamic `icon.tsx`
   and `apple-icon.tsx` are manual items;
-- keeps the public URL of route handlers outside `app/api`: they move under
+- migrates static GET-only route handlers (`output: 'export'` in `next.config`,
+  or a handler exporting `export const dynamic = "force-static"`) directly to
+  build-time static route handlers at their original URL (`src/pages/<path>/route.*`
+  for routes outside `app/api`, or `src/api/<path>.*` for routes under `app/api`),
+  preserving `generateStaticParams` and adding no `/api/` rewrite. Request-time
+  route handlers outside `app/api` keep the previous behavior: they move under
   `/api/`, and the plan adds a `rewrites` entry from the old path (`/r/[code]`
   becomes `/r/:code` to `/api/r/:code`; catch-alls use `:path+` and `:path*`).
   `krate serve` and `krate dev` answer such a rewrite from the API handler. A
-  handler at the app root (`app/route.ts`) is a manual item, because a rewrite
-  for `/` would shadow the home page. Deploy targets that do not run the Krate
+  handler at the app root (`app/route.ts`) is a manual item, because a route or
+  rewrite for `/` would shadow the home page. Deploy targets that do not run the Krate
   server may not apply the rewrite;
 - leaves inline `"use server"` functions (a directive inside a function body, the
   Auth.js `signOut` pattern) as they are: the build hoists them into server
@@ -313,7 +325,18 @@ The first pass:
   left is manual work: `request.cookies.set/delete`, `request.ip`,
   `request.geo`, `NextResponse.rewrite/next` in route handlers, and other `next/server` helpers
   such as `userAgent`;
-- maps `next/font/google` to a generated helper and Google Fonts CSS, and
+- maps `next/font/google` to Google Fonts CSS in `src/migrated/next-fonts.css`:
+  each call with literal options (`weight`, `style`, `display`, `variable`,
+  `fallback`) is replaced by an inline `{ className, variable, style }` object.
+  The identifier becomes the family name (`Noto_Sans_Display` is `Noto Sans Display`),
+  the weights and styles go into the css2 URL, and `variable: "--font-x"` defines
+  exactly `--font-x` on the returned `variable` class. All `@import` lines come
+  first in the file. `subsets`, `axes` and `preload` are not expressed. The fonts
+  are not downloaded: unlike `next/font`, which self-hosts, they load from
+  `fonts.googleapis.com` at runtime, and the report says so. To self-host, download
+  the font files and declare them with `@font-face` (or use `next/font/local`).
+  A call with computed options keeps the generated helper and is reported as
+  manual work. It also maps
   `next/font/local` plus `geist/font/sans` and `geist/font/mono` to self-hosted
   `@font-face` CSS: each `localFont({ src, weight, style, variable, display,
   declarations, fallback })` call (a single `src` or an array of `{ path, weight,

@@ -116,6 +116,8 @@ export interface HandlerPage {
   segDir?: string;
   /** A segment page that renders per request: reached through its synthetic route, never a URL. */
   segment?: boolean;
+  /** Route params of a page expanded from generateStaticParams, whose route is a plain path. */
+  params?: Record<string, string>;
 }
 
 /**
@@ -614,7 +616,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   function findPageForRoute(urlPath: string): { page: HandlerPage; params: Record<string, string> } | null {
     for (const p of pagesBySpecificity) {
       const params = matchRoutePattern(urlPath, p.route);
-      if (params) return { page: p, params };
+      if (params) return { page: p, params: p.params && Object.keys(params).length === 0 ? { ...p.params } : params };
     }
     return null;
   }

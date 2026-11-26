@@ -2,6 +2,7 @@ package build
 
 import (
 	"fmt"
+	"github.com/kratejs/krate/packages/compiler/internal/routeconv"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -40,17 +41,13 @@ const (
 )
 
 // segmentBaseKinds maps a file base name (no extension) to its role.
-var segmentBaseKinds = map[string]SegmentKind{
-	"404":       SegmentNotFound,
-	"not-found": SegmentNotFound,
-	"500":       SegmentError,
-	"error":     SegmentError,
-
-	"403":          SegmentForbidden,
-	"forbidden":    SegmentForbidden,
-	"401":          SegmentUnauthorized,
-	"unauthorized": SegmentUnauthorized,
-}
+var segmentBaseKinds = func() map[string]SegmentKind {
+	m := make(map[string]SegmentKind, len(routeconv.SegmentBases))
+	for base, kind := range routeconv.SegmentBases {
+		m[base] = SegmentKind(kind)
+	}
+	return m
+}()
 
 // segmentKindOfBase returns the role of a page base name.
 func segmentKindOfBase(base string) (SegmentKind, bool) {

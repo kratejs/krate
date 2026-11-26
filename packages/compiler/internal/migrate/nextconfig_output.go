@@ -78,7 +78,8 @@ func onlyParents(p string) (int, bool) {
 	return n, true
 }
 
-// outputKeys translates output: 'standalone' and outputFileTracingRoot.
+// outputKeys translates output: 'standalone', output: 'export', and
+// outputFileTracingRoot.
 func outputKeys(rc *ruleCtx, obj *ast.ObjectExpr, out *nextConfigData, notes *nextConfigNotes, done map[string]bool) {
 	if v := prop(obj, "outputFileTracingRoot"); v != nil {
 		if rel, ok := staticPathValue(rc, v); ok {
@@ -99,7 +100,15 @@ func outputKeys(rc *ruleCtx, obj *ast.ObjectExpr, out *nextConfigData, notes *ne
 	if v == nil {
 		return
 	}
-	if mode, _ := stringValue(v); mode != "standalone" {
+	mode, _ := stringValue(v)
+	switch mode {
+	case "export":
+		out.Output = "static"
+		done["output"] = true
+		notes.Info = append(notes.Info, "output: 'export' became output: \"static\" in krate.config.ts: static pages and GET route handlers are generated at build time into dist/")
+		return
+	case "standalone":
+	default:
 		return
 	}
 	out.DeployTarget = "node"

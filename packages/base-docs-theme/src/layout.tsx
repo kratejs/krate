@@ -1,6 +1,7 @@
 import { SidebarNav, TOCNav, Breadcrumbs, PrevNext, SocialLinks } from "./chrome";
 import { DocsSearch } from "./search";
 import { createSignal, createEffect, onMount, onCleanup } from "@krate/runtime";
+import { initialTheme } from "./colormode";
 import "./theme.css";
 
 interface SidebarItem {
@@ -17,6 +18,7 @@ interface SidebarItem {
 
 interface TOCItem {
   title: string;
+  html?: string;
   id: string;
   depth: number;
 }
@@ -101,6 +103,8 @@ interface BaseDocsLayoutProps {
   authors?: string[];
   i18n?: I18nProps;
   search?: { placeholder?: string; hotkey?: string };
+  /** Colour-mode settings from the docs plugin. */
+  colorMode?: { default?: "light" | "dark" | "system"; prePaint?: boolean; storageKey?: string };
   options?: {
     themeStorageKey?: string;
     feedback?: { repo: string; discussions?: boolean; label?: string };
@@ -127,7 +131,8 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
   const pageTitle = props.pageTitle;
   const siteTitle = props.siteTitle;
   const themeOptions = props.options || {};
-  const themeKey = themeOptions.themeStorageKey || "theme";
+  const themeKey = (props.colorMode && props.colorMode.storageKey) || themeOptions.themeStorageKey || "theme";
+  const defaultTheme = props.colorMode && props.colorMode.default;
   const routeBase = props.routeBase || "/docs";
   const tocItems = props.tocItems || [];
   const showToc = !props.tocHidden && tocItems.length > 0;
@@ -173,11 +178,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
     try {
       saved = localStorage.getItem(themeKey) || "";
     } catch {}
-    var dark = saved === "dark";
-    if (!dark && saved !== "light") {
-      dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    }
-    setTheme(dark ? "dark" : "light");
+    setTheme(initialTheme(saved, defaultTheme));
 
     var mq = window.matchMedia("(min-width: 1024px)");
     function onDesktop(e: MediaQueryListEvent) {

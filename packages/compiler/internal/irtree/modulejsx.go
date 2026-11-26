@@ -244,7 +244,12 @@ type jsxProp struct {
 // inlineJSXConstAttrs replaces attributes that read a constant holding JSX
 // (`body={intro}`, `sections={sections}`) with the constant's own JSX, so they
 // are handled like JSX written in the attribute.
-func (b *builder) inlineJSXConstAttrs(attrs map[string]ast.Expr) {
+//
+// An attribute that reads data with JSX in some fields is also returned,
+// with its original expression: a client component reads it as a value
+// (its other fields fold), while a server-rendered one gets the inlined JSX.
+func (b *builder) inlineJSXConstAttrs(attrs map[string]ast.Expr) map[string]ast.Expr {
+	var typed map[string]ast.Expr
 	for name, expr := range attrs {
 		switch unwrapTypeWrappers(expr).(type) {
 		case *ast.Identifier, *ast.MemberExpr:
@@ -255,9 +260,16 @@ func (b *builder) inlineJSXConstAttrs(attrs map[string]ast.Expr) {
 			continue
 		}
 		if resolved := b.resolveModuleJSX(expr, 0); resolved != nil && containsJSXNode(resolved) {
+			if v := b.evalValue(expr); v.ContainsJSXNode() && !v.ContainsUnknown() && !v.IsJSX() {
+				if typed == nil {
+					typed = make(map[string]ast.Expr)
+				}
+				typed[name] = expr
+			}
 			attrs[name] = resolved
 		}
 	}
+	return typed
 }
 
 // jsxAttrExprs returns the attribute expressions that hold JSX.
@@ -305,6 +317,9 @@ func (b *builder) localJSXInit(name string) (ast.Expr, bool) {
 func (b *builder) localInit(name string, needJSX bool) (ast.Expr, bool) {
 	if b.isShadowed(name) {
 		return nil, false
+	}
+	if init, ok := b.localJSXInits[name]; ok {
+		return init, true
 	}
 	var init ast.Expr
 	for _, stmt := range b.localFnBody {

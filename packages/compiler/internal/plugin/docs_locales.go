@@ -147,6 +147,17 @@ func docsRoute(locale, defaultLocale, version, currentVersion, path string) stri
 	return route
 }
 
+// slashLinks puts switcher URLs in the site's trailing-slash form.
+func slashLinks(links []altLink, mode string) []altLink {
+	if mode != "never" {
+		return links
+	}
+	for i := range links {
+		links[i].URL = docs.ApplyTrailingSlash(links[i].URL, mode)
+	}
+	return links
+}
+
 // localeSwitchLinksWithLabels builds the LocaleSwitcher entries for a page from
 // a translation map (locale -> URL), falling back to each locale's docs root.
 // Per-locale labels (i18n.localeLabels) override the built-in endonyms.

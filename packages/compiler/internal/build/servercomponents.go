@@ -22,10 +22,56 @@ import (
 // Async server components.
 //
 // An async function component is a server component (the annotator classifies
-// it TierRuntime). An async PAGE renders entirely per request in the SSR
-// sidecar (ssr, or isr with a revalidate window); an async child of a
-// synchronous page becomes a request-time region rendered from the page server
-// bundle, around a static shell.
+// it TierRuntime). An async PAGE with generateStaticParams (or under
+// output: "static" without dynamic segments) is prerendered at build time
+// through the staged SSR driver unless it opts into request-time rendering
+// (dynamic = "force-dynamic", revalidate, or request-only APIs such as
+// headers(), cookies(), or searchParams). Other async pages render per request
+// in the SSR sidecar (ssr, or isr with a revalidate window); an async child of
+// a synchronous page becomes a request-time region rendered from the page
+// server bundle, around a static shell.
+
+// serverComponentOpts captures the page context needed to decide whether an
+// async page is prerendered at build time or rendered per request.
+type serverComponentOpts struct {
+	staticMode bool
+	isDynRoute bool
+	hasGSP     bool
+	staticOnly bool
+	isExpanded bool
+	cfg        pageConfig
+	dataUsage  dataCacheUsage
+	cut        *layoutCut
+}
+
+// serverPagePlan describes how an async page will be built.
+type serverPagePlan struct {
+	serverPage        bool
+	prerender         bool
+	prerenderRequired bool
+	prerenderSeedISR  bool
+}
+
+// pageRequestsDynamic reports whether a page explicitly opts into per-request
+// rendering via segment exports or uncached (no-store) data reads.
+func pageRequestsDynamic(cfg pageConfig, usage dataCacheUsage) (string, bool) {
+	if cfg.ssr {
+		return "export const config = { ssr: true }", true
+	}
+	if cfg.streaming {
+		return "export const config = { streaming: true }", true
+	}
+	if cfg.dynamic == "force-dynamic" {
+		return `export const dynamic = "force-dynamic"`, true
+	}
+	if cfg.hasRevalidateExport && !cfg.revalidateForever && cfg.revalidateExport == 0 && cfg.dynamic != "force-static" && cfg.dynamic != "error" {
+		return "export const revalidate = 0", true
+	}
+	if usage.noStore && cfg.dynamic != "force-static" && cfg.dynamic != "error" && !cfg.revalidateForever {
+		return "uncached (no-store) data read", true
+	}
+	return "", false
+}
 
 // serverComponentNames returns the async components (other than the entry)
 // the page renders, sorted.
@@ -44,51 +90,107 @@ func serverComponentNames(ann *irtree.Annotations) []string {
 }
 
 // applyServerComponentMode adjusts the page render mode for server components
-// and reports whether the page component itself is async (a server page).
-func (b *Builder) applyServerComponentMode(page string, entry *bundler.Module, ann *irtree.Annotations, staticMode bool, cut *layoutCut, mode *RenderMode, revalidate *int) (bool, error) {
+// and returns the build plan for an async page (or a page under an async layout).
+func (b *Builder) applyServerComponentMode(page string, entry *bundler.Module, ann *irtree.Annotations, opts serverComponentOpts, mode *RenderMode, revalidate *int) (serverPagePlan, error) {
 	entryFn := ann.Functions[ann.EntryPoint]
+	cut := opts.cut
 	serverPage := (entryFn != nil && entryFn.Async) || (cut != nil && !cut.Dropped)
 	children := serverComponentNames(ann)
 	if !serverPage && len(children) == 0 {
-		return false, nil
+		return serverPagePlan{}, nil
 	}
-	if staticMode {
+	dynReason, wantsDynamic := pageRequestsDynamic(opts.cfg, opts.dataUsage)
+	staticPinned := opts.cfg.dynamic == "force-static" || opts.cfg.dynamic == "error" || opts.cfg.revalidateForever
+	wantsISR := *mode == RenderISR || opts.cfg.isr ||
+		(opts.cfg.hasRevalidateExport && !opts.cfg.revalidateForever && opts.cfg.revalidateExport > 0) ||
+		(!staticPinned && (opts.dataUsage.minRevalidate > 0 || opts.dataUsage.tagged))
+
+	if opts.staticMode {
 		name, fn := ann.EntryPoint, entryFn
-		if cut != nil && !cut.Dropped {
-			layout := filepath.Base(cut.Layouts[len(cut.Layouts)-1])
-			return false, serverDiag(ann, name, fn, entry.SourceCode,
-				"the async layout "+layout+" needs request-time rendering, but output is \"static\"",
-				"remove `output: \"static\"` from the config, or make "+layout+" synchronous").WithCode(diag.CodeServerComponentStaticOutput)
-		}
-		if !(entryFn != nil && entryFn.Async) {
+		if !serverPage {
 			name, fn = children[0], ann.Functions[children[0]]
+			return serverPagePlan{}, serverDiag(ann, name, fn, entry.SourceCode,
+				"async component "+name+" needs request-time rendering, but output is \"static\"",
+				"remove `output: \"static\"` from the config, make "+name+" synchronous, or make the page `async` so it can be prerendered at build time").WithCode(diag.CodeServerComponentStaticOutput)
 		}
-		return false, serverDiag(ann, name, fn, entry.SourceCode,
-			"async component "+name+" needs request-time rendering, but output is \"static\"",
-			"remove `output: \"static\"` from the config, or make "+name+" synchronous").WithCode(diag.CodeServerComponentStaticOutput)
-	}
-	if serverPage {
-		switch {
-		case *mode == RenderISR:
-		case pageRevalidateExport(entry.Program) > 0:
-			*mode = RenderISR
-			*revalidate = pageRevalidateExport(entry.Program)
-		default:
+		if wantsDynamic {
+			return serverPagePlan{}, serverDiag(ann, name, fn, entry.SourceCode,
+				"async page "+name+" requests per-request rendering ("+dynReason+"), but output is \"static\"",
+				"remove `output: \"static\"` from the config, or remove "+dynReason+" so the page can be prerendered at build time").WithCode(diag.CodeServerComponentStaticOutput)
+		}
+		if opts.isDynRoute && !opts.isExpanded {
+			if !opts.hasGSP {
+				return serverPagePlan{}, serverDiag(ann, name, fn, entry.SourceCode,
+					"async dynamic page "+name+" needs generateStaticParams to prerender with output: \"static\"",
+					"export `generateStaticParams` to list the routes to prerender, remove `output: \"static\"`, or make "+name+" synchronous").WithCode(diag.CodeServerComponentStaticOutput)
+			}
+			if !opts.staticOnly {
+				return serverPagePlan{}, serverDiag(ann, name, fn, entry.SourceCode,
+					"async dynamic page "+name+" allows on-demand dynamicParams, but output is \"static\"",
+					"remove `dynamicParams = true` so only generateStaticParams routes are prerendered, or remove `output: \"static\"` from the config").WithCode(diag.CodeServerComponentStaticOutput)
+			}
+			// Template is dropped after generateStaticParams expansion.
 			*mode = RenderSSR
 			*revalidate = 0
+			return serverPagePlan{serverPage: true}, nil
 		}
-		if cut != nil && !cut.Dropped && !(entryFn != nil && entryFn.Async) {
-			printf("  %s*%s %s renders inside the async layout %s -> %s\n", cCyan, cReset, filepath.Base(page), filepath.Base(cut.Layouts[len(cut.Layouts)-1]), mode.String())
-		} else {
-			printf("  %s*%s %s is an async server component -> %s\n", cCyan, cReset, filepath.Base(page), mode.String())
+		*mode = RenderSSR
+		*revalidate = 0
+		return serverPagePlan{serverPage: true, prerender: true, prerenderRequired: true}, nil
+	}
+
+	if serverPage {
+		if !wantsDynamic && wantsISR {
+			*mode = RenderISR
+			if *revalidate <= 0 {
+				switch {
+				case opts.cfg.isr && opts.cfg.revalidate > 0:
+					*revalidate = opts.cfg.revalidate
+				case opts.cfg.hasRevalidateExport && opts.cfg.revalidateExport > 0:
+					*revalidate = opts.cfg.revalidateExport
+				case pageRevalidateExport(entry.Program) > 0:
+					*revalidate = pageRevalidateExport(entry.Program)
+				case opts.dataUsage.minRevalidate > 0:
+					*revalidate = opts.dataUsage.minRevalidate
+				case opts.dataUsage.tagged:
+					*revalidate = taggedOnlyISRRevalidate
+				default:
+					*revalidate = defaultISRRevalidate
+				}
+			}
+			plan := serverPagePlan{serverPage: true}
+			if opts.isExpanded {
+				plan.prerender = true
+				plan.prerenderSeedISR = true
+			}
+			if cut != nil && !cut.Dropped && !(entryFn != nil && entryFn.Async) {
+				printf("  %s*%s %s renders inside the async layout %s -> %s\n", cCyan, cReset, filepath.Base(page), filepath.Base(cut.Layouts[len(cut.Layouts)-1]), mode.String())
+			} else {
+				printf("  %s*%s %s is an async server component -> %s\n", cCyan, cReset, filepath.Base(page), mode.String())
+			}
+			return plan, nil
 		}
-		return true, nil
+
+		*mode = RenderSSR
+		*revalidate = 0
+		plan := serverPagePlan{serverPage: true}
+		if !wantsDynamic && (opts.isExpanded || (!opts.isDynRoute && staticPinned)) {
+			plan.prerender = true
+		}
+		if !plan.prerender {
+			if cut != nil && !cut.Dropped && !(entryFn != nil && entryFn.Async) {
+				printf("  %s*%s %s renders inside the async layout %s -> %s\n", cCyan, cReset, filepath.Base(page), filepath.Base(cut.Layouts[len(cut.Layouts)-1]), mode.String())
+			} else {
+				printf("  %s*%s %s is an async server component -> %s\n", cCyan, cReset, filepath.Base(page), mode.String())
+			}
+		}
+		return plan, nil
 	}
 	if *mode == RenderSSG {
 		*mode = RenderStreaming
 		fmt.Fprintf(b.stderr(), "  %s*%s %s: [%s] renders server component %s per request -> streaming\n", cCyan, cReset, filepath.Base(page), diag.CodeServerComponentStreaming, children[0])
 	}
-	return false, nil
+	return serverPagePlan{}, nil
 }
 
 // pageRevalidateExport reads `export const revalidate = N` (Next.js route

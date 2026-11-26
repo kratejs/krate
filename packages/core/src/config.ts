@@ -847,6 +847,26 @@ export interface DocsPluginOptions {
   pagination?: boolean;
   /** Fill "last updated" from git history (default true). */
   lastUpdated?: boolean;
+  /**
+   * Wrap every generated docs page in the app's root layout
+   * (`pagesDir/_layout.*`), so its fonts, global CSS and `<html>`/`<body>`
+   * attributes apply. Route-group and nested layouts do not apply. Default
+   * false: the docs theme owns the whole shell. The theme must then render
+   * its shell as a plain element (no `<html>`, `<body>` or document title
+   * chrome of its own).
+   */
+  rootLayout?: boolean;
+  /**
+   * Colour mode used when none is stored: `"light"`, `"dark"` or `"system"`
+   * (default, follows `prefers-color-scheme`).
+   */
+  defaultTheme?: "light" | "dark" | "system";
+  /**
+   * Inject the pre-paint script that sets `data-theme` on `<html>` before
+   * first paint (default true). Set false for a theme or root layout that
+   * manages the colour mode itself.
+   */
+  themeScript?: boolean;
 }
 
 export type {

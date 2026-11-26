@@ -71,6 +71,13 @@ interface Isl {
   /** Elements from the top of the scanned list down to the island's parent. */
   chain: Element[];
   rec?: IslandRecord;
+  /** A paired new island's server-children slots, read before the swap moves its nodes. */
+  slots?: SlotNodes[];
+}
+
+interface SlotNodes {
+  id: string;
+  nodes: Node[];
 }
 
 function isOpen(n: Node): n is Comment {
@@ -385,6 +392,11 @@ function pairIslands(liveList: ArrayLike<Node>, newList: ArrayLike<Node>, allow:
       break;
     }
   }
+  // The swap moves a paired new island's nodes out of their parent (the live
+  // island takes their place), so its slots are read now.
+  pairs.forEach((_, n) => {
+    if (!n.el) n.slots = slotsOf(n);
+  });
   const kept = new Set(pairs.values());
   const byStart = new Map<Node, Isl>();
   pairs.forEach((_, n) => byStart.set(n.el || n.start!, n));
@@ -481,8 +493,8 @@ export function swapPreservingIslands(
 }
 
 /** The server-children slots directly in a new island's markup, in document order. */
-function slotsOf(i: Isl): Array<{ id: string; nodes: Node[] }> {
-  const out: Array<{ id: string; nodes: Node[] }> = [];
+function slotsOf(i: Isl): SlotNodes[] {
+  const out: SlotNodes[] = [];
   let depth = 0;
   let inner: Node[] = [];
   const see = (c: Node) => {
@@ -594,7 +606,7 @@ function updateIsland(l: Isl, n: Isl, jobs: Promise<unknown>[]): void {
   const pool: Record<string, Node[][]> = {};
   let retaken = false;
   const olds = h.slots || [];
-  const news = slotsOf(n);
+  const news = n.slots || slotsOf(n);
   const slots: IslandSlot[] = [];
   news.forEach((s, i) => {
     const o = olds.length === news.length ? olds[i] : undefined;

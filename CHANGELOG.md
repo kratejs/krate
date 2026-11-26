@@ -250,6 +250,28 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- Build-time (static) route handlers: GET-only route handlers under `src/pages/**/route.{ts,tsx,js,jsx}`
+  (mapped directly to their public URL, route groups stripped) and `src/api/**` routes under
+  `output: "static"`, with `export const dynamic = "force-static"`, or with `generateStaticParams` now
+  run at build time and write their responses directly to `dist/` with no runtime API sidecar. Dynamic
+  segments (`[slug]`, `[...slug]`, `[[...slug]]`) expand via `generateStaticParams()`, `ImageResponse`
+  handlers render PNGs in pure Go, parent-directory collisions write `<url>/index.<ext>` with a `200`
+  rewrite, and extensionless outputs record their `Content-Type` in `dist/.krate/static-routes.json` for
+  `krate serve` and static deploy adapters (`_headers`, `_redirects`, `vercel.json`). Non-GET handlers,
+  `dynamic = "force-dynamic"`, missing `generateStaticParams`, and request-dependent reads (`headers()`,
+  `cookies()`, `request.headers`, `request.cookies`, `searchParams`) fail with `KR7135`.
+  Large responses (a 1200x630 `ImageResponse` with an embedded data-URL logo, multi-megabyte text) are
+  read in full, and a failed build-time script (static routes, metadata routes, `generateStaticParams`,
+  prerendered endpoints) reports its exit status, whether stdout was empty, and the stderr tail.
+- Build-time prerendering for async pages with `generateStaticParams` (and non-dynamic async pages
+  under `output: "static"`): each param set is rendered once through the staged SSR driver with
+  thenable `params`, resolved `<Suspense>` boundaries, `"use client"` island hydration chunks, and
+  merged `generateMetadata`/`metadata` head tags, then written as SSG HTML. Under `output: "static"`,
+  prerenderable async pages succeed with no SSR server in `dist/`, while pages that require
+  request-time APIs (`headers()`, `cookies()`, `searchParams`, `dynamic = "force-dynamic"`, or
+  dynamic async routes without `generateStaticParams`) still report `KR7103`. In non-static mode,
+  pages that read request-only APIs during prerendering fall back to request-time SSR with a note,
+  and ISR pages (`revalidate`) keep ISR while seeding their initial HTML.
 - Experimental `ssr.apiRuntime: "scriptc"` (production only): `krate build` compiles the TypeScript API
   routes that scriptc accepts, from their original sources, into one native executable
   (`.krate/api-scriptc-server`), and `krate serve` runs it as a sidecar behind the same secret,
@@ -524,6 +546,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `create-krate-app` keeps its global CSS in `src/styles/global.css`, imported by `src/pages/_layout.tsx`, so it
+  goes through Krate's CSS pipeline (Tailwind, minification, hashed names) instead of being served as-is from
+  `public/`. The scaffold's favicon is a neutral placeholder, and `krate.config.ts` in both templates sets
+  `viewTransitions: "auto"` with a comment on turning it off. `create-krate-docs` uses the default search engine
+  (Pagefind in production builds) instead of docfind. The styling and config reference pages describe the
+  global-stylesheet pattern and the View Transitions default.
 - `krate build` checks client boundary chunks in fewer esbuild calls. When a page needs the exact check of a
   chunk from a code-split batch (its stateful hooks, the files it reads, its CSS classes), the check now joins
   the build round like the other client chunk jobs and runs in one unsplit batch with the others, instead of one
@@ -651,6 +679,201 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Client-side navigation: server content inside a client component lost on a same-page swap. When the swap kept a
+  client island (a table, say) and its new markup sat in a different number of elements than the old, the new
+  island's server children (a `<Button asChild><Link>` in a cell) were read after the swap had moved their markup
+  and found nothing, so the island re-rendered with an empty slot. The slots of a paired island are now read
+  before the swap runs.
+
+- Tailwind: `--value([duration])` in an `@utility` (used by `tw-animate-css` for `animation-duration-*` and
+  `delay-*`) no longer prints an "unknown type" warning. Like Tailwind, `duration` is a valid type name that is
+  only selected by an explicit `[duration:...]` hint; a bare `[400ms]` is served by the `[*]` fallback.
+
+- A dynamic route with `export const dynamicParams = false` and `generateStaticParams` answered 404 for every
+  param when the page is async and a layout above it reads `cookies()` or `headers()`. Two causes. A
+  `generateStaticParams` written as `export const generateStaticParams = () => ...` was not recognised, so no
+  page was built and the template was dropped. And a page that cannot be prerendered kept no params: its server
+  route rendered with empty params. The listed params now stay server routes that carry their params (in
+  `krate serve`, the dev server, the Node sidecar and the serverless targets) and other params 404, as in Next.js.
+  A closed route with no `generateStaticParams` is a build error (`KR7148`) instead of a silent 404.
+- `<div innerHTML={html} />` and `<p textContent={text} />` on an intrinsic element set the content in the static
+  page, in build-time rendering and in the browser (an `innerHTML` that reads state is re-applied), instead of
+  printing an `innerHTML="..."` attribute or dropping the value. They match `dangerouslySetInnerHTML={{ __html }}`
+  and a single `{text}` child; an element that also has children fails with KR8032. On a component both stay
+  ordinary props.
+- JSX held in a module constant's array (`STEPS = [{ facts: [<>a <b>b</b></>] }]`) and passed through a mapped
+  component prop (`<Step facts={s.facts}/>` into a component that maps it to `<li>{f}</li>`) renders instead of
+  failing with KR8352 "cannot evaluate `f`: JSX element kept as source".
+- With `trailingSlash: "never"`, the URLs in `llms.txt`, `llms-full.txt`, the docs feeds, `sitemap.xml` and the
+  canonical / `og:url` tags no longer end in `/` (the site root keeps it).
+- A component picked from a table at run time renders and ships its helper components. `const View =
+  views[kind]` with `<View/>` (and `const views = { a: A, b: B }`) lowers to a conditional over the
+  components the table holds, so each branch's body and the helpers it uses (a same-module `<Frame>`) reach the
+  page script instead of failing with "Frame is not defined" or KR8320. In list rows, `<item.view/>` and
+  `const View = item.view; <View/>` now render the row's component; the member tag was emitted as the string
+  `"item.view"` and the local was dropped.
+- `generateStaticParams` evaluates a page module that builds JSX when it loads (a module-level const holding
+  JSX, or a data module whose consts hold JSX) instead of failing with "React is not defined". The build-time
+  endpoint bundle for `pages/` API files uses the same JSX runtime.
+- A prerendered dynamic route with `generateStaticParams` no longer writes its `[param]` template page next to
+  the expanded pages (`dist/compare/[item]/index.html` with an empty title). Nothing serves it at request time,
+  so unknown params 404 like `dynamicParams = false`. SSR/ISR/streaming routes, routes with an explicit
+  `export const dynamicParams = true`, routes without `generateStaticParams` and dev builds keep it.
+- A named import of a missing export from a project module (`import { missingName } from "./data"`, or through a
+  tsconfig alias) is a build error, KR7128, with a did-you-mean hint, instead of an undefined binding that fails in
+  the browser. Type exports count, `export *` is followed, and modules the build cannot enumerate (CommonJS,
+  ambient declarations, `export *` from a package) are skipped.
+- Data with JSX in some fields no longer hides its other fields from the build. A module constant such as
+  `[{ id, name, icon: <svg/> }]` (imported from another module too) used to be skipped whole, so
+  `<title>{items.find(...).name}</title>` failed with KR8353 and `{item.name}` rendered empty until
+  hydration. The plain fields now fold, `{item.icon}` renders its markup where the component is static,
+  and a component with state passed such data (`<Picker rows={items} />`) renders its rows in the first
+  HTML while the client keeps the original expression.
+- Object identity holds while rendering lists at build time. `items.map((item) => <a class={item ===
+  current ? "on" : ""}>)` with `current = items.find(...)` used to compare a fresh copy of each element
+  and never matched, for a component with state and for the page root, for a `useState` array read twice,
+  for `find` inside the callback and for arrays passed to a child component. Elements substituted into a
+  row now evaluate to the original object.
+- A signal read through a plain local function now stays reactive. `const cur = () => list[n()]` and
+  `const cls = (i) => (n() === i ? "on" : "")` used as `{cur().label}` or `class={cls(i)}` used to
+  freeze at their build-time value; the compiler now looks through unshadowed local arrow and
+  function declarations (transitively) and keeps the binding. A local function that reads no signal
+  still folds into static HTML.
+- Reactive text inside another component's children now updates. In
+  `<Panel>{open() ? "Open" : "Closed"}</Panel>`, where `Panel` is a stateless component, only the
+  attributes in the children were bound; text and expression children now bind too, for every
+  copy of the children the component renders.
+- A component that gets its state from a project hook now hydrates. A function that creates state
+  (`createSignal`, `createMemo`, `createEffect`, `createResource`, ... in its body or in a hook it
+  calls), defined in the component's module or imported, makes the components that call it client
+  components: the hook and its helpers ship with them, the getters it returns are reactive (an object
+  `{ on, toggle }` or an array `[on, toggle]`, also through another hook), and the server HTML holds the
+  hook's initial values when the build can compute them. It used to be rendered at build time and failed
+  with KR8352 "unresolved identifier createSignal" (React source) or shipped dead bindings (Krate-native).
+  In a Krate-native module a hook's top-level `return` now hands back the getters it created instead of
+  their current values. See Core concepts > Reactivity.
+- `"use client"` on a page without server components now has a meaning: a component of such a module
+  (and the components it renders) is built as a client component, so what the build cannot evaluate
+  (`window.innerWidth`, `localStorage`) is bound when the page hydrates instead of failing the build with
+  KR8352. A component the build can fully render still ships no JavaScript. See Async Server Components.
+- CSS pruning no longer drops rules of an island that appear only after interaction. Every class of a CSS
+  module that a package island imports is kept (before, a panel opened by a click lost its base rules while
+  its `:hover` rule survived). Pruning is now per class: a class's base, pseudo-class and compound rules, also
+  inside `@media` and `@supports`, are kept or dropped together. Modules only build-time components use are
+  still pruned.
+- Docs plugin: generated docs pages can use the app's root layout. A new `rootLayout: true` option wraps
+  every generated page (tag and category pages too) in `pagesDir/_layout.*`, outside the theme's layout, so
+  the app's fonts, global CSS, `<html lang>` and `<body>` attributes and metadata apply, with one `<html>` and
+  one `<body>` in the output. Default stays `false`. See guides/customizing-docs.
+- Docs plugin: relative imports in a docs `.mdx` (or `.md`) file, in `import`, `export ... from` and
+  `import()`, resolve from the content file's own directory instead of `.krate/gen/docs/<route dir>`, so
+  `import Card from "../../components/card"` no longer works at one depth and fails at another. Aliases,
+  packages and URLs are left as written.
+- Docs plugin colour mode: new `defaultTheme` (`"light"`, `"dark"` or `"system"`, default `"system"`) is used
+  when no choice is stored, and `themeScript: false` turns the pre-paint script off for themes that manage
+  the mode themselves. The settings reach the theme as `props.colorMode`; `@krate/base-docs-theme`'s toggle,
+  layout and `ThemePrePaint` (new `defaultTheme` and `enabled` props, `site.defaultTheme`/`site.themePrePaint`)
+  follow them. A script marked `data-krate-once` is kept once per page, so the plugin's script and a root
+  layout's `ThemePrePaint` no longer both run. `HomeLayout`'s toggle now also uses `site.themeStorageKey`.
+- Build-time evaluation runs statements that build up a value in a component body, not only expressions:
+  a loop that groups pages with `find` and `push`, `switch` inside loops, `break`/`continue` (labelled too),
+  nested loops, `let` reassignment, `Map`/`Set` building, and `push`/`pop`/`shift`/`unshift`/`splice`/`sort`/
+  `reverse`/index assignment/`delete` on arrays and objects the component creates, including pushing
+  objects, arrays and JSX. Mutation follows JS aliasing (`let g = groups.find(...)` then `g.items.push(...)`
+  changes the element of `groups`). Before, such a value was left unknown, so a component with state
+  rendered it empty until hydration and one without state failed with `KR8352`. A module constant, or a
+  prop that came from one, is copied the first time a component changes it, so one page's change never
+  reaches another page's render. The limit is 100000 loop iterations per component (it was 1000 for
+  components with state), and a statement the build cannot run now says why in a `KR8356` warning (naming the
+  statement and the reason) instead of silently deferring to the browser. `sort()` and `reverse()` called as
+  statements in a component without state now change the array, as in JS, instead of returning an unused copy.
+- Build-time component folding and module-constant resolution are now deterministic across clean builds:
+  stateless components that compute chained locals via module-level helper functions fold in declaration
+  order with full builder hooks instead of random map iteration (eliminating intermittent `KR8352`
+  "unresolved identifier" errors across multi-page docs builds); mutually referencing module constants
+  evaluate in sorted key order without caching cycle-poisoned intermediate results; component locals
+  always shadow same-named module constants; entry-module constants win on cross-module collisions; and
+  cross-module context lowering and external-island scope bridging use copy-on-write AST cloning so
+  shared cached ASTs are never mutated across concurrent page builds.
+- `krate migrate nextjs` now translates `output: 'export'` to `output: "static"` in `krate.config.ts`
+  and migrates static GET-only route handlers (under `output: 'export'` or with
+  `export const dynamic = "force-static"`) directly to build-time static routes at their original URL
+  (`src/pages/**/route.*` for routes outside `app/api`, `src/api/**` under `app/api`) with no `/api/`
+  rewrite while keeping `generateStaticParams` and leaving request-time route handlers unchanged.
+- Metadata routes (`sitemap.ts`, `robots.ts`, `manifest.ts`, `opengraph-image.tsx`, `twitter-image.tsx`)
+  and `generateStaticParams` / prerendered endpoints now execute with `process.cwd()` set to the project
+  root instead of `src/pages/`, run after `BeforeBuild` and `prepareContent()` so `krate/content` and
+  generated pages are available, allow dynamic image routes to supply their own `generateStaticParams()`,
+  recognize root-level route-group convention files in plugin override checks, and diagnose per-request
+  metadata routes (`force-dynamic` / `revalidate`) under `output: "static"`.
+- Build-time evaluation now supports JavaScript regular expressions (literals and `new RegExp(...)`),
+  stored in locals, module constants, or objects and used with `exec`, `test`, `lastIndex`,
+  `String.prototype.match`, `matchAll`, `replace`, `replaceAll` (string and callback replacers),
+  `search`, and `split` (including match arrays with `index`, `input`, `groups`, and `indices`),
+  evaluated through a pooled embedded QuickJS VM so stateless components that tokenize or format
+  strings with regexes bake directly to static HTML with zero client JS.
+- Dynamic-route pages with `generateStaticParams` that destructure `{ params }` (or nested/renamed/plain
+  props forms) and index module-level data (`const { slug } = params; const [first] = DATA[slug]`,
+  `DATA[params.slug]`, `DATA[slug].title`, or nested object destructuring) now fold those locals at build
+  time and promote to static HTML with zero client JS instead of emitting empty hydration slots. When a
+  dynamic-route page genuinely needs client hydration and references its route params, the page scope now
+  binds `params` (concrete values for `generateStaticParams` pages, or `window.__KRATE_PARAMS__ || {}`
+  for dynamic templates) instead of throwing `ReferenceError: params is not defined`.
+- A stateless client component with a `useRef` local and a DOM ref or event handler no longer drops its
+  ref variable declaration during static-promotion checks (which threw `ReferenceError` at hydration
+  both when rendered directly and inside mapped lists). Signal-less wrapper components with destructured
+  props that wrap a hydrating child component now also keep their call-site props and folded locals when
+  building that child's slots, so mapped row props render statically instead of emitting empty `KR8011`
+  placeholders.
+- `openGraph` and `twitter` metadata without their own title now take the resolved top-level title
+  (after `title.template`), as Next.js does: a page `title: "Home page"` under a layout
+  `openGraph: { siteName }` gets `og:title` and `twitter:title` instead of none. `twitter` follows
+  `openGraph`'s title and description first. Static and SSR pages agree.
+- A component that hydrates on the client and renders a same-module component from a text, conditional or
+  list expression no longer throws `<Name> is not defined` in the browser. The component's declaration is
+  now emitted into the client chunk, including a recursive component that renders itself (for example a
+  tree that maps nested items to itself).
+- MDX: a component's closing tag on the line right after a paragraph (`<Note>`, text, `</Note>`) no
+  longer lands inside the paragraph and fails with "closing Note tag does not match opening p"; a
+  component tag alone on its line ends the paragraph, as in MDX. Inline tags (`see <Badge>x` with the
+  closing tag on the next line) are unchanged.
+- Docs: table-of-contents entries carry an `html` field (sanitized inline `code`, `em`, `strong`, `kbd`,
+  `sub`, `sup`, `s`) next to the plain `title`, and the default theme renders it, so inline code and
+  emphasis in a heading keep their formatting in the TOC.
+- Docs: a page named `template`, `loading`, `error`, `404`, `not-found`, `500`, `403`, `401`,
+  `forbidden`, `unauthorized` or starting with `_` (for example `cli/template.mdx`) no longer turns into
+  a route template or segment page that makes its sibling pages render as it; it is generated as
+  `<route>/index.tsx` and keeps its URL. The reserved names are shared with the build.
+- Docs: a folder section is titled from its index page (`sidebar.label`, else `title`) and positioned by
+  its `sidebar.order` / `order` among the sibling pages, as the contributing guide documents. Sites that set
+  neither keep the old title and alphabetical order.
+- Docs: prev/next links follow the sidebar order, including a `sidebar` array or `{ from: "file" }`
+  override; pages outside the sidebar get none. `currentPath` is the page path without `index`.
+- Docs: sidebar, prev/next, breadcrumb and language/version switcher URLs honour `trailingSlash: "never"`,
+  and the active-link match ignores a trailing-slash difference.
+- `krate migrate nextjs`: Next private folders (`app/x/_components`) are migrated as ordinary modules
+  under `src/migrated/app/`, with the imports of pages and layouts rewritten; files in them named
+  `page`, `layout` or `route` no longer become routes, and the "private segment" manual item is gone.
+- `krate migrate nextjs`: `next/font/google` now emits `@import` lines first, converts `Noto_Sans_Display`
+  to `Noto Sans Display` (CSS and URL), honours `variable`, `weight`, `style`, `display` and `fallback`, and
+  says plainly that the fonts load from fonts.googleapis.com at runtime.
+- `krate migrate nextjs`: a `start` script of `serve out` (or `npx serve ./out`) is rewritten to
+  `krate serve` and noted in the report.
+- A list key that is a DOM node or another object (`key={someJSX}`) no longer becomes
+  `[object HTMLSpanElement]` for every row. Object keys are matched by identity, so rows stay distinct and
+  keep their state across updates, and one console error says to use a string or number.
+- Tailwind now emits utilities written in project files outside `src/` (a top-level `components/`
+  folder imported through a `@/*` alias, for example): with no `content`/`scanDirs`, the modules the
+  build compiles are scanned too, in `krate dev` rebuilds as well. `@source` globs (`dir/**/*.tsx`)
+  also work in `@import "tailwindcss" source(...)`.
+- An island on the React compatibility path no longer throws `ReferenceError` for values used only in its
+  props: `<Chart data={loadRows()} />` now imports `loadRows` into the island chunk (it used to keep
+  only imports used as JSX tags). KR8302 now also covers `@/` and `~/` alias imports.
+- CSS modules imported through a tsconfig `paths` alias (`import s from "@/components/box.module.css"`)
+  now get their classes applied: the page no longer throws `ReferenceError: s is not defined` (KR8352 on
+  larger sites), and server bundles no longer fail with "cannot resolve CSS module". A client chunk
+  that imports a CSS module also no longer fails with esbuild's "without an output path configured"
+  message when it is rebuilt alone, so the chunk's real error surfaces.
 - Docs search with Pagefind: result titles and excerpts kept the page's HTML entities, so code in an
   excerpt read `&lt;Link href&gt;` instead of `<Link href>`.
 

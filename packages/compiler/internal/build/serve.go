@@ -1893,6 +1893,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 
 	// Segment pages: the nearest 404/500 page for a request (see segments.go).
 	segs := newSegmentIndex(absOut)
+	staticRoutes := newStaticRouteLoader(absOut, hub != nil)
 	if hasActions {
 		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandlerSegments(nodeAPIProxy, apiBodyLimit, segs)))))
 	}
@@ -1910,6 +1911,18 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 			}
 		}
 		extendAPIWriteDeadline(w, longestAPIBudget(budgets))
+
+		// Static API route outputs written at build time (dist/api/...).
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			if sr, ok := staticRoutes.get()[r.URL.Path]; ok {
+				if sr.ContentType != "" && w.Header().Get("Content-Type") == "" {
+					w.Header().Set("Content-Type", sr.ContentType)
+				}
+				target := filepath.Join(absOut, filepath.FromSlash(strings.TrimPrefix(sr.File, "/")))
+				http.ServeFile(w, r, target)
+				return
+			}
+		}
 
 		// Custom sidecar first (default /api prefix): owns the routes it
 		// responds to; a 404 falls through to the built-ins.
@@ -2089,6 +2102,18 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		// when one isn't already present).
 		if strings.HasSuffix(r.URL.Path, ".map") {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		}
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			if sr, ok := staticRoutes.get()[r.URL.Path]; ok {
+				if sr.ContentType != "" && w.Header().Get("Content-Type") == "" {
+					w.Header().Set("Content-Type", sr.ContentType)
+				}
+				if sr.File != "" && sr.File != sr.URL {
+					target := filepath.Join(absOut, filepath.FromSlash(strings.TrimPrefix(sr.File, "/")))
+					http.ServeFile(w, r, target)
+					return
+				}
+			}
 		}
 		// Hashed assets (styles.<hash>.css, index.<hash>.js, chunks/*.<hash>.js,
 		// assets/<name>-<hash>.*) are content-addressed, so they can be cached

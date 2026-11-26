@@ -3,10 +3,8 @@ package build
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -66,6 +64,9 @@ func injectStaticParams(tree *irtree.ComponentTree, params map[string]string) {
 		paramsObj.Set(k, jsvalue.String(params[k]))
 	}
 	bindings["params"] = paramsObj
+	for k, v := range irtree.PageParamBindings(root.Fn, params) {
+		bindings[k] = v
+	}
 	if len(bindings) > 0 {
 		if len(root.SSREvalBindings) > 0 {
 			for k, v := range root.SSREvalBindings {
@@ -118,14 +119,18 @@ func injectDynamicRoutePlaceholders(tree *irtree.ComponentTree, paramNames []str
 	if irtree.HasClientComponent(root.Children) {
 		return
 	}
+	sentinels := dynamicRouteSentinels(paramNames)
 	bindings := make(map[string]jsvalue.Value, len(paramNames)+1)
 	paramsObj := jsvalue.NewObject()
 	for _, name := range paramNames {
-		sentinel := jsvalue.String(dynamicParamSentinel(name))
+		sentinel := jsvalue.String(sentinels[name])
 		bindings[name] = sentinel
 		paramsObj.Set(name, sentinel)
 	}
 	bindings["params"] = paramsObj
+	for k, v := range irtree.PageParamBindings(root.Fn, sentinels) {
+		bindings[k] = v
+	}
 	for k, v := range root.SSREvalBindings {
 		if _, ok := bindings[k]; !ok {
 			bindings[k] = v
@@ -157,18 +162,26 @@ func extractParamNames(pagePath, pagesDir string) []string {
 	return params
 }
 
-var gspExportRe = regexp.MustCompile(`(?m)^\s*export\s+(?:async\s+)?function\s*\*?\s*generateStaticParams\b`)
+var gspExportRe = regexp.MustCompile(`(?m)^\s*export\s+(?:(?:async\s+)?function\s*\*?\s*|(?:const|let|var)\s+)generateStaticParams\b`)
 
-// hasGenerateStaticParams checks if the program exports a generateStaticParams function.
+// hasGenerateStaticParams checks if the program exports generateStaticParams as a function or a const/let/var binding.
 func hasGenerateStaticParams(prog *ast.Program) bool {
 	for _, stmt := range prog.Body {
 		exp, ok := stmt.(*ast.ExportStmt)
 		if !ok {
 			continue
 		}
-		fn, ok := exp.Declaration.(*ast.FnDecl)
-		if ok && fn.Name == "generateStaticParams" {
-			return true
+		switch d := exp.Declaration.(type) {
+		case *ast.FnDecl:
+			if d.Name == "generateStaticParams" {
+				return true
+			}
+		case *ast.VarStmt:
+			for _, decl := range d.Decls {
+				if decl.Name == "generateStaticParams" {
+					return true
+				}
+			}
 		}
 	}
 	return false
@@ -235,6 +248,8 @@ func (b *Builder) runGSPBundle(abs, target string, bnd *bundler.Bundler, virtual
 		ResolveImport: resolve,
 		VirtualFiles:  virtual,
 
+		// Module-level JSX in the page chain compiles without React in scope.
+		JSXImportSource: "@krate/runtime/server",
 		SourceTransform: b.serverGlobalsTransform,
 	})
 	if err != nil {
@@ -268,22 +283,19 @@ func (b *Builder) runGSPBundle(abs, target string, bnd *bundler.Bundler, virtual
 		return nil, fmt.Errorf("unsupported runtime %q for generateStaticParams (want node, bun, or deno)", runtime)
 	}
 	cmd := execx.Command(ctx, cmdName, args...)
-	cmd.Dir = filepath.Dir(abs)
+	if b.Root != "" {
+		cmd.Dir = b.Root
+	} else {
+		cmd.Dir = filepath.Dir(abs)
+	}
 	if len(b.Env) > 0 {
 		cmd.Env = append(os.Environ(), environ.KVList(b.Env)...)
 	}
-	out, err := cmd.Output()
+	run, err := runBuildScript(ctx, cmd, "execution timed out after 30s")
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, errors.New("execution timed out after 30s")
-		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("execution failed:\n%s", strings.TrimSpace(string(exitErr.Stderr)))
-		}
 		return nil, err
 	}
-	return out, nil
+	return run.Stdout, nil
 }
 
 // gspEmbedded evaluates the page's generateStaticParams on the embedded
@@ -313,6 +325,7 @@ Promise.resolve(fn()).then(function (r) { globalThis.%s = r; }, function () {});
 		ResolveImport: resolve,
 		VirtualFiles:  virtual,
 
+		JSXImportSource: "@krate/runtime/server",
 		SourceTransform: b.serverGlobalsTransform,
 		Worker:          b.jsWorker(),
 		WorkerLabel:     "static-params",
@@ -532,7 +545,17 @@ func (b *Builder) resolveStaticParamsPage(page string) staticParamsResolution {
 	res.expanded = pages
 
 	// The metadata of every entry resolves in one run (see metadataeval.go).
-	b.prefetchMetadata(page, paramSets, bnd)
+	// Async pages with generateMetadata resolve metadata through the staged SSR
+	// driver alongside their body, so skip the separate build-time eval for them.
+	skipMetaPrefetch := false
+	if prog, perr := parseSourceFile(page, data); perr == nil && entryIsAsync(prog) {
+		if _, hasFn := moduleMetadataExports(string(data)); hasFn {
+			skipMetaPrefetch = true
+		}
+	}
+	if !skipMetaPrefetch {
+		b.prefetchMetadata(page, paramSets, bnd)
+	}
 	return res
 }
 
@@ -727,7 +750,8 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
 		return nil, "", err
 	}
-	renderMode, revalidate, _ := b.resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules, b.importResolver().Resolve)
+	renderMode, revalidate, dataUsage := b.resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules, b.importResolver().Resolve)
+	pageCfg := parsePageConfig(entryModule.Program)
 
 	// Global streaming override: if configured, all *static* pages stream.
 	// Explicit ssr/isr opts win - forcing them to streaming would silently
@@ -735,6 +759,11 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if b.Cfg.SSR.Streaming && renderMode == RenderSSG {
 		renderMode = RenderStreaming
 		fmt.Fprintf(b.stderr(), "  %s*%s %s -> streaming (global override)\n", cCyan, cReset, filepath.Base(spp.PagePath))
+	}
+
+	staticMode := strings.EqualFold(b.Cfg.Output, "static")
+	if staticMode && renderMode != RenderSSG {
+		renderMode = RenderSSG
 	}
 
 	// Bind route params (e.g. slug) to their concrete values, then inline
@@ -751,7 +780,17 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	serverPage, serverErr := b.applyServerComponentMode(spp.PagePath, entryModule, ann, strings.EqualFold(b.Cfg.Output, "static"), layoutCut, &renderMode, &revalidate)
+	scPlan, serverErr := b.applyServerComponentMode(spp.PagePath, entryModule, ann, serverComponentOpts{
+		staticMode: staticMode,
+		isDynRoute: true,
+		hasGSP:     true,
+		staticOnly: !dynamicParamsAllowed(entryModule.Program, staticMode),
+		isExpanded: true,
+		cfg:        pageCfg,
+		dataUsage:  dataUsage,
+		cut:        layoutCut,
+	}, &renderMode, &revalidate)
+	serverPage := scPlan.serverPage
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}
@@ -1013,7 +1052,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 	b.registerWorkers(bundle.WorkerFiles, bundle.WorkerEsm)
 	b.registerDynamicChunks(bundle.DynImportFiles)
-	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML, dceJS...)
+	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, islandClasses(islandStyles), emitResult.HTML, dceJS...)
 	result := &PageResult{
 		Page:         spp.PagePath,
 		OutName:      spp.OutPath,
@@ -1039,6 +1078,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		GoBaked:      goBaked,
 
 		ServerPage:        serverPage,
+		Params:            spp.Params,
+		Prerender:         scPlan.prerender,
+		PrerenderRequired: scPlan.prerenderRequired,
+		PrerenderSeedISR:  scPlan.prerenderSeedISR,
 		ServerExports:     serverExportsOf(regions),
 		MetadataSegments:  metaSegs,
 		MetadataPageFiles: metaPageFiles,
@@ -1050,4 +1093,22 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		result.IslandStubs = newIslandServerStubs(entryModule.Program, tree.ExternalComponents, islandSSR)
 	}
 	return result, bundle.CSS, nil
+}
+
+// unservedDynamicRoute reports a closed-params dynamic route whose template was
+// dropped and that has no other page from the same file: without a detected
+// generateStaticParams nothing would serve any URL of it.
+func (b *Builder) unservedDynamicRoute(tmpl *PageResult, results []*PageResult) error {
+	for _, r := range results {
+		if r != nil && r.SourcePath == tmpl.SourcePath {
+			return nil
+		}
+	}
+	if v, ok := b.gspMemo.Load(tmpl.Page); ok && v.(*gspOnce).res.note {
+		return nil
+	}
+	route := routeFromOutName(tmpl.OutName)
+	return diag.New(tmpl.Page, 1, 1,
+		"dynamic route "+route+" has closed params but exports no generateStaticParams, so no page would be built and every URL would answer 404",
+		"export `generateStaticParams` (a function or a const) from the page, or remove `dynamicParams = false` (and `output: \"static\"`) so the route renders any param", "").WithCode(diag.CodeDynamicRouteUnserved)
 }

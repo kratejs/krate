@@ -1,8 +1,9 @@
+import "../styles/global.css";
+
 export default function SiteLayout({ children }: { children: any }) {
   return (
     <div class="site-shell">
       <Head>
-        <link rel="stylesheet" href="/global.css" />
         <link rel="icon" href="/favicon.svg" />
       </Head>
 
