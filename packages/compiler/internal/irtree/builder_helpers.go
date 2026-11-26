@@ -127,6 +127,7 @@ func declaredLocalNames(node *ComponentNode, fn *ast.FnDecl) map[string]bool {
 
 func extraVarName(ev string) string {
 	s := strings.TrimSpace(ev)
+	s = strings.TrimSpace(strings.TrimPrefix(s, PureVarBegin))
 	if !strings.HasPrefix(s, "var ") {
 		return ""
 	}

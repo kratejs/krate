@@ -651,6 +651,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A stateless client component with a `useRef` local and a DOM ref or event handler no longer drops its
+  ref variable declaration during static-promotion checks (which threw `ReferenceError` at hydration
+  both when rendered directly and inside mapped lists). Signal-less wrapper components with destructured
+  props that wrap a hydrating child component now also keep their call-site props and folded locals when
+  building that child's slots, so mapped row props render statically instead of emitting empty `KR8011`
+  placeholders.
 - `openGraph` and `twitter` metadata without their own title now take the resolved top-level title
   (after `title.template`), as Next.js does: a page `title: "Home page"` under a layout
   `openGraph: { siteName }` gets `og:title` and `twitter:title` instead of none. `twitter` follows

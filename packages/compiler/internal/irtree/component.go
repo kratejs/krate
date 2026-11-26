@@ -784,6 +784,7 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 	restoreUndeclaredHandlers(node, inlined)
 	b.checkUnbundledImports(node)
 	if needsNoClientJS(node, fn, b.localFuncProps) && !res.forceClient && !b.rendersLiveProps(node) && !node.Lazy {
+		node.ExtraVars, node.PreSignalVars = nil, nil
 		node.Tier = TierStatic
 	}
 }
@@ -911,8 +912,7 @@ func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl, funcProps map[string]b
 // onlyFoldedVars reports whether the component declares nothing the hydration
 // scope needs: no body vars, or only vars whose value was folded at build time
 // (they are baked into the HTML, so a hydration script would only repeat
-// them) in a component without a hydrating child, which may read them. It
-// drops the vars when it holds.
+// them) in a component without a hydrating child, which may read them.
 func onlyFoldedVars(node *ComponentNode, params map[string]bool) bool {
 	if len(node.ExtraVars) == 0 && len(node.PreSignalVars) == 0 {
 		return true
@@ -927,7 +927,6 @@ func onlyFoldedVars(node *ComponentNode, params map[string]bool) bool {
 			}
 		}
 	}
-	node.ExtraVars, node.PreSignalVars = nil, nil
 	return true
 }
 

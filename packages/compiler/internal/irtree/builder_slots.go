@@ -4748,10 +4748,30 @@ func (b *builder) bridgeScopeStmts(stmts []ast.Stmt, used map[string]bool) {
 // foldLocalConsts folds a component's local constants using the cva/cn-aware
 // attribute evaluator, returning name -> value and extending props with them.
 func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func() string) valueMap {
+	scope := make(valueMap, len(props)+len(b.moduleConsts)+len(b.routeHooks)+len(b.contextDefaults))
+	for k, v := range props {
+		scope[k] = v
+	}
+	for k, v := range b.moduleConsts {
+		if _, exists := scope[k]; !exists {
+			scope[k] = v
+		}
+	}
+	for k, v := range b.routeHooks {
+		if _, exists := scope[k]; !exists {
+			scope[k] = v
+		}
+	}
+	for k, v := range b.contextDefaults {
+		key := contextMarkerPrefix + k
+		if _, exists := scope[key]; !exists {
+			scope[key] = v
+		}
+	}
 	saved, savedKeys := b.localProps, b.propKeys
-	b.localProps, b.propKeys = props, keySet(props)
+	b.localProps, b.propKeys = scope, keySet(props)
 	defer func() { b.propKeys = savedKeys }()
-	fold := collectLocalVars(fn.Body, b.sigMap(), props, nextUseId)
+	fold := collectLocalVars(fn.Body, b.sigMap(), scope, nextUseId)
 	locals, inits := fold.locals, fold.inits
 	destructured := destructNames(fold.destructs)
 	for name, init := range inits {
@@ -4765,6 +4785,7 @@ func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func
 		if v := b.evalAttrConst(init); !v.ContainsUnknown() && !v.IsFunction() && !v.IsJSX() {
 			locals[name] = v
 			props[name] = v
+			scope[name] = v
 		}
 	}
 	b.localProps = saved
