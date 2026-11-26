@@ -448,11 +448,17 @@ func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs
 		}
 	}
 	for k, v := range b.moduleConsts {
+		if _, isLocal := localVars[k]; isLocal {
+			continue
+		}
 		if _, exists := b.localProps[k]; !exists {
 			b.localProps[k] = v
 		}
 	}
 	for k, v := range b.routeHooks {
+		if _, isLocal := localVars[k]; isLocal {
+			continue
+		}
 		if _, exists := b.localProps[k]; !exists {
 			b.localProps[k] = v
 		}

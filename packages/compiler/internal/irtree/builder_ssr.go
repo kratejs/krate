@@ -1005,8 +1005,8 @@ func (b *builder) buildPropBindings(paramNames []string, attrs map[string]ast.Ex
 	// Names inside a renamed or nested pattern come from destructuring the
 	// props, not from attributes of the same name.
 	propsObj := jsvalue.NewObject()
-	for name, expr := range attrs {
-		propsObj.Set(name, b.resolveBindingValue(expr, props))
+	for _, name := range sortedKeysExpr(attrs) {
+		propsObj.Set(name, b.resolveBindingValue(attrs[name], props))
 	}
 	for name, v := range b.nestedPatternValues(fn, propsObj) {
 		bindings[name] = v

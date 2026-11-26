@@ -308,8 +308,13 @@ func collectHandlerLocalFunctions(handlers []HandlerDecl, body []ast.Stmt) []*as
 		}
 	}
 
-	var result []*ast.FnDecl
+	names := make([]string, 0, len(referenced))
 	for name := range referenced {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	result := make([]*ast.FnDecl, 0, len(names))
+	for _, name := range names {
 		result = append(result, localFns[name])
 	}
 	return result
@@ -4333,9 +4338,10 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	el, hydrate = splitClientDirective(el)
 	b.checkIslandScopeProps(el, root)
 	// Replace page-scope signal reads with island props and collect their value
-	// expressions for the page hydration boot.
+	// expressions for the page hydration boot. Copy-on-write so shared cached
+	// ASTs are never mutated across concurrent page builds.
 	usedSignals := map[string]bool{}
-	b.bridgeIslandExpr(el, usedSignals)
+	el = b.bridgeIslandExpr(el, usedSignals)
 	subtree := astprint.PrintExpr(el)
 	if subtree == "" {
 		return nil, false
@@ -4379,7 +4385,13 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	// different runtime from the island's Preact tree. Imported local modules
 	// are bundled; inline functions need an explicit diagnostic, never a
 	// silently blank island.
-	for name, fn := range b.functions {
+	fnNames := make([]string, 0, len(b.functions))
+	for name := range b.functions {
+		fnNames = append(fnNames, name)
+	}
+	sort.Strings(fnNames)
+	for _, name := range fnNames {
+		fn := b.functions[name]
 		if fn == nil || name == root || !rendersTag(subtree, name) {
 			continue
 		}
@@ -4596,43 +4608,80 @@ func (b *builder) buildPortalSlot(el *ast.JSXElement, parentID string) []SlotNod
 // bridgeIslandExpr rewrites page-scope signal reads in an external island
 // subtree to island props, collecting the signal names used (their values are
 // evaluated in the page's hydration scope and handed to the island at mount).
-func (b *builder) bridgeIslandExpr(el *ast.JSXElement, used map[string]bool) {
+// Returns a cloned element so shared cached ASTs are never mutated.
+func (b *builder) bridgeIslandExpr(el *ast.JSXElement, used map[string]bool) *ast.JSXElement {
 	if el == nil {
-		return
+		return nil
 	}
+	cp := *el
 	if el.Opening != nil {
-		for _, attr := range el.Opening.Attributes {
-			if attr != nil && attr.Value != nil {
-				attr.Value = b.bridgeScopeExpr(attr.Value, used)
+		op := *el.Opening
+		if len(el.Opening.Attributes) > 0 {
+			op.Attributes = make([]*ast.JSXAttr, len(el.Opening.Attributes))
+			for i, attr := range el.Opening.Attributes {
+				if attr == nil {
+					continue
+				}
+				ac := *attr
+				if attr.Value != nil {
+					ac.Value = b.bridgeScopeExpr(attr.Value, used)
+				}
+				op.Attributes[i] = &ac
+			}
+		}
+		cp.Opening = &op
+	}
+	if len(el.Children) > 0 {
+		cp.Children = make([]ast.JSXChild, len(el.Children))
+		for i, child := range el.Children {
+			switch c := child.(type) {
+			case *ast.JSXExprContainer:
+				cc := *c
+				cc.Expression = b.bridgeScopeExpr(c.Expression, used)
+				cp.Children[i] = &cc
+			case *ast.JSXElementChild:
+				cc := *c
+				cc.Element = b.bridgeIslandExpr(c.Element, used)
+				cp.Children[i] = &cc
+			case *ast.JSXFragmentChild:
+				cc := *c
+				cc.Fragment = b.bridgeIslandFragment(c.Fragment, used)
+				cp.Children[i] = &cc
+			default:
+				cp.Children[i] = child
 			}
 		}
 	}
-	for _, child := range el.Children {
-		switch c := child.(type) {
-		case *ast.JSXExprContainer:
-			c.Expression = b.bridgeScopeExpr(c.Expression, used)
-		case *ast.JSXElementChild:
-			b.bridgeIslandExpr(c.Element, used)
-		case *ast.JSXFragmentChild:
-			b.bridgeIslandFragment(c.Fragment, used)
-		}
-	}
+	return &cp
 }
 
-func (b *builder) bridgeIslandFragment(frag *ast.JSXFragment, used map[string]bool) {
+func (b *builder) bridgeIslandFragment(frag *ast.JSXFragment, used map[string]bool) *ast.JSXFragment {
 	if frag == nil {
-		return
+		return nil
 	}
-	for _, child := range frag.Children {
-		switch c := child.(type) {
-		case *ast.JSXExprContainer:
-			c.Expression = b.bridgeScopeExpr(c.Expression, used)
-		case *ast.JSXElementChild:
-			b.bridgeIslandExpr(c.Element, used)
-		case *ast.JSXFragmentChild:
-			b.bridgeIslandFragment(c.Fragment, used)
+	cp := *frag
+	if len(frag.Children) > 0 {
+		cp.Children = make([]ast.JSXChild, len(frag.Children))
+		for i, child := range frag.Children {
+			switch c := child.(type) {
+			case *ast.JSXExprContainer:
+				cc := *c
+				cc.Expression = b.bridgeScopeExpr(c.Expression, used)
+				cp.Children[i] = &cc
+			case *ast.JSXElementChild:
+				cc := *c
+				cc.Element = b.bridgeIslandExpr(c.Element, used)
+				cp.Children[i] = &cc
+			case *ast.JSXFragmentChild:
+				cc := *c
+				cc.Fragment = b.bridgeIslandFragment(c.Fragment, used)
+				cp.Children[i] = &cc
+			default:
+				cp.Children[i] = child
+			}
 		}
 	}
+	return &cp
 }
 
 func (b *builder) bridgeScopeExpr(expr ast.Expr, used map[string]bool) ast.Expr {
@@ -4651,6 +4700,7 @@ func (b *builder) bridgeScopeExpr(expr ast.Expr, used map[string]bool) ast.Expr 
 				return lit
 			}
 		}
+		return expr
 	case *ast.CallExpr:
 		if id, ok := e.Callee.(*ast.Identifier); ok && len(e.Args) == 0 {
 			if sig := b.isSignalName(id.Name); sig {
@@ -4658,10 +4708,15 @@ func (b *builder) bridgeScopeExpr(expr ast.Expr, used map[string]bool) ast.Expr 
 				return &ast.MemberExpr{Object: &ast.Identifier{Name: "props"}, Property: &ast.Identifier{Name: id.Name}}
 			}
 		}
-		e.Callee = b.bridgeScopeExpr(e.Callee, used)
-		for i := range e.Args {
-			e.Args[i] = b.bridgeScopeExpr(e.Args[i], used)
+		cp := *e
+		cp.Callee = b.bridgeScopeExpr(e.Callee, used)
+		if len(e.Args) > 0 {
+			cp.Args = make([]ast.Expr, len(e.Args))
+			for i := range e.Args {
+				cp.Args[i] = b.bridgeScopeExpr(e.Args[i], used)
+			}
 		}
+		return &cp
 	case *ast.MemberExpr:
 		if id, ok := e.Object.(*ast.Identifier); ok && id.Name == "props" && !e.Computed {
 			if pid, ok := e.Property.(*ast.Identifier); ok && b.localFuncProps != nil && b.localFuncProps[pid.Name] {
@@ -4669,85 +4724,151 @@ func (b *builder) bridgeScopeExpr(expr ast.Expr, used map[string]bool) ast.Expr 
 				return &ast.MemberExpr{Object: &ast.Identifier{Name: "props"}, Property: &ast.Identifier{Name: pid.Name}}
 			}
 		}
-		e.Object = b.bridgeScopeExpr(e.Object, used)
+		cp := *e
+		cp.Object = b.bridgeScopeExpr(e.Object, used)
 		if e.Computed {
-			e.Property = b.bridgeScopeExpr(e.Property, used)
+			cp.Property = b.bridgeScopeExpr(e.Property, used)
 		}
+		return &cp
 	case *ast.BinaryExpr:
-		e.Left = b.bridgeScopeExpr(e.Left, used)
-		e.Right = b.bridgeScopeExpr(e.Right, used)
+		cp := *e
+		cp.Left = b.bridgeScopeExpr(e.Left, used)
+		cp.Right = b.bridgeScopeExpr(e.Right, used)
+		return &cp
 	case *ast.UnaryExpr:
-		e.Arg = b.bridgeScopeExpr(e.Arg, used)
+		cp := *e
+		cp.Arg = b.bridgeScopeExpr(e.Arg, used)
+		return &cp
 	case *ast.ConditionalExpr:
-		e.Test = b.bridgeScopeExpr(e.Test, used)
-		e.Consequent = b.bridgeScopeExpr(e.Consequent, used)
-		e.Alternate = b.bridgeScopeExpr(e.Alternate, used)
+		cp := *e
+		cp.Test = b.bridgeScopeExpr(e.Test, used)
+		cp.Consequent = b.bridgeScopeExpr(e.Consequent, used)
+		cp.Alternate = b.bridgeScopeExpr(e.Alternate, used)
+		return &cp
 	case *ast.ArrayExpr:
-		for i := range e.Elements {
-			e.Elements[i] = b.bridgeScopeExpr(e.Elements[i], used)
-		}
-	case *ast.ObjectExpr:
-		for _, p := range e.Properties {
-			if p != nil {
-				p.Value = b.bridgeScopeExpr(p.Value, used)
-				if p.Computed && p.KeyExpr != nil {
-					p.KeyExpr = b.bridgeScopeExpr(p.KeyExpr, used)
-				}
+		cp := *e
+		if len(e.Elements) > 0 {
+			cp.Elements = make([]ast.Expr, len(e.Elements))
+			for i := range e.Elements {
+				cp.Elements[i] = b.bridgeScopeExpr(e.Elements[i], used)
 			}
 		}
-	case *ast.TemplateExpr:
-		for i := range e.Parts {
-			e.Parts[i] = b.bridgeScopeExpr(e.Parts[i], used)
+		return &cp
+	case *ast.ObjectExpr:
+		cp := *e
+		if len(e.Properties) > 0 {
+			cp.Properties = make([]*ast.ObjectProp, len(e.Properties))
+			for i, p := range e.Properties {
+				if p == nil {
+					continue
+				}
+				pc := *p
+				pc.Value = b.bridgeScopeExpr(p.Value, used)
+				if p.Computed && p.KeyExpr != nil {
+					pc.KeyExpr = b.bridgeScopeExpr(p.KeyExpr, used)
+				}
+				cp.Properties[i] = &pc
+			}
 		}
+		return &cp
+	case *ast.TemplateExpr:
+		cp := *e
+		if len(e.Parts) > 0 {
+			cp.Parts = make([]ast.Expr, len(e.Parts))
+			for i := range e.Parts {
+				cp.Parts[i] = b.bridgeScopeExpr(e.Parts[i], used)
+			}
+		}
+		return &cp
+	case *ast.ParenExpr:
+		cp := *e
+		cp.Expr = b.bridgeScopeExpr(e.Expr, used)
+		return &cp
+	case *ast.TypeAssertion:
+		cp := *e
+		cp.Expr = b.bridgeScopeExpr(e.Expr, used)
+		return &cp
 	case *ast.ArrowFn:
-		b.bridgeScopeStmts(e.Body, used)
+		cp := *e
+		cp.Body = b.bridgeScopeStmts(e.Body, used)
+		return &cp
 	case *ast.JSXElement:
-		b.bridgeIslandExpr(e, used)
+		return b.bridgeIslandExpr(e, used)
 	case *ast.JSXFragment:
-		b.bridgeIslandFragment(e, used)
+		return b.bridgeIslandFragment(e, used)
 	}
 	return expr
 }
 
-func (b *builder) bridgeScopeStmts(stmts []ast.Stmt, used map[string]bool) {
-	for _, stmt := range stmts {
+func (b *builder) bridgeScopeStmts(stmts []ast.Stmt, used map[string]bool) []ast.Stmt {
+	if len(stmts) == 0 {
+		return stmts
+	}
+	out := make([]ast.Stmt, len(stmts))
+	for i, stmt := range stmts {
 		switch s := stmt.(type) {
 		case *ast.ReturnStmt:
-			s.Value = b.bridgeScopeExpr(s.Value, used)
+			cp := *s
+			cp.Value = b.bridgeScopeExpr(s.Value, used)
+			out[i] = &cp
 		case *ast.ExprStmt:
-			s.Expression = b.bridgeScopeExpr(s.Expression, used)
+			cp := *s
+			cp.Expression = b.bridgeScopeExpr(s.Expression, used)
+			out[i] = &cp
 		case *ast.VarStmt:
-			for _, d := range s.Decls {
-				if d != nil {
-					d.Init = b.bridgeScopeExpr(d.Init, used)
+			cp := *s
+			if len(s.Decls) > 0 {
+				cp.Decls = make([]*ast.VarDecl, len(s.Decls))
+				for j, d := range s.Decls {
+					if d == nil {
+						continue
+					}
+					dc := *d
+					dc.Init = b.bridgeScopeExpr(d.Init, used)
+					cp.Decls[j] = &dc
 				}
 			}
+			out[i] = &cp
 		case *ast.IfStmt:
-			s.Test = b.bridgeScopeExpr(s.Test, used)
-			b.bridgeScopeStmts(s.Consequent, used)
-			b.bridgeScopeStmts(s.Alternate, used)
+			cp := *s
+			cp.Test = b.bridgeScopeExpr(s.Test, used)
+			cp.Consequent = b.bridgeScopeStmts(s.Consequent, used)
+			cp.Alternate = b.bridgeScopeStmts(s.Alternate, used)
+			out[i] = &cp
 		case *ast.BlockStmt:
-			b.bridgeScopeStmts(s.Body, used)
+			cp := *s
+			cp.Body = b.bridgeScopeStmts(s.Body, used)
+			out[i] = &cp
 		case *ast.ForStmt:
+			cp := *s
 			if s.Init != nil {
-				b.bridgeScopeStmts([]ast.Stmt{s.Init}, used)
+				cp.Init = b.bridgeScopeStmts([]ast.Stmt{s.Init}, used)[0]
 			}
-			s.Test = b.bridgeScopeExpr(s.Test, used)
-			s.Update = b.bridgeScopeExpr(s.Update, used)
-			b.bridgeScopeStmts(s.Body, used)
+			cp.Test = b.bridgeScopeExpr(s.Test, used)
+			cp.Update = b.bridgeScopeExpr(s.Update, used)
+			cp.Body = b.bridgeScopeStmts(s.Body, used)
+			out[i] = &cp
 		case *ast.WhileStmt:
-			s.Test = b.bridgeScopeExpr(s.Test, used)
-			b.bridgeScopeStmts(s.Body, used)
+			cp := *s
+			cp.Test = b.bridgeScopeExpr(s.Test, used)
+			cp.Body = b.bridgeScopeStmts(s.Body, used)
+			out[i] = &cp
 		case *ast.DoWhileStmt:
-			b.bridgeScopeStmts(s.Body, used)
-			s.Test = b.bridgeScopeExpr(s.Test, used)
+			cp := *s
+			cp.Body = b.bridgeScopeStmts(s.Body, used)
+			cp.Test = b.bridgeScopeExpr(s.Test, used)
+			out[i] = &cp
+		default:
+			out[i] = stmt
 		}
 	}
+	return out
 }
 
 // foldLocalConsts folds a component's local constants using the cva/cn-aware
 // attribute evaluator, returning name -> value and extending props with them.
 func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func() string) valueMap {
+	origProps := keySet(props)
 	scope := make(valueMap, len(props)+len(b.moduleConsts)+len(b.routeHooks)+len(b.contextDefaults))
 	for k, v := range props {
 		scope[k] = v
@@ -4769,12 +4890,28 @@ func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func
 		}
 	}
 	saved, savedKeys := b.localProps, b.propKeys
-	b.localProps, b.propKeys = scope, keySet(props)
-	defer func() { b.propKeys = savedKeys }()
-	fold := collectLocalVars(fn.Body, b.sigMap(), scope, nextUseId)
+	b.localProps, b.propKeys = scope, origProps
+	defer func() {
+		b.localProps = saved
+		b.propKeys = savedKeys
+	}()
+	fold := collectLocalVarsWithBuilder(fn.Body, b.sigMap(), scope, nextUseId, b)
 	locals, inits := fold.locals, fold.inits
 	destructured := destructNames(fold.destructs)
-	for name, init := range inits {
+	// Walk locals in source declaration order so chained locals that depend
+	// on earlier locals evaluate deterministically.
+	for _, name := range fold.order {
+		if fold.leaked[name] {
+			if !origProps[name] {
+				delete(scope, name)
+			}
+		} else if v, ok := locals[name]; ok && !v.ContainsUnknown() && !v.IsFunction() && !v.IsJSX() {
+			scope[name] = v
+			if !origProps[name] {
+				props[name] = v
+			}
+		}
+		init := inits[name]
 		if init == nil || fold.changed[name] || destructured[name] {
 			continue
 		}
@@ -4784,11 +4921,13 @@ func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func
 		}
 		if v := b.evalAttrConst(init); !v.ContainsUnknown() && !v.IsFunction() && !v.IsJSX() {
 			locals[name] = v
-			props[name] = v
+			delete(fold.leaked, name)
 			scope[name] = v
+			if !origProps[name] {
+				props[name] = v
+			}
 		}
 	}
-	b.localProps = saved
 	return locals
 }
 

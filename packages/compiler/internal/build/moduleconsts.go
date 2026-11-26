@@ -12,24 +12,24 @@ import (
 )
 
 // mergeModuleConstants builds a module-constant map for the IR builder from the
-// entry page and its imported modules. Imported modules are visited first so the
-// entry module wins on name collisions, and every module's
+// entry page and its imported modules. Imported modules are visited first and
+// the entry module overwrites on name collisions, and every module's
 // `export { local as remote }` aliases are added (covering re-export barrels).
 func mergeModuleConstants(entry *ast.Program, extra []annotator.ModuleSource) (map[string]string, map[string]ast.Expr, *irtree.ModuleRun) {
 	consts := make(map[string]string)
 	inits := make(map[string]ast.Expr)
-	add := func(prog *ast.Program) {
+	add := func(prog *ast.Program, overwrite bool) {
 		if prog == nil {
 			return
 		}
 		c, in := irtree.CollectModuleConstants(prog)
 		for k, v := range c {
-			if _, ok := consts[k]; !ok {
+			if _, ok := consts[k]; overwrite || !ok {
 				consts[k] = v
 			}
 		}
 		for k, v := range in {
-			if _, ok := inits[k]; !ok {
+			if _, ok := inits[k]; overwrite || !ok {
 				inits[k] = v
 			}
 		}
@@ -42,11 +42,23 @@ func mergeModuleConstants(entry *ast.Program, extra []annotator.ModuleSource) (m
 				if n.Local == "" || n.Remote == "" {
 					continue
 				}
-				if v, ok := consts[n.Local]; ok {
-					consts[n.Remote] = v
+				if v, ok := c[n.Local]; ok {
+					if _, taken := consts[n.Remote]; overwrite || !taken {
+						consts[n.Remote] = v
+					}
+				} else if v, ok := consts[n.Local]; ok {
+					if _, taken := consts[n.Remote]; overwrite || !taken {
+						consts[n.Remote] = v
+					}
 				}
-				if e, ok := inits[n.Local]; ok {
-					inits[n.Remote] = e
+				if e, ok := in[n.Local]; ok {
+					if _, taken := inits[n.Remote]; overwrite || !taken {
+						inits[n.Remote] = e
+					}
+				} else if e, ok := inits[n.Local]; ok {
+					if _, taken := inits[n.Remote]; overwrite || !taken {
+						inits[n.Remote] = e
+					}
 				}
 			}
 		}
@@ -55,9 +67,9 @@ func mergeModuleConstants(entry *ast.Program, extra []annotator.ModuleSource) (m
 		if isExternalModulePath(m.Path) {
 			continue
 		}
-		add(m.Program)
+		add(m.Program, false)
 	}
-	add(entry)
+	add(entry, true)
 
 	// Top-level statements of the imported modules that change their bindings
 	// (the entry module's are run by the IR builder, which decides first).

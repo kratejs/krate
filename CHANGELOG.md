@@ -670,6 +670,14 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Build-time component folding and module-constant resolution are now deterministic across clean builds:
+  stateless components that compute chained locals via module-level helper functions fold in declaration
+  order with full builder hooks instead of random map iteration (eliminating intermittent `KR8352`
+  "unresolved identifier" errors across multi-page docs builds); mutually referencing module constants
+  evaluate in sorted key order without caching cycle-poisoned intermediate results; component locals
+  always shadow same-named module constants; entry-module constants win on cross-module collisions; and
+  cross-module context lowering and external-island scope bridging use copy-on-write AST cloning so
+  shared cached ASTs are never mutated across concurrent page builds.
 - `krate migrate nextjs` now translates `output: 'export'` to `output: "static"` in `krate.config.ts`
   and migrates static GET-only route handlers (under `output: 'export'` or with
   `export const dynamic = "force-static"`) directly to build-time static routes at their original URL

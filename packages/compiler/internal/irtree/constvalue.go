@@ -253,13 +253,16 @@ func valueJSLiteral(v jsvalue.Value) string {
 }
 
 // typedModuleConsts folds module-level constant initializers to typed values.
-// Initializers may reference each other (evaluated lazily, cycles yield
-// Unknown). Only fully-known, non-function values are kept; names that only
-// have a legacy string value (no initializer) are decoded from it.
+// Initializers may reference each other (evaluated lazily in sorted key order,
+// cycles yield Unknown without poisoning unrelated bindings). Only fully-known,
+// non-function values are kept; names that only have a legacy string value (no
+// initializer) are decoded from it.
 func typedModuleConsts(inits map[string]ast.Expr, legacy map[string]string, run *ModuleRun) valueMap {
 	out := make(valueMap, len(inits))
 	state := map[string]int{} // 1 = evaluating, 2 = done
+	depth := map[string]int{} // evaluation stack depth while state == 1
 	values := map[string]jsvalue.Value{}
+	retries := map[string]int{}
 	if run != nil {
 		// Top-level code ran: its final values replace the initializer folds,
 		// and a binding it left unknown stays unknown.
@@ -271,9 +274,17 @@ func typedModuleConsts(inits map[string]ast.Expr, legacy map[string]string, run 
 		}
 	}
 	in := jsvalue.New(jsvalue.Hooks{})
+	curDepth := 0
+	var ancestorHit []int // min ancestor depth hit by each active frame
 	resolve := func(name string) (jsvalue.Value, bool) {
 		switch state[name] {
 		case 1:
+			if d := depth[name]; len(ancestorHit) > 0 {
+				top := len(ancestorHit) - 1
+				if ancestorHit[top] == 0 || d < ancestorHit[top] {
+					ancestorHit[top] = d
+				}
+			}
 			return jsvalue.Dynamic("cyclic module constant " + name), true
 		case 2:
 			return values[name], true
@@ -285,14 +296,36 @@ func typedModuleConsts(inits map[string]ast.Expr, legacy map[string]string, run 
 			}
 			return jsvalue.Value{}, false
 		}
+		curDepth++
+		myDepth := curDepth
 		state[name] = 1
+		depth[name] = myDepth
+		ancestorHit = append(ancestorHit, 0)
 		v := in.EvalIn(jsvalue.NewScope(nil), init)
+		hit := ancestorHit[len(ancestorHit)-1]
+		ancestorHit = ancestorHit[:len(ancestorHit)-1]
+		if hit > 0 && hit < myDepth && len(ancestorHit) > 0 {
+			top := len(ancestorHit) - 1
+			if ancestorHit[top] == 0 || hit < ancestorHit[top] {
+				ancestorHit[top] = hit
+			}
+		}
+		delete(depth, name)
+		curDepth--
+		// If this frame only failed because it hit an outer binding still on
+		// the stack, leave it uncached once so it evaluates cleanly after the
+		// outer binding finishes.
+		if hit > 0 && hit < myDepth && v.ContainsUnknown() && retries[name] == 0 {
+			retries[name] = 1
+			state[name] = 0
+			return v, true
+		}
 		state[name] = 2
 		values[name] = v
 		return v, true
 	}
 	in.Hooks.Ident = resolve
-	for name := range inits {
+	for _, name := range sortedKeysExpr(inits) {
 		v, _ := resolve(name)
 		if v.ContainsUnknown() || v.IsFunction() || v.IsJSX() {
 			continue

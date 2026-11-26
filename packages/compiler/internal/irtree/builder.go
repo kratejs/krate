@@ -325,6 +325,9 @@ type componentCtx struct {
 	// site). localProps also holds locals and module constants, so a
 	// `props.X` read must not find an entry that is not one of these.
 	propKeys map[string]bool
+	// moduleSeeded tracks localProps keys populated from module constants or
+	// route hooks so component locals always shadow them.
+	moduleSeeded map[string]bool
 	// jsxProps holds the call-site props whose value is JSX (or holds it), so
 	// a `{props.X}` child can be rendered to markup for the server.
 	jsxProps         map[string]jsxProp

@@ -268,14 +268,22 @@ func (b *builder) installComponentProps(fn *ast.FnDecl, node *ComponentNode) {
 	}
 	// Module-level constants (const X = <literal>) resolve in JSX text such
 	// as {hexNum} instead of leaking the identifier name.
+	b.moduleSeeded = nil
+	seedModule := func(k string, v jsvalue.Value) {
+		if _, exists := b.localProps[k]; !exists {
+			b.localProps[k] = v
+			if b.moduleSeeded == nil {
+				b.moduleSeeded = make(map[string]bool)
+			}
+			b.moduleSeeded[k] = true
+		}
+	}
 	if len(b.moduleConsts) > 0 {
 		if b.localProps == nil {
 			b.localProps = make(valueMap)
 		}
 		for k, v := range b.moduleConsts {
-			if _, exists := b.localProps[k]; !exists {
-				b.localProps[k] = v
-			}
+			seedModule(k, v)
 		}
 	}
 	// Router hooks fold to the page's route.
@@ -284,9 +292,7 @@ func (b *builder) installComponentProps(fn *ast.FnDecl, node *ComponentNode) {
 			b.localProps = make(valueMap)
 		}
 		for k, v := range b.routeHooks {
-			if _, exists := b.localProps[k]; !exists {
-				b.localProps[k] = v
-			}
+			seedModule(k, v)
 		}
 	}
 	// `createContext(default)` bindings are seeded under a reserved key so
@@ -397,11 +403,12 @@ func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 			b.localProps[name] = fold.locals[name]
 		}
 	}
-	// Re-fold locals whose initializer needs the cva/cn table (e.g. shadcn's
-	// `const classes = cn(buttonVariants({ variant }), className)`), so JSX
-	// attributes reference the class value instead of the variable name.
+	// Re-fold locals in declaration order so a local that depends on an
+	// earlier local (for example `cn(buttonVariants(...), className)`) sees
+	// the earlier binding deterministically.
 	destructured := destructNames(fold.destructs)
-	for name, init := range fold.inits {
+	for _, name := range fold.order {
+		init := fold.inits[name]
 		if init == nil || fold.changed[name] || destructured[name] {
 			continue
 		}
@@ -413,10 +420,12 @@ func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 		}
 		if v := b.evalAttrConst(init); !v.ContainsUnknown() && !v.IsFunction() && !v.IsJSX() {
 			fold.locals[name] = v
+			delete(fold.leaked, name)
 			if b.localProps == nil {
 				b.localProps = make(valueMap)
 			}
 			b.localProps[name] = v
+			delete(b.moduleSeeded, name)
 		}
 	}
 	if len(fold.locals) > 0 {
@@ -468,19 +477,32 @@ func (b *builder) liveContextLocals(fold *localFold) {
 		}
 		fold.locals[name] = jsvalue.Dynamic("context " + ctx)
 		fold.leaked[name] = true
+		if !b.propKeys[name] {
+			delete(b.localProps, name)
+		}
 	}
 }
 
-// bindFoldedLocals adds folded locals to the local-prop scope. Leaked locals
-// have no known value and stay OUT of it, so guards referencing them fold as
-// unknown (a ConditionalSlot is emitted) instead of dropping a branch.
+// bindFoldedLocals adds folded locals to the local-prop scope. Component
+// locals shadow module constants and route hooks. Leaked locals have no known
+// value and stay OUT of localProps (removing any shadowed module constant), so
+// guards referencing them fold as unknown instead of reading an outer binding.
 func (b *builder) bindFoldedLocals(fold *localFold) {
-	for k, v := range fold.locals {
+	for _, k := range fold.order {
 		if fold.leaked[k] {
+			if b.moduleSeeded[k] {
+				delete(b.localProps, k)
+				delete(b.moduleSeeded, k)
+			}
 			continue
 		}
-		if _, exists := b.localProps[k]; !exists {
+		v, ok := fold.locals[k]
+		if !ok {
+			continue
+		}
+		if _, exists := b.localProps[k]; !exists || b.moduleSeeded[k] {
 			b.localProps[k] = v
+			delete(b.moduleSeeded, k)
 		}
 	}
 }

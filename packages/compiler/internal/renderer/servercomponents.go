@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -162,6 +163,7 @@ func (tc *TierClassifier) StaticComponentNames() []string {
 			names = append(names, name)
 		}
 	}
+	sort.Strings(names)
 	return names
 }
 
@@ -173,6 +175,7 @@ func (tc *TierClassifier) ServerComponentNames() []string {
 			names = append(names, name)
 		}
 	}
+	sort.Strings(names)
 	return names
 }
 
@@ -184,5 +187,6 @@ func (tc *TierClassifier) RuntimeComponentNames() []string {
 			names = append(names, name)
 		}
 	}
+	sort.Strings(names)
 	return names
 }

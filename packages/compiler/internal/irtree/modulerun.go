@@ -380,10 +380,20 @@ func moduleStatementReason(node any, name string) string {
 func lazyOuterFold(outer map[string]ast.Expr) func(string) (jsvalue.Value, bool) {
 	in := jsvalue.New(jsvalue.Hooks{})
 	state := map[string]int{}
+	depth := map[string]int{}
 	values := map[string]jsvalue.Value{}
+	retries := map[string]int{}
+	curDepth := 0
+	var ancestorHit []int
 	resolve := func(name string) (jsvalue.Value, bool) {
 		switch state[name] {
 		case 1:
+			if d := depth[name]; len(ancestorHit) > 0 {
+				top := len(ancestorHit) - 1
+				if ancestorHit[top] == 0 || d < ancestorHit[top] {
+					ancestorHit[top] = d
+				}
+			}
 			return jsvalue.Dynamic("cyclic module constant " + name), true
 		case 2:
 			return values[name], true
@@ -392,8 +402,27 @@ func lazyOuterFold(outer map[string]ast.Expr) func(string) (jsvalue.Value, bool)
 		if init == nil {
 			return jsvalue.Value{}, false
 		}
+		curDepth++
+		myDepth := curDepth
 		state[name] = 1
+		depth[name] = myDepth
+		ancestorHit = append(ancestorHit, 0)
 		v := in.EvalIn(jsvalue.NewScope(nil), init)
+		hit := ancestorHit[len(ancestorHit)-1]
+		ancestorHit = ancestorHit[:len(ancestorHit)-1]
+		if hit > 0 && hit < myDepth && len(ancestorHit) > 0 {
+			top := len(ancestorHit) - 1
+			if ancestorHit[top] == 0 || hit < ancestorHit[top] {
+				ancestorHit[top] = hit
+			}
+		}
+		delete(depth, name)
+		curDepth--
+		if hit > 0 && hit < myDepth && v.ContainsUnknown() && retries[name] == 0 {
+			retries[name] = 1
+			state[name] = 0
+			return v, true
+		}
 		state[name] = 2
 		values[name] = v
 		return v, true

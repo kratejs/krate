@@ -3,6 +3,7 @@ package annotator
 import (
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -50,7 +51,7 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 	classifyTiers(ann, cfg)
 
 	// 5. Detect signal declarations
-	for name := range ann.UsedComponents {
+	for _, name := range sortedBoolKeys(ann.UsedComponents) {
 		if fn, ok := ann.Functions[name]; ok {
 			collectSignalDecls(fn.Body, ann.Signals)
 		}
@@ -749,11 +750,20 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 	}
 	// Collect signal declarations for any newly discovered components so the
 	// annotation signal map is complete for imported modules too.
-	for name := range ann.UsedComponents {
+	for _, name := range sortedBoolKeys(ann.UsedComponents) {
 		if fn, ok := ann.Functions[name]; ok {
 			collectSignalDecls(fn.Body, ann.Signals)
 		}
 	}
+}
+
+func sortedBoolKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // MergeImportAliases makes imported components resolvable under their local
@@ -772,7 +782,13 @@ func MergeImportAliases(ann *irtree.Annotations, modules []ModuleSource, entry M
 	lowerContextUses(ann, modules)
 	collectCrossModuleHOCs(ann, modules)
 	aliases := BuildImportAliases(modules)
-	for local, declared := range aliases {
+	aliasLocals := make([]string, 0, len(aliases))
+	for local := range aliases {
+		aliasLocals = append(aliasLocals, local)
+	}
+	sort.Strings(aliasLocals)
+	for _, local := range aliasLocals {
+		declared := aliases[local]
 		if fn := ann.Functions[declared]; fn != nil {
 			if _, exists := ann.Functions[local]; !exists {
 				ann.Functions[local] = fn
@@ -791,7 +807,7 @@ func MergeImportAliases(ann *irtree.Annotations, modules []ModuleSource, entry M
 		ann.UsedComponents = map[string]bool{}
 		collectUsedFuncs(ann.Functions, ann.EntryPoint, ann.UsedComponents)
 	}
-	for name := range ann.UsedComponents {
+	for _, name := range sortedBoolKeys(ann.UsedComponents) {
 		if fn, ok := ann.Functions[name]; ok {
 			collectSignalDecls(fn.Body, ann.Signals)
 		}
