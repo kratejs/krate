@@ -1,11 +1,11 @@
 import { ThemePrePaint, ThemeToggle } from "@krate/base-docs-theme/shell";
+import "../styles/site.css";
 
 export default function SiteLayout({ children }: { children: any }) {
   return (
     <div class="site-shell">
       <ThemePrePaint />
       <Head>
-        <link rel="stylesheet" href="/site.css" />
         <link rel="icon" href="/favicon.svg" />
       </Head>
 

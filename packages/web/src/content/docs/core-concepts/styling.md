@@ -386,6 +386,18 @@ is shipped as written.
 
 ## Global CSS & code splitting
 
+Keep site-wide styles in a stylesheet under `src/` and import it from the root
+layout, as `create-krate-app` does:
+
+```tsx
+// src/pages/_layout.tsx
+import "../styles/global.css";
+```
+
+It then goes through the same pipeline as every other stylesheet (Tailwind,
+minification, content-hashed file names). A file in `public/` is served as
+written and skips all of that, so keep `public/` for static assets.
+
 Plain CSS imported or referenced in pages is collected per page, in source and
 import order, and **split by source**: the syntax-highlighting sheet, each
 layout, theme and component stylesheet, and the page's own CSS are written as

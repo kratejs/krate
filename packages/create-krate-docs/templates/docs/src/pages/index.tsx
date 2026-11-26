@@ -42,10 +42,10 @@ export default function Home() {
           </p>
         </Link>
         <Link class="feature-card" href="/docs/">
-          <h3>WASM search</h3>
+          <h3>Full-text search</h3>
           <p>
-            Full-text search powered by docfind, with the index embedded at
-            build time - zero server round-trips.
+            Full-text search powered by Pagefind, indexed at build time and
+            queried in the browser - no search server to run.
           </p>
         </Link>
       </section>

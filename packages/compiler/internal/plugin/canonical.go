@@ -29,6 +29,13 @@ func CanonicalRoutePath(route string) string {
 // CanonicalURL joins site origin, base path and route into an absolute,
 // percent-encoded URL (the route is not XML/HTML escaped).
 func CanonicalURL(origin, basePath, route string) string {
+	return CanonicalURLMode(origin, basePath, route, "")
+}
+
+// CanonicalURLMode is CanonicalURL for a site whose trailingSlash setting is
+// mode ("always", "never" or "ignore"). Only "never" drops the trailing slash
+// of a directory page; the site root keeps it.
+func CanonicalURLMode(origin, basePath, route, mode string) string {
 	origin = strings.TrimRight(origin, "/")
 	basePath = strings.TrimRight(strings.TrimSpace(basePath), "/")
 	if basePath != "" && !strings.HasPrefix(basePath, "/") {
@@ -38,6 +45,9 @@ func CanonicalURL(origin, basePath, route string) string {
 		basePath = ""
 	}
 	p := CanonicalRoutePath(route)
+	if mode == "never" && p != "/" {
+		p = strings.TrimRight(p, "/")
+	}
 	u := url.URL{Path: basePath + p}
 	return origin + u.EscapedPath()
 }

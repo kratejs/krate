@@ -28,6 +28,7 @@ public/              # static assets served at /
 src/
   pages/             # file-based routes: index.tsx -> /, 404.tsx, _layout.tsx shell
   components/        # reusable components + CSS modules
+  styles/            # global.css, imported by _layout.tsx
 ```
 
 - `src/pages/_layout.tsx` wraps every page in a shared shell (nav + footer).
@@ -45,7 +46,10 @@ src/
   no `useState`, `useEffect`, etc. `onClick={() => setCount(c => c + 1)}` works.
 - Use plain `class=` (not `className`).
 - CSS modules: import `styles from './X.module.css'` for component-scoped styles;
-  global styles live in `public/` (e.g. `global.css`).
+  global styles live in `src/styles/global.css`, imported by
+  `src/pages/_layout.tsx`, so they go through Krate's CSS pipeline (Tailwind,
+  minification, content-hashed file names). `public/` is for files served
+  as-is.
 
 ## Key runtime APIs
 

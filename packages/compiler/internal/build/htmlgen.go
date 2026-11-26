@@ -404,7 +404,7 @@ func generateSEOTags(headHTML, route string, seo config.SEOConfig, ctx ...seoCtx
 
 	// Canonical and og:url use the form the site is actually served at
 	// (trailing slash, base path), the same as the sitemap and hreflang links.
-	canonical := plugin.CanonicalURL(baseURL, sc.BasePath, route)
+	canonical := plugin.CanonicalURLMode(baseURL, sc.BasePath, route, sc.Slash)
 
 	var tags []string
 	if descTag != "" {
@@ -513,6 +513,7 @@ func fallbackHeadTags(headHTML string, seo config.SEOConfig) string {
 // seoCtx carries per-page context for generateSEOTags.
 type seoCtx struct {
 	BasePath  string
+	Slash     string // trailingSlash mode
 	ErrorPage bool
 }
 

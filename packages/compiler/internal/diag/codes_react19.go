@@ -7,6 +7,9 @@ const (
 	CodeHOCUnresolved Code = "KR8030"
 	// CodeReact19Prop: a prop of Activity or ViewTransition that is ignored.
 	CodeReact19Prop Code = "KR8031"
+	// CodeContentPropChildren: innerHTML or textContent on an element that
+	// also has children.
+	CodeContentPropChildren Code = "KR8032"
 )
 
 func init() {
@@ -30,6 +33,14 @@ func init() {
 				"(`onEnter`, `onExit`, `onUpdate`, `onShare`). `<SuspenseList>` renders its children and ignores " +
 				"`revealOrder` and `tail`. Other props have no effect and are reported once per " +
 				"element. This is a warning: the children always render.",
+		},
+		CodeInfo{
+			Code:  CodeContentPropChildren,
+			Title: "innerHTML or textContent used together with children",
+			Explanation: "`<div innerHTML={html} />` sets the element's content to the HTML string (it is not escaped, " +
+				"like `dangerouslySetInnerHTML={{ __html: html }}`), and `<p textContent={text} />` sets it to plain text. " +
+				"Either prop replaces the element's content, so an element that also has children is ambiguous and the " +
+				"build fails. Remove the children or the prop.",
 		},
 	)
 }

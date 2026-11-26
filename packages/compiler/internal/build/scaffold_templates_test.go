@@ -85,6 +85,15 @@ func TestScaffoldedTemplatesBuildAndTypecheck(t *testing.T) {
 			if !strings.Contains(string(home), tpl.display) {
 				t.Errorf("index.html does not carry the project name %q", tpl.display)
 			}
+			if tpl.name == "app" {
+				// Global CSS goes through the CSS pipeline, not public/.
+				if strings.Contains(string(home), "/global.css") {
+					t.Errorf("index.html links /global.css straight from public/")
+				}
+				if !strings.Contains(string(home), "rel=stylesheet") {
+					t.Errorf("index.html links no stylesheet")
+				}
+			}
 			if _, err := os.Stat(filepath.Join(cfg.OutDir, ".krate", "manifest.json")); err != nil {
 				t.Errorf("dist/.krate/manifest.json missing: %v", err)
 			}

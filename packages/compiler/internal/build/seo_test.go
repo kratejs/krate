@@ -25,3 +25,17 @@ func TestSEOCanonicalMatchesServedForm(t *testing.T) {
 		t.Errorf("root canonical:\n%s", root)
 	}
 }
+
+func TestSEOCanonicalHonoursTrailingSlashNever(t *testing.T) {
+	t.Parallel()
+	seo := config.SEOConfig{BaseURL: "https://example.com", SiteName: "Site"}
+	got := generateSEOTags("<title>Guide</title>", "/docs/guide", seo, seoCtx{BasePath: "/sub", Slash: "never"})
+	for _, want := range []string{
+		`rel="canonical" href="https://example.com/sub/docs/guide"`,
+		`og:url" content="https://example.com/sub/docs/guide"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}

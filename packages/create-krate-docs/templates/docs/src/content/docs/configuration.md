@@ -18,7 +18,7 @@ export default defineConfig({
       contentDir: "src/content/docs",
       title: "My Docs",
       theme: baseDocsTheme(),
-      search: { enabled: true, engine: "docfind" },
+      search: { enabled: true },
     }),
   ],
 });
@@ -50,17 +50,21 @@ Icons use the `lucide:` and `tabler:` icon sets.
 
 ## Search
 
-Search is on by default and builds a WASM index at build time.
+Search is on by default. A production build indexes the built HTML with
+[Pagefind](https://pagefind.app) (`npx pagefind`, which downloads its binary on
+first use); `krate dev` uses a lightweight built-in index instead.
 
 ```ts
 docs({
   search: {
     enabled: true,
-    engine: "docfind",
     maxResults: 8,
   },
 });
 ```
+
+Set `engine: "docfind"` or `engine: "json"` to use an index that is built
+in-process and needs no Node tooling at build time.
 
 ## Sitemap and site metadata
 

@@ -2516,7 +2516,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				}
 				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
 				if b.Cfg.SEO.BaseURL != "" || b.Cfg.SEO.Description != "" {
-					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO, seoCtx{BasePath: b.Cfg.BaseURLPath(), ErrorPage: r.IsErrorPage})
+					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO, seoCtx{BasePath: b.Cfg.BaseURLPath(), Slash: b.Cfg.TrailingSlashMode(), ErrorPage: r.IsErrorPage})
 					if seoTags != "" {
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}

@@ -118,7 +118,7 @@ func generateFeeds(ctx *BuildResultHookCtx) error {
 		if p.Draft {
 			continue
 		}
-		url := CanonicalURL(baseURL, cfg.BaseURLPath(), feedPagePath(cfg, prefix, p.Path))
+		url := CanonicalURLMode(baseURL, cfg.BaseURLPath(), feedPagePath(cfg, prefix, p.Path), cfg.TrailingSlashMode())
 		date := p.Date
 		if date == "" {
 			date = p.Updated
@@ -424,7 +424,7 @@ func docsJSONLDURL(cfg *config.Config, baseURL string, page docs.Page) string {
 	if u == "" {
 		u = docsPageURL("/docs", page.Path)
 	}
-	return CanonicalURL(baseURL, cfg.BaseURLPath(), u)
+	return CanonicalURLMode(baseURL, cfg.BaseURLPath(), u, cfg.TrailingSlashMode())
 }
 
 // feedPagePath maps a content file path (which includes locale and version

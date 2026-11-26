@@ -509,6 +509,7 @@ func (e *SSREval) renderChildExpr(expr ast.Expr) string {
 // renderValue renders an evaluated value in child position, reporting values
 // that cannot be rendered.
 func (e *SSREval) renderValue(expr ast.Expr, v jsvalue.Value) string {
+	v = e.renderJSXNodes(v)
 	html, err := jsvalue.RenderChild(v)
 	if err != nil {
 		if uerr, ok := err.(*jsvalue.UnknownChildError); ok {
@@ -525,6 +526,33 @@ func (e *SSREval) renderValue(expr ast.Expr, v jsvalue.Value) string {
 		}
 	}
 	return html
+}
+
+// renderJSXNodes replaces JSX kept as source (an element read out of a module
+// constant and passed in as a prop) by the markup it renders, so it prints like
+// the same JSX written in place. Arrays are rebuilt only when they hold one.
+func (e *SSREval) renderJSXNodes(v jsvalue.Value) jsvalue.Value {
+	if !v.ContainsJSXNode() || v.ContainsUnknown() {
+		return v
+	}
+	switch v.Kind() {
+	case jsvalue.KindJSX:
+		if src, ok := v.JSXSource(); ok {
+			return jsvalue.JSX(e.renderChildValue(src))
+		}
+	case jsvalue.KindArray:
+		elems := make([]jsvalue.Value, 0, len(v.Elems()))
+		for _, el := range v.Elems() {
+			elems = append(elems, e.renderJSXNodes(el))
+		}
+		return jsvalue.ArrayOf(elems)
+	}
+	return v
+}
+
+// renderChildValue renders JSX source written in the caller's scope.
+func (e *SSREval) renderChildValue(src ast.Expr) string {
+	return e.renderValue(src, e.callerValue(src))
 }
 
 // resolveIdent resolves identifiers not bound in the current scope chain:

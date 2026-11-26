@@ -543,6 +543,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `create-krate-app` keeps its global CSS in `src/styles/global.css`, imported by `src/pages/_layout.tsx`, so it
+  goes through Krate's CSS pipeline (Tailwind, minification, hashed names) instead of being served as-is from
+  `public/`. The scaffold's favicon is a neutral placeholder, and `krate.config.ts` in both templates sets
+  `viewTransitions: "auto"` with a comment on turning it off. `create-krate-docs` uses the default search engine
+  (Pagefind in production builds) instead of docfind. The styling and config reference pages describe the
+  global-stylesheet pattern and the View Transitions default.
 - `krate build` checks client boundary chunks in fewer esbuild calls. When a page needs the exact check of a
   chunk from a code-split batch (its stateful hooks, the files it reads, its CSS classes), the check now joins
   the build round like the other client chunk jobs and runs in one unsplit batch with the others, instead of one
@@ -670,6 +676,16 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `<div innerHTML={html} />` and `<p textContent={text} />` on an intrinsic element set the content in the static
+  page, in build-time rendering and in the browser (an `innerHTML` that reads state is re-applied), instead of
+  printing an `innerHTML="..."` attribute or dropping the value. They match `dangerouslySetInnerHTML={{ __html }}`
+  and a single `{text}` child; an element that also has children fails with KR8032. On a component both stay
+  ordinary props.
+- JSX held in a module constant's array (`STEPS = [{ facts: [<>a <b>b</b></>] }]`) and passed through a mapped
+  component prop (`<Step facts={s.facts}/>` into a component that maps it to `<li>{f}</li>`) renders instead of
+  failing with KR8352 "cannot evaluate `f`: JSX element kept as source".
+- With `trailingSlash: "never"`, the URLs in `llms.txt`, `llms-full.txt`, the docs feeds, `sitemap.xml` and the
+  canonical / `og:url` tags no longer end in `/` (the site root keeps it).
 - A component picked from a table at run time renders and ships its helper components. `const View =
   views[kind]` with `<View/>` (and `const views = { a: A, b: B }`) lowers to a conditional over the
   components the table holds, so each branch's body and the helpers it uses (a same-module `<Frame>`) reach the

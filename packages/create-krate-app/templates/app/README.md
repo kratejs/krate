@@ -36,6 +36,7 @@ Open [http://localhost:3000](http://localhost:3000) to see your app.
 +-- src/
     +-- pages/           # File-based routes (pages/layouts/404)
     +-- components/      # Reusable components
+    +-- styles/          # Global CSS (imported by pages/_layout.tsx)
 ```
 
 - `src/pages/index.tsx` maps to `/`

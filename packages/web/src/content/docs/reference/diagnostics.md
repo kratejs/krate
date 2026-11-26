@@ -1102,6 +1102,12 @@ Preact islands and real-React islands (those that use a library built on react-r
 
 `<Activity>` supports `mode="visible"` and `mode="hidden"`. `<ViewTransition>` supports `name`, `default`, `enter`, `exit`, `update` and `share` as strings, and ignores the event callbacks (`onEnter`, `onExit`, `onUpdate`, `onShare`). `<SuspenseList>` renders its children and ignores `revealOrder` and `tail`. Other props have no effect and are reported once per element. This is a warning: the children always render.
 
+### KR8032
+
+**innerHTML or textContent used together with children**
+
+`<div innerHTML={html} />` sets the element's content to the HTML string (it is not escaped, like `dangerouslySetInnerHTML={{ __html: html }}`), and `<p textContent={text} />` sets it to plain text. Either prop replaces the element's content, so an element that also has children is ambiguous and the build fails. Remove the children or the prop.
+
 ### KR8301
 
 **Render value keeps its first value**

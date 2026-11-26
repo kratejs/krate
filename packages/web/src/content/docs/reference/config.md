@@ -620,6 +620,11 @@ reports Save-Data or a 2g connection.
 viewTransitions: "auto", // "auto" (default) | "off" | true | false
 ```
 
+View Transitions are **on by default**: a site that sets nothing gets the
+behaviour below. Set `viewTransitions: "off"` (or `false`) to turn them off;
+`"auto"` (or `true`) is the default, and the project templates spell it out so
+the choice is visible in `krate.config.ts`.
+
 When enabled, the SPA router wraps each navigation to another page in the
 native View Transitions API (`document.startViewTransition`), and every page
 emits the cross-document `@view-transition { navigation: auto }` rule so

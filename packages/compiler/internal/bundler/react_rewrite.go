@@ -357,6 +357,9 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	}
 	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src, susp: newSuspenseState()}
 	ctx.fnNames = functionNames(prog.Body)
+	if !inNodeModules(file) {
+		ctx.lowerInnerHTMLProps(prog)
+	}
 	ctx.refDiagnostics(prog)
 	var toRemove []int
 	legacy := legacyImports(prog)
