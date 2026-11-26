@@ -24,7 +24,9 @@ var (
 // calls.
 func migrateNextFonts(rep *Report, root string) {
 	lf := newLocalFonts(root, rep)
+	gf := newGoogleFonts()
 	fonts := map[string]bool{}
+	helperUse := map[string]string{} // export names still needing the runtime helper
 	n := len(rep.Files)
 	for i := 0; i < n; i++ {
 		f := &rep.Files[i]
@@ -32,15 +34,36 @@ func migrateNextFonts(rep *Report, root string) {
 			continue
 		}
 		src := string(f.Content)
+		bindings := map[string]string{}
 		for _, m := range fontGoogleImport.FindAllStringSubmatch(src, -1) {
 			for _, item := range strings.Split(m[1], ",") {
-				name := strings.TrimSpace(item)
+				name, local := strings.TrimSpace(item), ""
 				if i := strings.Index(name, " as "); i >= 0 {
+					local = strings.TrimSpace(name[i+4:])
 					name = strings.TrimSpace(name[:i])
 				}
 				if name != "" {
 					fonts[name] = true
+					if local == "" {
+						local = name
+					}
+					bindings[local] = name
 				}
+			}
+		}
+		if len(bindings) > 0 && f.Source != "" {
+			out, left := gf.rewriteCalls(rep, f.Source, src, bindings)
+			for _, exp := range left {
+				helperUse[exp] = exp
+			}
+			if out != src {
+				src = out
+				f.Content = []byte(out)
+				f.Rewrites = append(f.Rewrites, "migrated next/font/google calls to generated CSS")
+			}
+		} else {
+			for _, exp := range bindings {
+				helperUse[exp] = exp
 			}
 		}
 		if out, changed := lf.rewrite(f, src); changed {
@@ -54,24 +77,31 @@ func migrateNextFonts(rep *Report, root string) {
 		return
 	}
 
+	for exp := range helperUse {
+		gf.add(googleFontSpec{family: googleFamilyName(exp), variable: "--font-" + fontSlug(exp)})
+	}
 	var css strings.Builder
 	names := make([]string, 0, len(fonts))
 	for name := range fonts {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	if len(names) > 0 {
-		css.WriteString("/* Google fonts loaded by the migration helper. */\n")
+	sort.Slice(gf.order, func(i, j int) bool { return gf.order[i].id < gf.order[j].id })
+	imports := map[string]bool{}
+	for _, o := range gf.order {
+		if !imports[o.url] {
+			imports[o.url] = true
+			fmt.Fprintf(&css, "@import url(%q);\n", o.url)
+		}
 	}
-	for _, name := range names {
-		slug := fontSlug(name)
-		fmt.Fprintf(&css, `@import url("https://fonts.googleapis.com/css2?family=%s&display=swap");
-.krate-font-%s { font-family: "%s", ui-sans-serif, system-ui, sans-serif; }
-.krate-font-%s-variable { --font-%s: "%s"; }
-`, name, slug, name, slug, slug, name)
+	if len(gf.order) > 0 {
+		css.WriteString("\n/* Google fonts loaded by the migration helper. */\n")
+	}
+	for _, o := range gf.order {
+		css.WriteString(o.css())
 	}
 	if lf.used() {
-		if len(names) > 0 {
+		if len(gf.order) > 0 {
 			css.WriteString("\n")
 		}
 		css.WriteString("/* Local and geist fonts, self-hosted from public/" + publicFontDir + ". */\n")
@@ -89,7 +119,7 @@ func migrateNextFonts(rep *Report, root string) {
 	helper.WriteString("  });\n")
 	helper.WriteString("}\n\n")
 	for _, name := range names {
-		fmt.Fprintf(&helper, "export const %s = __krateFont(%q);\n", name, name)
+		fmt.Fprintf(&helper, "export const %s = __krateFont(%q);\n", name, googleFamilyName(name))
 	}
 
 	if len(names) > 0 {
@@ -115,7 +145,7 @@ func migrateNextFonts(rep *Report, root string) {
 	rep.Files = append(rep.Files, PlannedFile{Kind: KindAsset, Target: nextFontCSS, Content: []byte(css.String()), Rewrites: []string{"generated font CSS"}})
 	if len(names) > 0 {
 		rep.Files = append(rep.Files, PlannedFile{Kind: KindAsset, Target: nextFontHelper, Content: []byte(helper.String()), Rewrites: []string{"generated next/font helper"}})
-		rep.Warnings = append(rep.Warnings, "next/font/google uses the Google Fonts CSS endpoint; self-host the font files if the site must not call Google")
+		rep.Warnings = append(rep.Warnings, "next/font/google fonts load from fonts.googleapis.com at runtime (the migrator does not download font files, unlike next/font which self-hosts them); to self-host, download the font files, declare them with @font-face in src/migrated/next-fonts.css (or migrate to next/font/local) and remove the @import lines")
 	}
 }
 

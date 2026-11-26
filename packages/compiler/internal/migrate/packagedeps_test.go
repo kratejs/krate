@@ -288,3 +288,35 @@ func TestPackageJSONKeepsItsLayout(t *testing.T) {
 		t.Errorf("nested value lost:\n%s", got)
 	}
 }
+
+func TestStartScriptServingStaticExportBecomesKrateServe(t *testing.T) {
+	cases := map[string]string{
+		"serve out":              "krate serve",
+		"npx serve out":          "krate serve",
+		"npx -y serve ./out/":    "krate serve",
+		"serve -s out -l 4000":   "krate serve --port 4000",
+		"pnpm dlx serve out":     "krate serve",
+		"serve public":           "serve public",
+		"serve out --cors":       "serve out --cors",
+		"serve out && echo done": "serve out && echo done",
+		"python3 -m http.server": "python3 -m http.server",
+	}
+	for old, want := range cases {
+		rep := scanConfig(t, map[string]string{
+			"next.config.js": `module.exports = { output: 'export' };`,
+			"package.json":   `{"scripts":{"build":"next build","start":"` + old + `","preview":"serve out"},"dependencies":{"next":"16.0.0"}}`,
+		})
+		scripts := pkgJSON(t, rep)["scripts"].(map[string]any)
+		if scripts["start"] != want {
+			t.Errorf("start %q -> %v, want %q", old, scripts["start"], want)
+		}
+		if scripts["preview"] != "serve out" {
+			t.Errorf("unrelated script rewritten: %v", scripts["preview"])
+		}
+		if want == "krate serve" || want == "krate serve --port 4000" {
+			if !hasInfo(rep, "scripts.start served the static export") {
+				t.Errorf("%q: no report note: %v", old, rep.Info)
+			}
+		}
+	}
+}

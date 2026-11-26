@@ -68,7 +68,10 @@ and `--update-package` is still accepted). The plan lists each change:
   `node dist/.krate/server/.../server.mjs` for `output: 'standalone'`). Other
   scripts keep their text with `next <command>` rewritten the same way:
   `next typegen` becomes `krate types`, and a `next lint` or other command Krate has no
-  equivalent for stays, with an info line, and keeps `next` installed.
+  equivalent for stays, with an info line, and keeps `next` installed. A `start`
+  script that only serves the static export (`serve out`, `npx serve ./out`,
+  optionally with `-s` and `-l <port>`) becomes `krate serve`, with an info line
+  in the report; other `serve` scripts are left alone.
 - Every `@krate/*` package the migrated code imports is added (`@krate/core`,
   `@krate/runtime`, `@krate/components`, and `@krate/auth`, `@krate/three` or
   `@krate/konva` when the code now uses them), plus `preact`. A release of the
@@ -95,7 +98,10 @@ The first pass:
   `(.)x` segments in place (the Krate file router understands them);
 - copies Pages Router `_app` and wraps it as the root `_layout.tsx` shell;
 - copies app-local relative imports under `src/migrated/` and rewrites the
-  migrated route imports to point at them;
+  migrated route imports to point at them. Private folders (`app/x/_components`,
+  any directory whose name starts with `_`) are ordinary modules: every file in
+  them moves to `src/migrated/app/` and none becomes a route, even one named
+  `page.tsx`, `layout.tsx` or `route.ts`;
 - follows imports from the migrated files to project modules outside `app/`
   (relative imports and tsconfig `paths` / `baseUrl` aliases such as `@/*`,
   including `extends`) and applies the same Next import rewrites to them
@@ -313,7 +319,18 @@ The first pass:
   left is manual work: `request.cookies.set/delete`, `request.ip`,
   `request.geo`, `NextResponse.rewrite/next` in route handlers, and other `next/server` helpers
   such as `userAgent`;
-- maps `next/font/google` to a generated helper and Google Fonts CSS, and
+- maps `next/font/google` to Google Fonts CSS in `src/migrated/next-fonts.css`:
+  each call with literal options (`weight`, `style`, `display`, `variable`,
+  `fallback`) is replaced by an inline `{ className, variable, style }` object.
+  The identifier becomes the family name (`Noto_Sans_Display` is `Noto Sans Display`),
+  the weights and styles go into the css2 URL, and `variable: "--font-x"` defines
+  exactly `--font-x` on the returned `variable` class. All `@import` lines come
+  first in the file. `subsets`, `axes` and `preload` are not expressed. The fonts
+  are not downloaded: unlike `next/font`, which self-hosts, they load from
+  `fonts.googleapis.com` at runtime, and the report says so. To self-host, download
+  the font files and declare them with `@font-face` (or use `next/font/local`).
+  A call with computed options keeps the generated helper and is reported as
+  manual work. It also maps
   `next/font/local` plus `geist/font/sans` and `geist/font/mono` to self-hosted
   `@font-face` CSS: each `localFont({ src, weight, style, variable, display,
   declarations, fallback })` call (a single `src` or an array of `{ path, weight,

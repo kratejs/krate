@@ -217,7 +217,7 @@ func planStaticIcon(root, prefix, rel string, rep *Report) bool {
 		return false
 	}
 	dir := filepath.ToSlash(filepath.Dir(rel))
-	urlRoute, _, _ := appRoute(dir)
+	urlRoute, _ := appRoute(dir)
 	source := prefix + "/" + rel
 	target := name
 	if urlRoute != "." && urlRoute != "" {

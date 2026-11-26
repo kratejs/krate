@@ -655,6 +655,15 @@ host code runs in the native process. Names and options may change between relea
   (after `title.template`), as Next.js does: a page `title: "Home page"` under a layout
   `openGraph: { siteName }` gets `og:title` and `twitter:title` instead of none. `twitter` follows
   `openGraph`'s title and description first. Static and SSR pages agree.
+- `krate migrate nextjs`: Next private folders (`app/x/_components`) are migrated as ordinary modules
+  under `src/migrated/app/`, with the imports of pages and layouts rewritten; files in them named
+  `page`, `layout` or `route` no longer become routes, and the "private segment" manual item is gone.
+- `krate migrate nextjs`: `next/font/google` now emits `@import` lines first, converts `Noto_Sans_Display`
+  to `Noto Sans Display` (CSS and URL), honours `variable`, `weight`, `style`, `display` and `fallback`, and
+  says plainly that the fonts load from fonts.googleapis.com at runtime.
+- `krate migrate nextjs`: a `start` script of `serve out` (or `npx serve ./out`) is rewritten to
+  `krate serve` and noted in the report.
+
 - A list key that is a DOM node or another object (`key={someJSX}`) no longer becomes
   `[object HTMLSpanElement]` for every row. Object keys are matched by identity, so rows stay distinct and
   keep their state across updates, and one console error says to use a string or number.

@@ -445,7 +445,10 @@ func scopedAppDirs(appDir string) map[string]bool {
 		if !isSourceExt(ext) || !scopedBases[strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))] {
 			return nil
 		}
-		_, fsRoute, _ := appRoute(filepath.ToSlash(filepath.Dir(rel)))
+		if isPrivateAppPath(rel) {
+			return nil
+		}
+		_, fsRoute := appRoute(filepath.ToSlash(filepath.Dir(rel)))
 		out[fsRoute] = true
 		return nil
 	})
@@ -471,6 +474,15 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 		rel = filepath.ToSlash(rel)
 		base := strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))
 		ext := strings.ToLower(filepath.Ext(rel))
+		if isPrivateAppPath(rel) {
+			// A private folder holds ordinary modules: they move with the app
+			// and never become routes, whatever their file names are.
+			if isAssetExt(ext) {
+				target := "src/migrated/" + strings.TrimPrefix(prefix, "src/") + "/" + rel
+				rep.Files = append(rep.Files, planned(root, prefix+"/"+rel, target, KindAsset, ext, rep))
+			}
+			return nil
+		}
 		if planStaticIcon(root, prefix, rel, rep) || planStaticMetadata(root, appDir, prefix, rel, rep) {
 			return nil
 		}
@@ -478,11 +490,8 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 			return nil
 		}
 		dir := filepath.ToSlash(filepath.Dir(rel))
-		route, fsRoute, manual := appRoute(dir)
+		route, fsRoute := appRoute(dir)
 		source := prefix + "/" + rel
-		for _, m := range manual {
-			rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: m, Hint: "flatten or rename the segment before migrating"})
-		}
 		if route == "" {
 			route = "."
 		}
@@ -800,17 +809,15 @@ func segmentConfigNotes(src string, kind FileKind) (notes, manual []string) {
 // src/pages. Krate's file router understands route groups, "@slot"
 // directories and intercepting "(.)x" segments natively, so the file path
 // keeps them.
-func appRoute(dir string) (urlRoute, fsRoute string, manual []string) {
+func appRoute(dir string) (urlRoute, fsRoute string) {
 	if dir == "." || dir == "" {
-		return ".", ".", nil
+		return ".", "."
 	}
 	var url, fs []string
 	for _, p := range strings.Split(filepath.ToSlash(dir), "/") {
 		switch {
 		case p == "" || p == ".":
 			continue
-		case strings.HasPrefix(p, "_"):
-			manual = append(manual, "private segment "+p+" is not a route")
 		case strings.HasPrefix(p, "@"):
 			fs = append(fs, p)
 		case isInterceptingSegment(p):
@@ -826,7 +833,19 @@ func appRoute(dir string) (urlRoute, fsRoute string, manual []string) {
 	if fsRoute == "" {
 		fsRoute = "."
 	}
-	return urlRoute, fsRoute, manual
+	return urlRoute, fsRoute
+}
+
+// isPrivateAppPath reports whether a path relative to the app directory sits
+// under a private folder (a directory whose name starts with "_").
+func isPrivateAppPath(rel string) bool {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	for _, p := range parts[:len(parts)-1] {
+		if strings.HasPrefix(p, "_") {
+			return true
+		}
+	}
+	return false
 }
 
 // isInterceptingSegment reports whether a directory name starts with one of
@@ -1345,7 +1364,7 @@ func planStaticMetadata(root, appDir, prefix, rel string, rep *Report) bool {
 	ext := strings.ToLower(filepath.Ext(name))
 	stem := strings.TrimSuffix(name, filepath.Ext(name))
 	dir := filepath.ToSlash(filepath.Dir(rel))
-	_, fsRoute, _ := appRoute(dir)
+	_, fsRoute := appRoute(dir)
 	source := prefix + "/" + rel
 	var target string
 	switch {
