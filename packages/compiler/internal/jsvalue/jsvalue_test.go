@@ -2,6 +2,8 @@ package jsvalue
 
 import (
 	"testing"
+
+	"github.com/kratejs/krate/packages/compiler/ast"
 )
 
 // evalSrc evaluates a JS expression with a few bindings in scope.
@@ -162,5 +164,31 @@ func TestInterpExpressions(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%s = %s, want %s", c.src, got, c.want)
 		}
+	}
+}
+
+func TestToASTRefKeepsIdentity(t *testing.T) {
+	item := NewObject()
+	item.Set("id", Number(1))
+	list := ArrayOf([]Value{item})
+
+	same := func(in *Interp, expr ast.Expr, want Value) bool {
+		return StrictEquals(in.Eval(expr), want)
+	}
+	in := &Interp{}
+	if same(in, ToAST(list), list) {
+		t.Fatal("ToAST literal must evaluate to a fresh array")
+	}
+	ref := ToASTRef(list)
+	if !same(in, ref, list) {
+		t.Fatal("ToASTRef array literal must evaluate to the value it was made from")
+	}
+	el := ref.(*ast.ArrayExpr).Elements[0]
+	if !same(in, el, item) {
+		t.Fatal("element literal must evaluate to the original element")
+	}
+	// An interpreter that changes values in place never hands out the shared value.
+	if same(&Interp{InPlace: true}, ref, list) {
+		t.Fatal("in-place interpreter must build a fresh value")
 	}
 }

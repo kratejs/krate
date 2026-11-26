@@ -280,3 +280,30 @@ export function Wrapper(props) {
 	}
 	wg.Wait()
 }
+
+func TestTypedModuleConstsKeepFieldsAroundJSX(t *testing.T) {
+	t.Parallel()
+	prog := parseDeterminismProg(t, `
+export const items = [
+  { id: "a", name: "Alpha", icon: <svg viewBox="0 0 1 1" /> },
+  { id: "b", name: "Beta", icon: <svg viewBox="0 0 1 1" /> },
+];
+export const lone = <b>x</b>;
+`)
+	got := typedModuleConsts(collectModuleConstInits(prog), nil, nil)
+	items, ok := got["items"]
+	if !ok || !items.IsArray() || len(items.Elems()) != 2 {
+		t.Fatalf("items = (%v, %v), want a two element array", items, ok)
+	}
+	name, _ := items.Elems()[1].Get("name")
+	if name.ToString() != "Beta" {
+		t.Errorf("items[1].name = %q, want Beta", name.ToString())
+	}
+	icon, _ := items.Elems()[1].Get("icon")
+	if _, isSrc := icon.JSXSource(); !isSrc {
+		t.Errorf("items[1].icon should keep its JSX source, got %v", icon)
+	}
+	if _, kept := got["lone"]; kept {
+		t.Error("a constant that is only JSX stays out of the value table")
+	}
+}

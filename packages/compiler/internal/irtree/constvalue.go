@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"reflect"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -23,8 +24,26 @@ func evalConstValue(expr ast.Expr, signals map[string]ast.Expr, props valueMap) 
 	return newConstInterp(signals, props).Eval(expr)
 }
 
+// signalMemoKey identifies one signal initial under one props map.
+type signalMemoKey struct {
+	initial ast.Expr
+	props   uintptr
+}
+
+// signalMemo keeps the object and array initials of signals, so every read of
+// a signal during a build sees one value and `a === a` holds.
+type signalMemo map[signalMemoKey]jsvalue.Value
+
 func newConstInterp(signals map[string]ast.Expr, props valueMap) *jsvalue.Interp {
+	return newConstInterpMemo(signals, props, nil)
+}
+
+func newConstInterpMemo(signals map[string]ast.Expr, props valueMap, memo signalMemo) *jsvalue.Interp {
 	in := jsvalue.New(jsvalue.Hooks{})
+	var propsID uintptr
+	if props != nil {
+		propsID = reflect.ValueOf(props).Pointer()
+	}
 	resolving := map[string]bool{}
 	signalInitial := func(name string) (jsvalue.Value, bool) {
 		initial, ok := signals[name]
@@ -37,9 +56,16 @@ func newConstInterp(signals map[string]ast.Expr, props valueMap) *jsvalue.Interp
 		if resolving[name] {
 			return jsvalue.Dynamic("recursive signal initial " + name), true
 		}
+		key := signalMemoKey{initial, propsID}
+		if v, ok := memo[key]; ok && memo != nil {
+			return v, true
+		}
 		resolving[name] = true
 		v := in.EvalIn(jsvalue.NewScope(nil), initial)
 		delete(resolving, name)
+		if memo != nil && (v.IsArray() || v.IsObject()) && !v.ContainsUnknown() {
+			memo[key] = v
+		}
 		return v, true
 	}
 	contextDefault := func(ctx string) (jsvalue.Value, bool) {
@@ -274,6 +300,9 @@ func typedModuleConsts(inits map[string]ast.Expr, legacy map[string]string, run 
 		}
 	}
 	in := jsvalue.New(jsvalue.Hooks{})
+	// JSX inside a constant stays source (see jsvalue.JSXFromNode) so the
+	// fields around it still read at build time.
+	in.Hooks.JSX = func(expr ast.Expr) jsvalue.Value { return jsvalue.JSXFromNode(expr) }
 	curDepth := 0
 	var ancestorHit []int // min ancestor depth hit by each active frame
 	resolve := func(name string) (jsvalue.Value, bool) {

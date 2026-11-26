@@ -515,6 +515,9 @@ func (in *Interp) assignTo(target ast.Expr, v Value) Value {
 }
 
 func (in *Interp) array(e *ast.ArrayExpr) Value {
+	if v, ok := in.refValue(e.Ref); ok {
+		return v
+	}
 	elems := make([]Value, 0, len(e.Elements))
 	for _, el := range e.Elements {
 		if el == nil {
@@ -542,7 +545,20 @@ func unknownOr(v Value, reason string) Value {
 	return Unsupported(reason)
 }
 
+// refValue returns the value a literal was made from (see ToASTRef). An
+// interpreter that changes values in place builds a fresh one instead.
+func (in *Interp) refValue(ref any) (Value, bool) {
+	if ref == nil || in.InPlace {
+		return Value{}, false
+	}
+	v, ok := ref.(Value)
+	return v, ok
+}
+
 func (in *Interp) object(e *ast.ObjectExpr) Value {
+	if v, ok := in.refValue(e.Ref); ok {
+		return v
+	}
 	obj := NewObject()
 	for _, p := range e.Properties {
 		if p == nil {

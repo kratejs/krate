@@ -184,7 +184,10 @@ func (b *builder) evalValueVolatile(expr ast.Expr) jsvalue.Value {
 // constInterp returns a const-folding interpreter over props that also knows
 // the builder's cva factories and server-action URLs.
 func (b *builder) constInterp(props valueMap) *jsvalue.Interp {
-	in := newConstInterp(b.sigMap(), props)
+	if b.signalMemo == nil {
+		b.signalMemo = make(signalMemo)
+	}
+	in := newConstInterpMemo(b.sigMap(), props, b.signalMemo)
 	in.Volatile = b.bakesOnly()
 	ident, call := in.Hooks.Ident, in.Hooks.Call
 	callables := map[string]jsvalue.Value{}

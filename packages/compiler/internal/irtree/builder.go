@@ -453,6 +453,7 @@ type builder struct {
 	// A component's walk clears it on entry and restores the caller's counts
 	// on exit, so siblings after a child component keep unique IDs.
 	elementCounts     map[string]int
+	signalMemo        signalMemo          // object/array signal initials, one value per signal
 	moduleConsts      valueMap            // module-level const values (name -> folded value)
 	moduleRun         *ModuleRun          // outcome of module-level statements that change bindings
 	routeHooks        valueMap            // router hooks folded to the page's route (see routehooks.go)

@@ -2374,7 +2374,7 @@ func (b *builder) resolveArrayLiteralExpr(expr ast.Expr) *ast.ArrayExpr {
 		}
 		return nil
 	}
-	arr, _ := jsvalue.ToAST(v).(*ast.ArrayExpr)
+	arr, _ := jsvalue.ToASTRef(v).(*ast.ArrayExpr)
 	return arr
 }
 
@@ -2553,8 +2553,15 @@ func (s *listParamSubstituter) sub(expr ast.Expr) ast.Expr {
 	case *ast.TemplateExpr:
 		return &ast.TemplateExpr{Position: e.Position, Parts: subExprList(s, e.Parts), Raw: e.Raw}
 	case *ast.ArrayExpr:
+		if e.Ref != nil {
+			// A literal made from a build-time value has no free names.
+			return e
+		}
 		return &ast.ArrayExpr{Position: e.Position, Elements: subExprList(s, e.Elements)}
 	case *ast.ObjectExpr:
+		if e.Ref != nil {
+			return e
+		}
 		out := make([]*ast.ObjectProp, len(e.Properties))
 		for i, p := range e.Properties {
 			cp := *p
@@ -2780,13 +2787,13 @@ func cloneExpr(expr ast.Expr) ast.Expr {
 		for i, p := range e.Properties {
 			out[i] = cloneObjectProp(p, cloneExpr)
 		}
-		return &ast.ObjectExpr{Position: e.Position, Properties: out}
+		return &ast.ObjectExpr{Position: e.Position, Properties: out, Ref: e.Ref}
 	case *ast.ArrayExpr:
 		out := make([]ast.Expr, len(e.Elements))
 		for i, el := range e.Elements {
 			out[i] = cloneExpr(el)
 		}
-		return &ast.ArrayExpr{Position: e.Position, Elements: out}
+		return &ast.ArrayExpr{Position: e.Position, Elements: out, Ref: e.Ref}
 	case *ast.MemberExpr:
 		return &ast.MemberExpr{Position: e.Position, Object: cloneExpr(e.Object), Property: e.Property, Computed: e.Computed, Optional: e.Optional}
 	default:

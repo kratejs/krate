@@ -670,6 +670,17 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Data with JSX in some fields no longer hides its other fields from the build. A module constant such as
+  `[{ id, name, icon: <svg/> }]` (imported from another module too) used to be skipped whole, so
+  `<title>{items.find(...).name}</title>` failed with KR8353 and `{item.name}` rendered empty until
+  hydration. The plain fields now fold, `{item.icon}` renders its markup where the component is static,
+  and a component with state passed such data (`<Picker rows={items} />`) renders its rows in the first
+  HTML while the client keeps the original expression.
+- Object identity holds while rendering lists at build time. `items.map((item) => <a class={item ===
+  current ? "on" : ""}>)` with `current = items.find(...)` used to compare a fresh copy of each element
+  and never matched, for a component with state and for the page root, for a `useState` array read twice,
+  for `find` inside the callback and for arrays passed to a child component. Elements substituted into a
+  row now evaluate to the original object.
 - A signal read through a plain local function now stays reactive. `const cur = () => list[n()]` and
   `const cls = (i) => (n() === i ? "on" : "")` used as `{cur().label}` or `class={cls(i)}` used to
   freeze at their build-time value; the compiler now looks through unshadowed local arrow and
