@@ -670,6 +670,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- CSS pruning no longer drops rules of an island that appear only after interaction. Every class of a CSS
+  module that a package island imports is kept (before, a panel opened by a click lost its base rules while
+  its `:hover` rule survived). Pruning is now per class: a class's base, pseudo-class and compound rules, also
+  inside `@media` and `@supports`, are kept or dropped together. Modules only build-time components use are
+  still pruned.
 - Docs plugin: generated docs pages can use the app's root layout. A new `rootLayout: true` option wraps
   every generated page (tag and category pages too) in `pagesDir/_layout.*`, outside the theme's layout, so
   the app's fonts, global CSS, `<html lang>` and `<body>` attributes and metadata apply, with one `<html>` and

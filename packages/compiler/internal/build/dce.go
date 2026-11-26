@@ -32,8 +32,10 @@ func (b *Builder) dceCSSEnabled() bool {
 
 // pageCSSAfterDCE prunes unused CSS-module rules from a page's own CSS. It is a
 // no-op unless DCE is enabled and the page is statically rendered (SSR/ISR pages
-// are left untouched).
-func (b *Builder) pageCSSAfterDCE(renderMode RenderMode, cssText string, modules map[string]*bundler.CSSModuleInfo, html string, clientJS ...string) string {
+// are left untouched). clientClasses are the scoped classes of CSS modules
+// that client island code imports: they are kept whole, since the island may
+// render any of them after interaction and its chunk text is not scanned.
+func (b *Builder) pageCSSAfterDCE(renderMode RenderMode, cssText string, modules map[string]*bundler.CSSModuleInfo, clientClasses map[string]bool, html string, clientJS ...string) string {
 	if !b.dceCSSEnabled() || renderMode != RenderSSG || cssText == "" {
 		return cssText
 	}
@@ -42,6 +44,9 @@ func (b *Builder) pageCSSAfterDCE(renderMode RenderMode, cssText string, modules
 		return cssText
 	}
 	used := collectClassTokens(html)
+	for cls := range clientClasses {
+		used[cls] = true
+	}
 	// Classes applied only on the client (signal-driven class expressions) show
 	// up in the emitted JS. Scoped names carry a unique hash suffix, so a
 	// substring search over the JS is safe.
@@ -140,28 +145,77 @@ func moduleClassSet(modules map[string]*bundler.CSSModuleInfo) map[string]bool {
 	return set
 }
 
-// pruneModuleCSS removes CSS rules that consist solely of CSS-module class
-// selectors which do not appear in the page's emitted HTML. Only classes that
-// belong to the bundle's module mappings are candidates, so global, Tailwind,
-// and component styles are never touched. Rules with compound selectors,
-// pseudo-classes, or at-rules are always kept (conservative).
+// pruneModuleCSS removes CSS rules that only target CSS-module classes the page
+// never uses. Pruning is per class: a selector is dropped only when every
+// class in it is a module class that is unused, so a class's base rule and its
+// pseudo or compound rules are kept or dropped together. Only classes in the
+// bundle's module mappings are candidates, so global, Tailwind, and component
+// styles are never touched. Rules inside @media, @supports, @container and
+// @layer blocks are pruned the same way; other at-rules are kept whole.
 func pruneModuleCSS(cssText string, scoped, used map[string]bool) string {
 	if cssText == "" || len(scoped) == 0 {
 		return cssText
 	}
 	rules := css.SplitCSSRules(cssText)
 	out := make([]string, 0, len(rules))
+	changed := false
 	for _, rule := range rules {
-		if keepCSSRule(rule, scoped, used) {
-			out = append(out, rule)
+		kept, ok := pruneRule(rule, scoped, used)
+		if !ok || kept != rule {
+			changed = true
+		}
+		if ok {
+			out = append(out, kept)
 		}
 	}
-	if len(out) == len(rules) {
+	if !changed {
 		return cssText
 	}
 	return strings.Join(out, "\n")
 }
 
+// pruneRule returns the rule to emit and whether any of it survives.
+func pruneRule(rule string, scoped, used map[string]bool) (string, bool) {
+	open := strings.IndexByte(rule, '{')
+	if open < 0 {
+		return rule, true
+	}
+	selector := strings.TrimSpace(rule[:open])
+	if selector == "" {
+		return rule, true
+	}
+	if strings.HasPrefix(selector, "@") {
+		if !isGroupingAtRule(selector) || !strings.HasSuffix(rule, "}") {
+			return rule, true
+		}
+		body := rule[open+1 : len(rule)-1]
+		pruned := pruneModuleCSS(body, scoped, used)
+		if pruned == body {
+			return rule, true
+		}
+		if strings.TrimSpace(pruned) == "" {
+			return "", false
+		}
+		return selector + "{" + pruned + "}", true
+	}
+	return rule, keepCSSRule(rule, scoped, used)
+}
+
+func isGroupingAtRule(sel string) bool {
+	for _, p := range []string{"@media", "@supports", "@container", "@layer"} {
+		if strings.HasPrefix(sel, p) {
+			return true
+		}
+	}
+	return false
+}
+
+var selectorClassRe = regexp.MustCompile(`\.(-?[_a-zA-Z\x{80}-\x{10FFFF}][-_a-zA-Z0-9\x{80}-\x{10FFFF}]*)`)
+
+// keepCSSRule reports whether a style rule may match the page. A comma part
+// is droppable only when it names at least one module class and every class
+// it names is an unused module class; any other class (global, escaped,
+// unknown) keeps the part.
 func keepCSSRule(rule string, scoped, used map[string]bool) bool {
 	open := strings.IndexByte(rule, '{')
 	if open < 0 {
@@ -171,21 +225,49 @@ func keepCSSRule(rule string, scoped, used map[string]bool) bool {
 	if selector == "" || strings.HasPrefix(selector, "@") {
 		return true // at-rule or malformed: keep
 	}
-	for _, part := range strings.Split(selector, ",") {
-		p := strings.TrimSpace(part)
-		if !strings.HasPrefix(p, ".") {
+	for _, part := range splitSelectorList(selector) {
+		if strings.ContainsAny(part, "\\\"'") {
+			return true // escapes and attribute values: keep
+		}
+		classes := selectorClassRe.FindAllStringSubmatch(part, -1)
+		if len(classes) == 0 {
 			return true // element/id/attr selector: keep
 		}
-		cls := p[1:]
-		if cls == "" || strings.ContainsAny(cls, " \t\r\n>+~:.#[*") {
-			return true // compound / pseudo / nested: keep
-		}
-		if !scoped[cls] {
-			return true // not a module class: keep
-		}
-		if used[cls] {
-			return true // referenced by the page: keep
+		for _, m := range classes {
+			if !scoped[m[1]] || used[m[1]] {
+				return true // global class or a class the page uses: keep
+			}
 		}
 	}
-	return false // every selector is an unused module class: drop
+	return false // every selector only needs unused module classes: drop
+}
+
+// splitSelectorList splits a selector list at top-level commas, so commas in
+// :is(), :not() and attribute selectors do not split a selector.
+func splitSelectorList(sel string) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i := 0; i < len(sel); i++ {
+		switch sel[i] {
+		case '(', '[':
+			depth++
+		case ')', ']':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, strings.TrimSpace(sel[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, strings.TrimSpace(sel[start:]))
+}
+
+// islandClasses returns the scoped classes of CSS modules the page's islands
+// import, or nil when it has none.
+func islandClasses(st *islandStyles) map[string]bool {
+	if st == nil {
+		return nil
+	}
+	return st.Classes
 }

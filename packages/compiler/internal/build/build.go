@@ -3272,7 +3272,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 			return nil, "", err
 		}
 		b.recordDeps(page, deps)
-		pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
+		pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, nil, emitResult.HTML)
 		return &PageResult{
 			Page:              page,
 			OutName:           outName,
@@ -3500,7 +3500,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	loadingHTML := b.renderLoadingComponent(page)
 	pl.Lap("loading")
 
-	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML, dceJS...)
+	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, islandClasses(islandStyles), emitResult.HTML, dceJS...)
 	pl.Lap("css-dce")
 
 	// Return data structures without triggering an intermediate disk write
