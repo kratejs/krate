@@ -703,7 +703,6 @@ host code runs in the native process. Names and options may change between relea
   tsconfig alias) is a build error, KR7128, with a did-you-mean hint, instead of an undefined binding that fails in
   the browser. Type exports count, `export *` is followed, and modules the build cannot enumerate (CommonJS,
   ambient declarations, `export *` from a package) are skipped.
-
 - Data with JSX in some fields no longer hides its other fields from the build. A module constant such as
   `[{ id, name, icon: <svg/> }]` (imported from another module too) used to be skipped whole, so
   `<title>{items.find(...).name}</title>` failed with KR8353 and `{item.name}` rendered empty until
@@ -810,8 +809,10 @@ host code runs in the native process. Names and options may change between relea
   (after `title.template`), as Next.js does: a page `title: "Home page"` under a layout
   `openGraph: { siteName }` gets `og:title` and `twitter:title` instead of none. `twitter` follows
   `openGraph`'s title and description first. Static and SSR pages agree.
-- A component that hydrates on the client and renders a same-module component from a text, conditional or list expression no longer throws `<Name> is not defined` in the browser. The component's declaration is now emitted into the client chunk, including a recursive component that renders itself (for example a tree that maps nested items to itself).
-
+- A component that hydrates on the client and renders a same-module component from a text, conditional or
+  list expression no longer throws `<Name> is not defined` in the browser. The component's declaration is
+  now emitted into the client chunk, including a recursive component that renders itself (for example a
+  tree that maps nested items to itself).
 - MDX: a component's closing tag on the line right after a paragraph (`<Note>`, text, `</Note>`) no
   longer lands inside the paragraph and fails with "closing Note tag does not match opening p"; a
   component tag alone on its line ends the paragraph, as in MDX. Inline tags (`see <Badge>x` with the
@@ -819,7 +820,6 @@ host code runs in the native process. Names and options may change between relea
 - Docs: table-of-contents entries carry an `html` field (sanitized inline `code`, `em`, `strong`, `kbd`,
   `sub`, `sup`, `s`) next to the plain `title`, and the default theme renders it, so inline code and
   emphasis in a heading keep their formatting in the TOC.
-
 - Docs: a page named `template`, `loading`, `error`, `404`, `not-found`, `500`, `403`, `401`,
   `forbidden`, `unauthorized` or starting with `_` (for example `cli/template.mdx`) no longer turns into
   a route template or segment page that makes its sibling pages render as it; it is generated as
@@ -839,7 +839,6 @@ host code runs in the native process. Names and options may change between relea
   says plainly that the fonts load from fonts.googleapis.com at runtime.
 - `krate migrate nextjs`: a `start` script of `serve out` (or `npx serve ./out`) is rewritten to
   `krate serve` and noted in the report.
-
 - A list key that is a DOM node or another object (`key={someJSX}`) no longer becomes
   `[object HTMLSpanElement]` for every row. Object keys are matched by identity, so rows stay distinct and
   keep their state across updates, and one console error says to use a string or number.
