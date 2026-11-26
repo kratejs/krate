@@ -41,7 +41,7 @@ type localFold struct {
 	notes []foldNote
 }
 
-// collectLocalVars resolves top-level local variable declarations in a
+// collectLocalVarsWithBuilder resolves top-level local variable declarations in a
 // component body to build-time constants (derived from props and other
 // locals). It folds sequential declarations and simple reassignments of a
 // known local (`x = ...`, `x += ...`, `x++`) across declaration, expression,
@@ -51,10 +51,8 @@ type localFold struct {
 // instead of folding a value the statement would have changed. The result
 // resolves SSR initial values and drives the `var x = ...` declarations
 // emitted into the hydration bundle.
-func collectLocalVars(body []ast.Stmt, sigMap map[string]ast.Expr, props valueMap, nextUseId func() string) *localFold {
-	return collectLocalVarsWithBuilder(body, sigMap, props, nextUseId, nil)
-}
-
+//
+// owner, when set, gives the fold the module helpers it can call.
 func collectLocalVarsWithBuilder(body []ast.Stmt, sigMap map[string]ast.Expr, props valueMap, nextUseId func() string, owner *builder) *localFold {
 	f := &localFolder{
 		res: &localFold{

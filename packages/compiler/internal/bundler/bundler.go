@@ -1505,7 +1505,7 @@ func (b *Bundler) rewriteCSSModuleRefs() {
 			}
 			// Resolve like every other import (relative, tsconfig paths,
 			// baseUrl) so the key matches the cssModules map.
-			resolved := src
+			var resolved string
 			if filepath.IsAbs(src) {
 				resolved = filepath.Clean(src)
 			} else if r := b.resolveImportForModule(mod.Path, src); r != "" {
