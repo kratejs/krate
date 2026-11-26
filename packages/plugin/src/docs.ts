@@ -117,7 +117,7 @@ export interface DocsLayoutProps<Options = DocsThemeOptions> {
   socialLinks: { icon?: string; url?: string }[];
   /** Search UI hints from `docs({ search })`. */
   search?: { placeholder?: string; hotkey?: string };
-  /** Current page path (e.g. "getting-started"). */
+  /** Current page path without a trailing "index" (e.g. "getting-started", "cli" for cli/index; "" for the root). */
   currentPath: string;
   /** URL prefix the docs are mounted under (default "/docs"). */
   routeBase?: string;

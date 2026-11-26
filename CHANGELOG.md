@@ -655,6 +655,17 @@ host code runs in the native process. Names and options may change between relea
   (after `title.template`), as Next.js does: a page `title: "Home page"` under a layout
   `openGraph: { siteName }` gets `og:title` and `twitter:title` instead of none. `twitter` follows
   `openGraph`'s title and description first. Static and SSR pages agree.
+- Docs: a page named `template`, `loading`, `error`, `404`, `not-found`, `500`, `403`, `401`,
+  `forbidden`, `unauthorized` or starting with `_` (for example `cli/template.mdx`) no longer turns into
+  a route template or segment page that makes its sibling pages render as it; it is generated as
+  `<route>/index.tsx` and keeps its URL. The reserved names are shared with the build.
+- Docs: a folder section is titled from its index page (`sidebar.label`, else `title`) and positioned by
+  its `sidebar.order` / `order` among the sibling pages, as the contributing guide documents. Sites that set
+  neither keep the old title and alphabetical order.
+- Docs: prev/next links follow the sidebar order, including a `sidebar` array or `{ from: "file" }`
+  override; pages outside the sidebar get none. `currentPath` is the page path without `index`.
+- Docs: sidebar, prev/next, breadcrumb and language/version switcher URLs honour `trailingSlash: "never"`,
+  and the active-link match ignores a trailing-slash difference.
 - `krate migrate nextjs`: Next private folders (`app/x/_components`) are migrated as ordinary modules
   under `src/migrated/app/`, with the imports of pages and layouts rewritten; files in them named
   `page`, `layout` or `route` no longer become routes, and the "private segment" manual item is gone.

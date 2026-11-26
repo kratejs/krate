@@ -72,7 +72,26 @@ src/content/docs/
 
 Sidebar sections come from directories; page order within a directory comes
 from the frontmatter `order` field. Each directory's `index.md` becomes the
-section landing page.
+section landing page and names the section:
+
+- The section title is the index page's `sidebar.label`, else its `title`, else
+  the folder name ("cli" becomes "Cli").
+- The section position is the index page's `sidebar.order` (or `order`). It sorts
+  among the sibling pages by that number, and on a tie the page comes before the
+  section. A section whose index sets no order stays after the pages, sorted by title.
+
+Prev/next links follow the sidebar a reader sees, including a `sidebar` array or
+`{ from: "file" }` override, walked depth-first with a section's index page first.
+A page the sidebar does not list (for example `sidebar: { hidden: true }`) gets no
+prev/next links; with `sidebar: "none"` they follow the page order instead.
+
+Docs URLs follow the site's `trailingSlash` setting: they end in `/` by default and
+carry none with `trailingSlash: "never"`. This covers the sidebar, prev/next,
+breadcrumbs, the language and version switchers, `sidebar.json` and the search index.
+
+A page whose file name is a route convention name (`template`, `loading`, `error`,
+`404`, `not-found`, `500`, `403`, `401`, `forbidden`, `unauthorized`, or anything
+starting with `_`) still renders as an ordinary docs page at its own URL.
 
 ## The layout component
 

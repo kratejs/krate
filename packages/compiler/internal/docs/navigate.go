@@ -59,6 +59,61 @@ func PageURL(path string) string {
 	return DocsBasePath + "/" + normalized + "/"
 }
 
+// ApplyTrailingSlash puts a docs URL in the site's trailing-slash form. Only
+// "never" changes it: the root "/" is kept and a query or fragment is left
+// alone. "always" and "ignore" keep the generated form (a trailing slash).
+func ApplyTrailingSlash(u, mode string) string {
+	if mode != "never" || u == "" {
+		return u
+	}
+	if i := strings.IndexAny(u, "?#"); i >= 0 {
+		return ApplyTrailingSlash(u[:i], mode) + u[i:]
+	}
+	if t := strings.TrimRight(u, "/"); t != "" {
+		return t
+	}
+	return u
+}
+
+// sameURL reports whether two page URLs are the same page, ignoring a
+// trailing slash.
+func sameURL(a, b string) bool {
+	return strings.TrimRight(a, "/") == strings.TrimRight(b, "/")
+}
+
+// SidebarOrderedPages returns the pages in the order a reader walks the
+// sidebar (depth-first, a section's index page first), for prev/next links.
+// Pages the sidebar does not list (hidden pages, or any page under a file
+// sidebar that omits it) are left out. ok is false when the sidebar lists no
+// page at all, so the caller can fall back to the plain page order.
+func SidebarOrderedPages(pages []Page, sections []SidebarItem) (ordered []Page, ok bool) {
+	byURL := make(map[string]Page, len(pages))
+	for _, p := range pages {
+		byURL[strings.TrimRight(pagePathURL(p), "/")] = p
+	}
+	seen := make(map[string]bool, len(pages))
+	add := func(u string) {
+		k := strings.TrimRight(u, "/")
+		if u == "" || seen[k] {
+			return
+		}
+		if p, found := byURL[k]; found {
+			seen[k] = true
+			ordered = append(ordered, p)
+		}
+	}
+	var walk func(items []SidebarItem)
+	walk = func(items []SidebarItem) {
+		for _, it := range items {
+			add(it.IndexURL)
+			add(it.URL)
+			walk(it.Children)
+		}
+	}
+	walk(sections)
+	return ordered, len(ordered) > 0
+}
+
 // pagePathURL returns a page's URL, preferring the plugin-computed (locale- and
 // version-aware) URL when present.
 func pagePathURL(p Page) string {
@@ -124,9 +179,17 @@ func BuildSidebarTree(pages []Page) []SidebarItem {
 		}
 	}
 
+	// entry is a link in a directory with the order it sorts by.
+	type entry struct {
+		item SidebarItem
+		rank int
+	}
 	type dirNode struct {
 		item    SidebarItem
 		subdirs map[string]*dirNode
+		links   []entry
+		index   *Page // the directory's visible index page, if any
+		idxPage *Page // the directory's index page even when hidden
 	}
 
 	root := &dirNode{
@@ -163,7 +226,7 @@ func BuildSidebarTree(pages []Page) []SidebarItem {
 			Badge: badge,
 		}
 		if dir == "" {
-			root.item.Children = append(root.item.Children, linkItem)
+			root.links = append(root.links, entry{linkItem, effectiveOrder(p)})
 			continue
 		}
 
@@ -184,56 +247,118 @@ func BuildSidebarTree(pages []Page) []SidebarItem {
 			}
 			current = next
 		}
-		current.item.Children = append(current.item.Children, linkItem)
+		current.links = append(current.links, entry{linkItem, effectiveOrder(p)})
+		if isDirIndexPath(p.Path, dir) {
+			pp := p
+			current.idxPage = &pp
+			if cfg == nil || !cfg.Hidden {
+				current.index = &pp
+			}
+		}
 	}
 
-	// Convert tree to SidebarItem list (recursive)
-	var flatten func(n *dirNode) SidebarItem
-	flatten = func(n *dirNode) SidebarItem {
-		for _, subdir := range n.subdirs {
-			n.item.Children = append(n.item.Children, flatten(subdir))
+	// Convert tree to SidebarItem list (recursive). Each section carries its
+	// sort rank: the order set on its index page, else after every link.
+	type ranked struct {
+		item    SidebarItem
+		rank    int
+		section bool
+	}
+	var flatten func(n *dirNode) ranked
+	// sortRanked orders a directory's entries: by rank, links before sections
+	// on a tie, sections that tie by title. Links keep their SortPages order.
+	sortRanked := func(es []ranked) {
+		sort.SliceStable(es, func(i, j int) bool {
+			if es[i].rank != es[j].rank {
+				return es[i].rank < es[j].rank
+			}
+			if es[i].section != es[j].section {
+				return !es[i].section
+			}
+			if es[i].section {
+				return es[i].item.Title < es[j].item.Title
+			}
+			return false
+		})
+	}
+	flatten = func(n *dirNode) ranked {
+		rank := noRank
+		if ip := n.idxPage; ip != nil {
+			if t := sectionTitle(*ip); t != "" {
+				n.item.Title = t
+			}
+			if o := effectiveOrder(*ip); o != defaultPageOrder {
+				rank = o
+			}
 		}
-		if n.item.Title != "__root__" {
-			if idxURL := sidebarIndexURLNav(n.item); idxURL != "" {
-				if cfg, ok := navByURL[idxURL]; ok {
-					n.item.Icon = firstNonEmpty(cfg.Icon, n.item.Icon)
-					n.item.Collapsible = n.item.Collapsible || cfg.Collapsible
-					n.item.Expanded = n.item.Expanded || cfg.DefaultOpen
-					if cfg.Badge != nil {
-						n.item.Badge = cfg.Badge
-					} else if b, ok2 := badgeByURL[idxURL]; ok2 {
-						n.item.Badge = b
-					}
+		var es []ranked
+		for _, l := range n.links {
+			es = append(es, ranked{l.item, l.rank, false})
+		}
+		for _, subdir := range n.subdirs {
+			es = append(es, flatten(subdir))
+		}
+		sortRanked(es)
+		n.item.Children = n.item.Children[:0]
+		for _, e := range es {
+			n.item.Children = append(n.item.Children, e.item)
+		}
+		if n.index != nil {
+			idxURL := pagePathURL(*n.index)
+			n.item.IndexURL = idxURL
+			if cfg, ok := navByURL[idxURL]; ok {
+				n.item.Icon = firstNonEmpty(cfg.Icon, n.item.Icon)
+				n.item.Collapsible = n.item.Collapsible || cfg.Collapsible
+				n.item.Expanded = n.item.Expanded || cfg.DefaultOpen
+				if cfg.Badge != nil {
+					n.item.Badge = cfg.Badge
+				} else if b, ok2 := badgeByURL[idxURL]; ok2 {
+					n.item.Badge = b
 				}
 			}
 		}
-		// Stable sort: sections after links, sections alphabetically,
-		// links preserve insertion order (from SortPages: Dir->Order->Title)
-		sort.SliceStable(n.item.Children, func(i, j int) bool {
-			hasChildrenI := len(n.item.Children[i].Children) > 0
-			hasChildrenJ := len(n.item.Children[j].Children) > 0
-			if hasChildrenI != hasChildrenJ {
-				return !hasChildrenI // links before sections
-			}
-			if hasChildrenI {
-				return n.item.Children[i].Title < n.item.Children[j].Title
-			}
-			return false // preserve original order for links
-		})
-		return n.item
+		return ranked{n.item, rank, true}
 	}
 
-	// Collect directory sections, sorted by title
-	var dirSections []SidebarItem
+	// Root-level pages first, then directory sections that sort after them
+	// unless an index page gives them an order.
+	var top []ranked
+	for _, l := range root.links {
+		top = append(top, ranked{l.item, l.rank, false})
+	}
 	for _, subdir := range root.subdirs {
-		dirSections = append(dirSections, flatten(subdir))
+		top = append(top, flatten(subdir))
 	}
-	sort.Slice(dirSections, func(i, j int) bool {
-		return dirSections[i].Title < dirSections[j].Title
-	})
+	sortRanked(top)
+	out := make([]SidebarItem, 0, len(top))
+	for _, e := range top {
+		out = append(out, e.item)
+	}
+	return out
+}
 
-	// Root-level pages first, then directory sections
-	return append(root.item.Children, dirSections...)
+const (
+	// defaultPageOrder is the order of a page that sets none.
+	defaultPageOrder = 999
+	// noRank puts a section with no explicit order after every link.
+	noRank = int(^uint(0) >> 1)
+)
+
+// isDirIndexPath reports whether path is the index page of dir.
+func isDirIndexPath(path, dir string) bool {
+	return path == dir+"/index"
+}
+
+// sectionTitle is the title of a folder section taken from its index page:
+// sidebar.label, else an explicit title; "" keeps the folder-name title.
+func sectionTitle(p Page) string {
+	if p.SidebarCfg != nil && p.SidebarCfg.Label != "" {
+		return p.SidebarCfg.Label
+	}
+	if p.TitleSet && p.Title != "" {
+		return p.Title
+	}
+	return ""
 }
 
 func firstNonEmpty(a, b string) string {
@@ -362,6 +487,9 @@ func lastURLSegmentNav(url string) string {
 }
 
 func sidebarIndexURLNav(item SidebarItem) string {
+	if item.IndexURL != "" {
+		return item.IndexURL
+	}
 	sectionSlug := slugFromTitleNav(item.Title)
 	for _, child := range item.Children {
 		if child.URL == "" || len(child.Children) > 0 {
@@ -375,7 +503,7 @@ func sidebarIndexURLNav(item SidebarItem) string {
 }
 
 func sidebarItemActiveNav(item SidebarItem, activeURL string) bool {
-	if item.Active || (item.URL != "" && item.URL == activeURL) {
+	if item.Active || (item.URL != "" && sameURL(item.URL, activeURL)) {
 		return true
 	}
 	for _, child := range item.Children {

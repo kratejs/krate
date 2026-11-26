@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kratejs/krate/packages/compiler/internal/routeconv"
 	"hash/fnv"
 	"io"
 	"os"
@@ -4640,12 +4641,10 @@ func escapeJSONForScript(s string) string {
 }
 
 var (
-	layoutNames   = []string{"_layout.tsx", "_layout.ts", "_layout.jsx", "_layout.js"}
-	templateNames = []string{"_template.tsx", "_template.ts", "_template.jsx", "_template.js", "template.tsx", "template.ts", "template.jsx", "template.js"}
-	loadingNames  = []string{"loading.tsx", "loading.ts", "loading.jsx", "loading.js"}
-	// errorBoundaryNames are the files that become a client error boundary. 500.tsx
-	// is only the server error page, so existing static 500 pages stay static.
-	errorBoundaryNames = []string{"error.tsx", "error.ts", "error.jsx", "error.js"}
+	layoutNames        = routeconv.LayoutNames
+	templateNames      = routeconv.TemplateNames
+	loadingNames       = routeconv.LoadingNames
+	errorBoundaryNames = routeconv.ErrorBoundaryNames
 )
 
 // findLayoutFile walks up from pagePath toward pagesDir checking each directory

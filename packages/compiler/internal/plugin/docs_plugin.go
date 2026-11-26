@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
+	"github.com/kratejs/krate/packages/compiler/internal/routeconv"
 )
 
 type DocsPluginOptions struct {
@@ -292,11 +294,24 @@ func parseDocsOptions(cfg *config.Config) *DocsPluginOptions {
 	return nil
 }
 
+// genPageFile is the generated page file for a route, relative to the gen
+// root. A route whose last segment is a route convention name (template,
+// loading, error, 404, _x ...) goes to <route>/index.tsx: the build would
+// otherwise treat <route>.tsx as a layout, template or segment page. The URL
+// is the same because the build drops a trailing /index.
+func genPageFile(route string) string {
+	if routeconv.ReservedBase(path.Base(route)) {
+		route += "/index"
+	}
+	return filepath.FromSlash(route) + ".tsx"
+}
+
 func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 	cfg, ok := ctx.Config.(*config.Config)
 	if !ok {
 		return nil
 	}
+	slashMode := cfg.TrailingSlashMode()
 
 	opts := parseDocsOptions(cfg)
 	if opts == nil {
@@ -336,7 +351,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 			for i := range ps {
 				ps[i].Locale = loc
 				ps[i].Version = ver
-				ps[i].URL = docsURL(loc, defaultLocale, ver, currentVersion, ps[i].Path)
+				ps[i].URL = docs.ApplyTrailingSlash(docsURL(loc, defaultLocale, ver, currentVersion, ps[i].Path), slashMode)
 				lk := ver + "\x00" + ps[i].Path
 				if localeAlts[lk] == nil {
 					localeAlts[lk] = map[string]string{}
@@ -410,15 +425,27 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 	var wg sync.WaitGroup
 
 	for _, b := range bundles {
-		for i, page := range b.pages {
+		// Prev/next follow the sidebar a reader sees (including a custom
+		// sidebar); with no sidebar they fall back to the page order.
+		navPages, inSidebar := docs.SidebarOrderedPages(b.pages, b.sections)
+		if !inSidebar {
+			navPages = b.pages
+		}
+		navIndex := make(map[string]int, len(navPages))
+		for i, np := range navPages {
+			navIndex[np.URL] = i
+		}
+		for _, page := range b.pages {
 			var prevTitle, prevLink, nextTitle, nextLink string
-			if i > 0 {
-				prevTitle = b.pages[i-1].Title
-				prevLink = b.pages[i-1].URL
-			}
-			if i < len(b.pages)-1 {
-				nextTitle = b.pages[i+1].Title
-				nextLink = b.pages[i+1].URL
+			if i, found := navIndex[page.URL]; found {
+				if i > 0 {
+					prevTitle = navPages[i-1].Title
+					prevLink = navPages[i-1].URL
+				}
+				if i < len(navPages)-1 {
+					nextTitle = navPages[i+1].Title
+					nextLink = navPages[i+1].URL
+				}
 			}
 
 			li := docsLocaleInfo{
@@ -431,11 +458,14 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 				VersionBanner:  cfg.Versions.Enabled() && cfg.Versions.BannerEnabled() && page.Version != currentVersion,
 			}
 
+			li.Locales = slashLinks(li.Locales, slashMode)
+			li.Versions = slashLinks(li.Versions, slashMode)
+
 			// The build derives a generated page's route from its path under
 			// .krate/gen, so the file path must mirror the final route exactly
 			// (e.g. route "fr/docs/getting-started" -> .krate/gen/fr/docs/getting-started.tsx).
 			route := docsRoute(page.Locale, defaultLocale, page.Version, currentVersion, page.Path)
-			tsxPath := filepath.Join(genRoot, filepath.FromSlash(route)+".tsx")
+			tsxPath := filepath.Join(genRoot, genPageFile(route))
 
 			wg.Add(1)
 			go func(page docs.Page, b docsBundle, li docsLocaleInfo, prevTitle, prevLink, nextTitle, nextLink string) {
@@ -443,6 +473,9 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 
 				tocItems := pageTocItems(page)
 				breadcrumbs := docs.BuildBreadcrumbsTitled(page.Locale, defaultLocale, page.Path, b.pages)
+				for i := range breadcrumbs {
+					breadcrumbs[i].URL = docs.ApplyTrailingSlash(breadcrumbs[i].URL, slashMode)
+				}
 
 				fileLayoutRel := theme.importSpecifier(filepath.Dir(tsxPath))
 				tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, searchEnabled, b.sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, li, opts, themeOptions, cfg.Markdown, docs.DocsBasePath)
@@ -794,7 +827,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	socialJSON := marshalJSONArray(socialLinks)
 	pageTitleJSON, _ := json.Marshal(page.Title)
 	siteTitleJSON, _ := json.Marshal(siteTitle)
-	currentPathJSON, _ := json.Marshal(page.Path)
+	currentPathJSON, _ := json.Marshal(docs.NormalizePagePath(page.Path))
 	templateJSON, _ := json.Marshal(page.Template)
 	routeBaseJSON, _ := json.Marshal(strings.TrimRight(routeBase, "/"))
 
