@@ -12,9 +12,9 @@ export async function GET() {
     out[hash] = hex(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: enc.encode("salt"), iterations: 1000, hash }, base, 256));
   }
   const hmac = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: new Uint8Array(16), iterations: 10, hash: "SHA-256" }, base, { name: "HMAC", hash: "SHA-256" }, true, ["sign"]);
-  out.derived = [hmac.algorithm.name, (hmac.algorithm as any).length, hmac.extractable, hmac.usages, hex(await crypto.subtle.exportKey("raw", hmac))];
+  out.derived = [hmac.algorithm.name, (hmac.algorithm as any).length, hmac.extractable, [...hmac.usages].sort(), hex(await crypto.subtle.exportKey("raw", hmac))];
   out.signed = hex(await crypto.subtle.sign("HMAC", hmac, enc.encode("message")));
-  out.key = [base.type, base.extractable, base.usages, base.algorithm.name];
+  out.key = [base.type, base.extractable, [...base.usages].sort(), base.algorithm.name];
   out.zeroIterations = await errName(() => crypto.subtle.deriveBits({ name: "PBKDF2", salt: new Uint8Array(1), iterations: 0, hash: "SHA-256" }, base, 256));
   out.oddLength = await errName(() => crypto.subtle.deriveBits({ name: "PBKDF2", salt: new Uint8Array(1), iterations: 1, hash: "SHA-256" }, base, 7));
   out.extractable = await errName(() => crypto.subtle.importKey("raw", enc.encode("pw"), "PBKDF2", true, ["deriveBits"]));
