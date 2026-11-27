@@ -20,9 +20,9 @@
   },
   "devDependencies": {
     "@krate/base-docs-theme": "workspace:*",
-    "@krate/components": "0.5.0-rc.14",
-    "@krate/core": "0.5.0-rc.14",
-    "@krate/runtime": "0.5.0-rc.14",
+    "@krate/components": "0.5.0-rc.15",
+    "@krate/core": "0.5.0-rc.15",
+    "@krate/runtime": "0.5.0-rc.15",
     "typescript": "^5.5.0"
   }
 }
