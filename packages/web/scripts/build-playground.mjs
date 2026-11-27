@@ -4,6 +4,7 @@
 //   wasm_exec.js                Go's wasm loader, matching the Go toolchain
 //   packages.json               @krate/runtime and @krate/components files for node_modules
 //   manifest.json               what the engine should load
+//   examples.json              src/playground/examples.ts as JSON for the page
 //
 // engine.js and memfs.js in the same directory are committed sources.
 //
@@ -20,6 +21,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants as zc, gzipSync } from "node:zlib";
+import { loadExamples } from "./playground-examples.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const webDir = resolve(here, "..");
@@ -47,6 +49,13 @@ function run(cmd, args, opts = {}) {
   return spawnSync(cmd, args, { encoding: "utf8", ...opts });
 }
 
+// The page's example gallery. Written first so it exists even without Go.
+mkdirSync(outDir, { recursive: true });
+{
+  const { examples, defaultExampleId } = await loadExamples();
+  writeFileSync(join(outDir, "examples.json"), JSON.stringify({ examples, defaultExampleId }));
+}
+
 const goVersion = run("go", ["version"], { cwd: compilerDir });
 if (goVersion.error || goVersion.status !== 0) skip("Go was not found on PATH.");
 
@@ -60,7 +69,7 @@ mkdirSync(outDir, { recursive: true });
 
 // 1. The compiler.
 const rawWasm = join(workDir, "krate.wasm");
-const compilerVersion = JSON.parse(readFileSync(join(repoRoot, "packages/core/package.json"), "utf8")).version;
+const compilerVersion = stampVersion();
 console.log(`[playground] ${goVersion.stdout.trim()}: building krate.wasm`);
 const build = run(
   "go",
@@ -129,6 +138,24 @@ writeFileSync(
 );
 console.log(`[playground] wrote ${outDir}`);
 
+// The version the wasm reports. Releases set packages/core/package.json (see
+// scripts/set-version.mjs); in the repository it stays at the 0.1.0
+// placeholder, so fall back to the nearest git tag. Either way the short
+// commit is appended when git is available.
+function stampVersion() {
+  if (process.env.KRATE_PLAYGROUND_VERSION) return process.env.KRATE_PLAYGROUND_VERSION;
+  const pkg = JSON.parse(readFileSync(join(repoRoot, "packages/core/package.json"), "utf8")).version;
+  const git = (...args) => {
+    const r = run("git", args, { cwd: repoRoot });
+    return r.status === 0 ? r.stdout.trim() : "";
+  };
+  const sha = git("rev-parse", "--short", "HEAD");
+  if (pkg !== "0.1.0") return sha ? `${pkg}+${sha}` : pkg;
+  const described = git("describe", "--tags", "--always").replace(/^v/, "");
+  if (/^\d/.test(described)) return described;
+  return sha ? `${pkg}+${sha}` : pkg;
+}
+
 // The workspace package matches the compiler of the same commit; the npm
 // release the site depends on is the fallback.
 function findPackage(dirName, probe, collect) {
@@ -160,7 +187,7 @@ function collectComponentFiles(dir) {
 }
 
 // Every JS file of the package reachable from package.json "exports" by
-// relative imports, plus package.json itself (reduced to what resolution needs).
+// relative imports, plus the krate-*.js browser bundles and package.json itself (reduced to what resolution needs).
 function collectRuntimeFiles(dir) {
   const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
   const entries = new Set();
@@ -191,6 +218,12 @@ function collectRuntimeFiles(dir) {
     }
   };
   for (const e of entries) visit(e);
+  // The prebuilt browser bundles (krate-hydrate.js and the trimmed-runtime
+  // parts) are not reachable from exports, but the compiler writes them into
+  // every page's shared runtime chunk, so the build needs them.
+  for (const name of readdirSync(join(dir, "dist"))) {
+    if (/^krate-.*\.(js|json)$/.test(name)) files[`dist/${name}`] = readFileSync(join(dir, "dist", name), "utf8");
+  }
   files["package.json"] = JSON.stringify({
     name: pkg.name,
     version: pkg.version,

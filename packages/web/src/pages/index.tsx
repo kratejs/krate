@@ -30,6 +30,7 @@ export default function Home() {
         <div class="hero-actions">
           <a class="btn btn-primary" href="/docs/">Read the docs</a>
           <a class="btn btn-secondary" href="/docs/getting-started/">Getting started</a>
+          <a class="btn btn-secondary" href="/playground/">Try it in the playground</a>
           <a class="btn btn-secondary" href="/blog/">Blog</a>
         </div>
         <div class="hero-demo">

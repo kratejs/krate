@@ -7,7 +7,7 @@ const site = {
   nav: [
     { label: "Docs", href: "/docs/" },
     { label: "Plugins", href: "/docs/features/plugins/" },
-    { label: "Runtime API", href: "/docs/reference/runtime-api/" },
+    { label: "Playground", href: "/playground/" },
     { label: "Blog", href: "/blog/" },
     { label: "Contributing", href: "/docs/contributing/" },
   ],

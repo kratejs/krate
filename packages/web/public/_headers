@@ -1,0 +1,12 @@
+# Cloudflare Pages response headers.
+
+# The preview service worker must always be revalidated so updates reach
+# users. It lives inside its scope, so no Service-Worker-Allowed is needed.
+/playground/preview/sw.js
+  Cache-Control: no-cache
+
+# The compiler ships pre-gzipped (the engine inflates it in the browser);
+# serve it as an opaque binary.
+/playground/krate.wasm.gz
+  Content-Type: application/octet-stream
+  Cache-Control: public, max-age=3600

@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
+import { loadExamples } from "./playground-examples.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 if (!existsSync(join(here, "../public/playground/manifest.json"))) {
@@ -133,6 +134,29 @@ for (let i = 0; i < 20; i++) {
     assert.match(res.files["index.html"], new RegExp(`demo ${i}`), `rebuild ${i} picked up the edit`);
   }
 }
+// (d) Every gallery example builds cleanly, with the shared runtime chunk.
+const { examples } = await loadExamples();
+assert.ok(examples.length >= 10, "the gallery has the expected examples");
+for (const ex of examples) {
+  assert.ok(Object.keys(ex.files).every((f) => f.startsWith("src/")), `${ex.id}: files live under src/`);
+  assert.ok(ex.open in ex.files, `${ex.id}: the open file exists`);
+  for (const minify of [false, true]) {
+    res = await request("build", { files: ex.files, opts: { minify } });
+    const errs = res.diagnostics.filter((x) => x.severity === "error");
+    assert.equal(res.ok, true, `${ex.id}: build ok (minify=${minify}); diagnostics: ${JSON.stringify(res.diagnostics)}`);
+    assert.deepEqual(errs, [], `${ex.id}: no error diagnostics`);
+    const home = res.files["index.html"] ?? res.files["notes/index.html"];
+    assert.ok(home, `${ex.id}: has a page`);
+    const names = Object.keys(res.files);
+    const scripts = [...home.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);
+    if (ex.id === "css-signals") assert.equal(scripts.length, 0, "css-signals ships no script");
+    else if (ex.id !== "css-modules" && ex.id !== "multi-page") {
+      assert.ok(names.some((n) => /^chunks\/runtime\.[\w-]+\.js$/.test(n)), `${ex.id}: the runtime chunk is emitted (have: ${names.join(", ")})`);
+    }
+  }
+  console.log(`example ${ex.id}: ok`);
+}
+
 const sorted = [...times].sort((a, b) => a - b);
 console.log(
   `20 rebuilds: ok. ms per build: first ${times[0].toFixed(0)}, median ${sorted[10].toFixed(0)}, min ${sorted[0].toFixed(0)}, max ${sorted[19].toFixed(0)}`,
