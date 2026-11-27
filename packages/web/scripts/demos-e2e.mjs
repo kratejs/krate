@@ -1,3 +1,6 @@
+// The page callbacks read innerText on purpose: the checks are about rendered,
+// visible text, which textContent does not reflect.
+/* oxlint-disable unicorn/prefer-dom-node-text-content */
 // End-to-end test for the homepage and the /demos/ gallery (Chromium, headless).
 //
 //   pnpm build && node scripts/demos-e2e.mjs
@@ -197,7 +200,7 @@ const tests = {
     await page.waitForURL("**/demos/transitions/");
   },
   async canvas(page) {
-    await page.waitForFunction(() => /fps/.test(document.querySelector(".cv-fps").textContent) && parseInt(document.querySelector(".cv-fps").textContent) > 0, null, { timeout: 8000 });
+    await page.waitForFunction(() => /fps/.test(document.querySelector(".cv-fps").textContent) && parseInt(document.querySelector(".cv-fps").textContent, 10) > 0, null, { timeout: 8000 });
     const painted = () => page.evaluate(() => {
       const c = document.querySelector("canvas");
       const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;

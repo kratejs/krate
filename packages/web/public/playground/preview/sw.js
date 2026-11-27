@@ -9,7 +9,6 @@
 // worker being stopped when idle.
 
 const CACHE = "krate-playground-preview-v1";
-const PREFIX = "/playground/preview/";
 const STORE = "/__pg/";
 const SESSION_TTL_MS = 2 * 24 * 3600 * 1000;
 
@@ -53,7 +52,7 @@ self.addEventListener("message", (event) => {
       ),
     );
   } else if (msg.type === "ping") {
-    port && port.postMessage({ ok: true });
+    if (port) port.postMessage({ ok: true });
   }
 });
 
@@ -91,7 +90,7 @@ function sessionOf(pathname) {
 
 async function lookup(sid, rest) {
   const cache = await caches.open(CACHE);
-  let p = decodeURIComponent(rest).replace(/^\/+/, "");
+  const p = decodeURIComponent(rest).replace(/^\/+/, "");
   const tries = [];
   if (p === "" || p.endsWith("/")) tries.push(p + "index.html");
   else {
@@ -114,7 +113,7 @@ function relay(sid) {
     msg.sid = sid;
     try {
       parentWin.postMessage(msg, location.origin);
-    } catch (e) {}
+    } catch {}
   }
   function fmt(v) {
     if (typeof v === "string") return v;
@@ -123,7 +122,7 @@ function relay(sid) {
     try {
       var s = JSON.stringify(v);
       return s === undefined ? String(v) : s.length > 800 ? s.slice(0, 800) + "..." : s;
-    } catch (e) {
+    } catch {
       return String(v);
     }
   }
@@ -131,7 +130,7 @@ function relay(sid) {
     var orig = console[level];
     console[level] = function () {
       var args = Array.prototype.slice.call(arguments).map(fmt);
-      send({ type: "console", level: level, text: args.join(" ") });
+      send({ type: "console", level, text: args.join(" ") });
       return orig.apply(console, arguments);
     };
   });

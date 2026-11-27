@@ -88,7 +88,7 @@ export function createEditor(host, handlers = {}) {
     let last = e;
     if (e > s && v[e - 1] === "\n") last = e - 1;
     const endOfLast = v.indexOf("\n", last);
-    const to = endOfLast < 0 ? v.length : endOfLast;
+    const to = endOfLast === -1 ? v.length : endOfLast;
     const block = v.slice(first, to);
     const lines = block.split("\n");
     let firstDelta = 0;
@@ -160,7 +160,7 @@ export function createEditor(host, handlers = {}) {
     const e = ta.selectionEnd;
     const first = lineStart(s);
     const endOfLast = v.indexOf("\n", e > s && v[e - 1] === "\n" ? e - 1 : e);
-    const to = endOfLast < 0 ? v.length : endOfLast;
+    const to = endOfLast === -1 ? v.length : endOfLast;
     const lines = v.slice(first, to).split("\n");
     const css = lang === "css";
     const open = css ? "/* " : lang === "html" || lang === "md" ? "<!-- " : "// ";

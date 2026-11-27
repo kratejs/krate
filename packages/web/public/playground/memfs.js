@@ -126,7 +126,7 @@ export function createMemFS(options = {}) {
   const fds = new Map();
   let nextFd = 3;
 
-  let outBuf = { 1: "", 2: "" };
+  const outBuf = { 1: "", 2: "" };
   const onOutput = options.onOutput || ((fd, text) => (fd === 2 ? console.error(text) : console.log(text)));
   function writeConsole(fd, buf) {
     outBuf[fd] += decoder.decode(buf, { stream: true });

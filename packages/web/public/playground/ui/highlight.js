@@ -244,7 +244,7 @@ function tokenizeCSS(src) {
       else if (c === ")") paren--;
       else if (c === "/" && src[j + 1] === "*") {
         const e = src.indexOf("*/", j + 2);
-        if (e < 0) return "decl";
+        if (e === -1) return "decl";
         j = e + 1;
       } else if (c === '"' || c === "'") {
         j = src.indexOf(c, j + 1);
@@ -355,7 +355,7 @@ function tokenizeCSS(src) {
           i += m ? m[0].length : 1;
         } else if (s === "[") {
           const e = src.indexOf("]", i);
-          const j = e < 0 ? n : e + 1;
+          const j = e === -1 ? n : e + 1;
           push("a", src.slice(i, j));
           i = j;
         } else if (isIdStart(s) || s === "*" || s === "&") {
@@ -437,7 +437,7 @@ function tokenizeHTML(src) {
       const name = m[2].toLowerCase();
       if (!m[1].includes("/") && (name === "script" || name === "style")) {
         const close = src.toLowerCase().indexOf("</" + name, i);
-        const end = close < 0 ? n : close;
+        const end = close === -1 ? n : close;
         const body = src.slice(i, end);
         const inner = name === "style" ? tokenizeCSS(body) : tokenizeJS(body, false);
         for (const t of inner) out.push(t);

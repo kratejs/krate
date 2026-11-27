@@ -155,6 +155,6 @@ export function attach(port, options = {}) {
 }
 
 // Started as a worker: serve requests.
-if (typeof WorkerGlobalScope !== "undefined" && globalThis instanceof WorkerGlobalScope) {
+if (typeof globalThis.WorkerGlobalScope === "function" && globalThis instanceof globalThis.WorkerGlobalScope) {
   attach(globalThis);
 }

@@ -19,6 +19,9 @@ globalThis.fetch = async (url) => {
 const { attach } = await import("../public/playground/engine.js");
 attach({
   postMessage: (msg) => parentPort.postMessage(msg),
+  get onmessage() {
+    return null;
+  },
   set onmessage(fn) {
     parentPort.on("message", (data) => fn({ data }));
   },

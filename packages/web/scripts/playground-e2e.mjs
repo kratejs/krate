@@ -1,3 +1,6 @@
+// The page callbacks read innerText on purpose: the checks are about rendered,
+// visible text, which textContent does not reflect.
+/* oxlint-disable unicorn/prefer-dom-node-text-content */
 // End-to-end test for the /playground/ page (Chromium, headless).
 //
 //   pnpm build && node scripts/playground-e2e.mjs
@@ -82,10 +85,10 @@ const waitReady = (page) => page.waitForSelector('#pg[data-stage="ready"]', { ti
 
 // Waits for the next build and for the preview iframe to finish loading it.
 async function afterEdit(page, action) {
-  const before = await page.evaluate(() => ({ b: +(pg.dataset.builds || 0), f: +(pg.dataset.frames || 0) }));
+  const before = await page.evaluate(() => ({ b: +(document.getElementById("pg").dataset.builds || 0), f: +(document.getElementById("pg").dataset.frames || 0) }));
   await action();
-  await page.waitForFunction((b) => +pg.dataset.builds > b, before.b, { timeout: 30000 });
-  await page.waitForFunction((f) => +pg.dataset.frames > f, before.f, { timeout: 30000 });
+  await page.waitForFunction((b) => +document.getElementById("pg").dataset.builds > b, before.b, { timeout: 30000 });
+  await page.waitForFunction((f) => +document.getElementById("pg").dataset.frames > f, before.f, { timeout: 30000 });
 }
 const preview = (page) => page.frameLocator("iframe.pg-frame");
 const setCode = (page, text) => page.locator(".ed-ta").fill(text);
@@ -125,7 +128,7 @@ try {
 
   // ---- Counter preview and interaction ----
   step = "counter";
-  await page.waitForFunction(() => +pg.dataset.frames >= 1, null, { timeout: 30000 });
+  await page.waitForFunction(() => +document.getElementById("pg").dataset.frames >= 1, null, { timeout: 30000 });
   const frame = preview(page);
   await frame.locator(".value").waitFor();
   assert.equal((await frame.locator(".value").innerText()).trim(), "0");
@@ -144,9 +147,9 @@ try {
   await preview(page).locator("h1", { hasText: "Edited title" }).waitFor();
   log("an edit rebuilds the preview automatically");
 
-  await page.evaluate(() => (window.__b = +pg.dataset.builds));
+  await page.evaluate(() => (window.__b = +document.getElementById("pg").dataset.builds));
   await setCode(page, counterSrc.replace("<h1>Counter</h1>", "<h1>{</h1>"));
-  await page.waitForFunction(() => +pg.dataset.builds > window.__b, null, { timeout: 30000 });
+  await page.waitForFunction(() => +document.getElementById("pg").dataset.builds > window.__b, null, { timeout: 30000 });
   await page.waitForSelector(".pg-badge-error");
   assert.ok((await page.locator(".ed-pre .l-error").count()) > 0, "the failing line is highlighted");
   await tab(page, "diagnostics");
@@ -265,7 +268,7 @@ try {
   assert.match(link, /\/playground\/#code=[\w-]+$/);
   const shared = await newPlayground(context, link);
   await waitReady(shared.page);
-  await shared.page.waitForFunction(() => +pg.dataset.builds >= 1, null, { timeout: 30000 });
+  await shared.page.waitForFunction(() => +document.getElementById("pg").dataset.builds >= 1, null, { timeout: 30000 });
   assert.match(await shared.page.locator(".ed-ta").inputValue(), /Shared title/);
   assert.equal(await shared.page.locator("#pg-gate").isVisible(), true, "a shared project does not auto-run");
   assert.equal(await shared.page.locator("iframe.pg-frame").count(), 0, "no preview frame before the user agrees");
@@ -279,7 +282,7 @@ try {
   // Example hash link.
   const ex = await newPlayground(context, base + "/playground/#example=stopwatch");
   await waitReady(ex.page);
-  await ex.page.waitForFunction(() => +pg.dataset.frames >= 1, null, { timeout: 30000 });
+  await ex.page.waitForFunction(() => +document.getElementById("pg").dataset.frames >= 1, null, { timeout: 30000 });
   assert.match(await ex.page.locator(".ed-ta").inputValue(), /Stopwatch/);
   assert.equal(await pickerValue(ex.page, "pg-example"), "stopwatch");
   await ex.page.close();
@@ -463,7 +466,7 @@ try {
     const desk = await browser.newContext({ viewport: { width: 1360, height: 860 }, colorScheme: scheme });
     const d = await newPlayground(desk, base + "/playground/#example=todo");
     await waitReady(d.page);
-    await d.page.waitForFunction(() => +pg.dataset.frames >= 1, null, { timeout: 30000 });
+    await d.page.waitForFunction(() => +document.getElementById("pg").dataset.frames >= 1, null, { timeout: 30000 });
     await d.page.waitForTimeout(300);
     await d.page.screenshot({ path: join(shots, `desktop-${scheme}.png`) });
     assert.deepEqual(d.errors, [], `desktop ${scheme}: no console errors`);
@@ -472,7 +475,7 @@ try {
     const mob = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: scheme, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
     const m = await newPlayground(mob, base + "/playground/#example=todo");
     await waitReady(m.page);
-    await m.page.waitForFunction(() => +pg.dataset.frames >= 1, null, { timeout: 30000 });
+    await m.page.waitForFunction(() => +document.getElementById("pg").dataset.frames >= 1, null, { timeout: 30000 });
     await m.page.waitForTimeout(300);
     const overflow = await m.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 0, `mobile ${scheme}: no horizontal page scroll (overflow ${overflow}px)`);

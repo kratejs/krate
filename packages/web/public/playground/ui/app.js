@@ -295,7 +295,7 @@ function wireTablist(list, select) {
   list.addEventListener("keydown", (e) => {
     const tabs = [...list.querySelectorAll('[role="tab"]')];
     const i = tabs.indexOf(document.activeElement);
-    if (i < 0) return;
+    if (i === -1) return;
     let next = -1;
     if (e.key === "ArrowRight") next = (i + 1) % tabs.length;
     else if (e.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length;
@@ -519,7 +519,7 @@ let swReg = null;
 let swFailed = "";
 let previewPath = "/";
 let previewReady = false; // files pushed to the worker at least once
-let frames = $("pg-frames");
+const frames = $("pg-frames");
 let currentFrame = null;
 let frameCount = 0;
 
@@ -553,7 +553,8 @@ async function pushFiles(files) {
     const t = setTimeout(() => reject(new Error("The preview service worker did not answer.")), 8000);
     ch.port1.onmessage = (e) => {
       clearTimeout(t);
-      e.data?.ok ? resolve() : reject(new Error(e.data?.error || "update failed"));
+      if (e.data?.ok) resolve();
+      else reject(new Error(e.data?.error || "update failed"));
     };
     worker.postMessage({ type: "update", sid, files }, [ch.port2]);
   });
@@ -722,7 +723,6 @@ async function engineAvailable() {
 let building = false;
 let dirty = false;
 let buildTimer = 0;
-let waitingForEngine = false;
 
 function schedule(delay = 250) {
   clearTimeout(buildTimer);
@@ -732,7 +732,6 @@ function schedule(delay = 250) {
 async function runBuild() {
   clearTimeout(buildTimer);
   if (!engineReady) {
-    waitingForEngine = true;
     if (!engineStarting && shared.stage !== "unavailable") startEngine().then(() => runBuild(), () => {});
     return;
   }

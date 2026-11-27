@@ -14,7 +14,7 @@ export default function Demo() {
   const [fps, setFps] = createSignal(0);
   const [ready, setReady] = createSignal(false);
   let canvas: HTMLCanvasElement | undefined;
-  let dots: Dot[] = [];
+  const dots: Dot[] = [];
   let width = 0;
   let height = 0;
   let pointer: { x: number; y: number } | null = null;
