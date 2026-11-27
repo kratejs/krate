@@ -83,7 +83,7 @@ func TestBuildCSSSignalsZeroJS(t *testing.T) {
 
 // hasHydrationScript reports whether the page references a page hydration script.
 func hasHydrationScript(html string) bool {
-	return regexp.MustCompile(`<script src="/index\.[A-Za-z0-9]+\.js"`).MatchString(html)
+	return regexp.MustCompile(`<script src="?/index\.[A-Za-z0-9]+\.js`).MatchString(html)
 }
 
 // readAllCSS concatenates every emitted stylesheet.
@@ -169,5 +169,92 @@ func checkClientChunkDeclares(t *testing.T, src string, wantHelper bool) {
 	}
 	if wantHelper && !strings.Contains(js, `class:"glyph"`) {
 		t.Errorf("helper body not declared in client JS:\n%.1500s", js)
+	}
+}
+
+// A destructured `[get, set] = createCSS*(...)` declaration is compile-time
+// state like the handle form: the page ships no hydration script and no runtime
+// createCSS* call.
+func TestBuildCSSSignalsDestructuredFormsZeroJS(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"choice": `export default function Page() {
+	const [size, setSize] = createCSSChoice('s', ['s', 'm', 'l']);
+	return (<main>
+		<button onClick={() => setSize('m')}>M</button>
+		<button onClick={() => setSize('l')}>L</button>
+		<p showIf={size() === 'l'}>large</p>
+		<b>{size()}</b>
+	</main>);
+}`,
+		"range": `export default function Page() {
+	const [step, setStep] = createCSSRange(0, { min: 0, max: 3, step: 1 });
+	return (<main>
+		<button onClick={() => setStep(2)}>two</button>
+		<button onClick={() => setStep(step() + 1)}>next</button>
+		<span>{step()}</span>
+	</main>);
+}`,
+		"toggle": `export default function Page() {
+	const [on, setOn] = createCSSToggle(false);
+	return (<main>
+		<button onClick={() => setOn(!on())}>flip</button>
+		<p showIf={on()}>on</p>
+	</main>);
+}`,
+		"flags": `export default function Page() {
+	const [flags, setFlag] = createCSSFlags(['a', 'b']);
+	return (<main>
+		<button onClick={() => setFlag('a', true)}>a</button>
+		<p showIf={flags.a()}>a is on</p>
+	</main>);
+}`,
+		"group": `export default function Page() {
+	const [open, setOpen] = createCSSGroup(null);
+	return (<main>
+		<button onClick={() => setOpen('q1')}>q1</button>
+		<p showIf={open() === 'q1'}>answer</p>
+	</main>);
+}`,
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			html, outDir, err := buildPageSrc(t, src)
+			if err != nil {
+				t.Fatalf("BuildAll: %v", err)
+			}
+			if hasHydrationScript(html) {
+				t.Errorf("destructured form should ship no page script:\n%.900s", html)
+			}
+			entries, _ := os.ReadDir(outDir)
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".js") {
+					data, _ := os.ReadFile(filepath.Join(outDir, e.Name()))
+					t.Errorf("unexpected client script %s:\n%.400s", e.Name(), data)
+				}
+			}
+		})
+	}
+}
+
+// A use the compiler cannot express in CSS stays a build error that names the
+// reason, for the destructured form as for the handle form.
+func TestBuildCSSSignalsDestructuredUnsupportedUseDiagnostic(t *testing.T) {
+	t.Parallel()
+	src := `export default function Page() {
+	const [size, setSize] = createCSSChoice('s', ['s', 'm']);
+	const next = 'm';
+	return (<main>
+		<button onClick={() => setSize(next)}>M</button>
+		<p showIf={size() === 'm'}>m</p>
+	</main>);
+}`
+	_, _, err := buildPageSrc(t, src)
+	if err == nil {
+		t.Fatal("expected a build error for a non-literal setter argument")
+	}
+	if !strings.Contains(err.Error(), "createSignal") {
+		t.Errorf("error should explain how to use client JS: %v", err)
 	}
 }

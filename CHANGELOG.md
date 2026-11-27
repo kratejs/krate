@@ -679,6 +679,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- CSS signals: the destructured form (`const [size, setSize] = createCSSChoice(...)`, and the same for
+  `createCSSRange`, `createCSSToggle`, `createCSSFlags`, `createCSSGroup`) no longer leaves a
+  `createCSS*(...)` call in the page script. Like the handle form it now compiles to zero client JS
+  when every use is a literal `onClick` setter or a `showIf`/text read; a use that cannot be lowered is
+  still a build error that names the reason. The `CSSScope` and `CSSFlagsScope` types now declare the
+  `.is()` / `.on()` / `.off()` helpers the compiler and the docs already support.
 - A Krate-native context value that is an object works in the browser. `<Ctx.Provider value={{ count,
   setCount }}>` and a value built by a hook (`value={useCounter()}`) keep their signal getters as getters
   (they were called, so the consumer's `count()` threw `n.count is not a function`), and a consumer that
