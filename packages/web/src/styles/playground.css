@@ -15,6 +15,15 @@
     background: var(--color-bg);
     color: var(--color-fg);
     font-size: 0.875rem;
+    /* Map the component tokens (checkbox, select) onto the site theme. */
+    --krate-bg: var(--color-bg);
+    --krate-card-bg: var(--color-bg);
+    --krate-surface: var(--color-bg-subtle);
+    --krate-border: var(--color-border-strong);
+    --krate-text: var(--color-fg);
+    --krate-text-muted: var(--color-muted);
+    --krate-primary: var(--color-action);
+    --krate-focus-ring: var(--color-link);
 }
 
 :root[data-theme="dark"] .pg {
@@ -34,7 +43,6 @@
 }
 
 .pg button,
-.pg select,
 .pg input {
     font: inherit;
 }
@@ -63,19 +71,30 @@
     gap: 0.5rem;
 }
 
-.pg-field label,
-.pg-codehead label {
+.pg-label {
     color: var(--color-muted);
 }
 
-.pg select {
-    height: 30px;
+.pg-select {
+    width: 15rem;
     max-width: 100%;
-    padding: 0 0.5rem;
-    border: 1px solid var(--color-border-strong);
-    border-radius: var(--radius);
-    background: var(--color-bg);
-    color: var(--color-fg);
+}
+
+.pg-select .krate-select-trigger {
+    height: 30px;
+    padding: 0 0.5rem 0 0.65rem;
+    font-size: inherit;
+}
+
+.pg-select .krate-select-content {
+    inset-inline-end: auto;
+    min-width: 100%;
+    width: max-content;
+    max-width: min(32rem, 90vw);
+}
+
+.pg-codehead .pg-select {
+    width: 16rem;
 }
 
 .pg-actions,
@@ -138,15 +157,11 @@
 }
 
 .pg-check {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    color: var(--color-muted);
-    cursor: pointer;
+    gap: 0.4rem;
 }
 
-.pg-check input {
-    accent-color: var(--color-action);
+.pg-check .krate-checkbox-label {
+    color: var(--color-muted);
 }
 
 .pg-engine {
@@ -278,16 +293,15 @@
     border-radius: 6px;
     background: var(--color-bg);
     color: var(--color-fg);
-    font-family: var(--font-mono);
 }
 
 .pg-badge {
     min-width: 1.35em;
     padding: 0 0.35em;
     border-radius: var(--radius-pill);
-    background: var(--color-bg-subtle);
-    border: 1px solid var(--color-border);
+    background: var(--pill-bg-strong);
     font-size: 0.72rem;
+    font-weight: 600;
     line-height: 1.5;
     text-align: center;
     color: var(--color-muted);
@@ -295,7 +309,6 @@
 
 .pg-badge-error {
     background: var(--pg-err-bg);
-    border-color: var(--pg-err);
     color: var(--pg-err);
 }
 
@@ -527,12 +540,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding: 0.2rem 0.6rem;
-    border: 1px solid var(--color-border);
+    padding: calc(0.2rem + 1px) calc(0.6rem + 1px);
+    border: 0;
     border-radius: var(--radius-pill);
-    background: var(--color-bg);
+    background: var(--pill-bg);
     color: var(--color-muted);
-    font: 12px/1.4 var(--font-mono);
+    font: 12px/1.4 var(--font-sans);
 }
 
 .pg-frames {
@@ -645,7 +658,7 @@
 .pg-table th[scope="row"] {
     text-align: start;
     font-weight: 400;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
 }
 
 .pg-table th[scope="row"] {
@@ -710,7 +723,7 @@
 
 .pg-diag-loc {
     margin-inline-start: 0.5rem;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 0.8125rem;
 }
 

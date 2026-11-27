@@ -89,7 +89,13 @@ async function afterEdit(page, action) {
 }
 const preview = (page) => page.frameLocator("iframe.pg-frame");
 const setCode = (page, text) => page.locator(".ed-ta").fill(text);
-const openExample = (page, id) => afterEdit(page, () => page.selectOption("#pg-example", id));
+// The pickers are Krate select listboxes (a combobox button and role=option items).
+const pickOption = async (page, id, value) => {
+  await page.click(`#${id} .krate-select-trigger`);
+  await page.locator(`#${id}`).getByRole("option", { name: value, exact: true }).click();
+};
+const pickerValue = (page, id) => page.evaluate((i) => document.getElementById(i).value, id);
+const openExample = (page, id) => afterEdit(page, () => pickOption(page, "pg-example", examples.find((e) => e.id === id)?.title ?? id));
 const tab = (page, name) => page.click(`#pg-tab-${name}`);
 
 try {
@@ -275,7 +281,7 @@ try {
   await waitReady(ex.page);
   await ex.page.waitForFunction(() => +pg.dataset.frames >= 1, null, { timeout: 30000 });
   assert.match(await ex.page.locator(".ed-ta").inputValue(), /Stopwatch/);
-  assert.equal(await ex.page.locator("#pg-example").inputValue(), "stopwatch");
+  assert.equal(await pickerValue(ex.page, "pg-example"), "stopwatch");
   await ex.page.close();
   log("#example=<id> opens an example");
 
@@ -388,6 +394,51 @@ try {
   await openExample(page, "fetch");
   await preview(page).getByRole("alert").waitFor({ timeout: 8000 });
   log("the fetch example degrades gracefully when offline");
+
+  // ---- Pickers and options: Krate select, Krate checkboxes ----
+  step = "pickers";
+  assert.equal(await page.locator("select").count(), 0, "the playground has no native select");
+  assert.equal(await page.locator('.pg input[type="checkbox"]:not(.krate-checkbox-input)').count(), 0, "the checkboxes are Krate checkboxes");
+  await openExample(page, "counter");
+  assert.equal(await pickerValue(page, "pg-example"), "counter");
+  // Keyboard: ArrowDown opens the list and focuses the search; type, Enter chooses.
+  await page.focus("#pg-example .krate-select-trigger");
+  await page.keyboard.press("ArrowDown");
+  assert.equal(await page.getAttribute("#pg-example .krate-select-trigger", "aria-expanded"), "true");
+  await afterEdit(page, async () => {
+    await page.keyboard.type("stopw");
+    await page.keyboard.press("Enter");
+  });
+  assert.equal(await pickerValue(page, "pg-example"), "stopwatch");
+  assert.equal(await page.getAttribute("#pg-example .krate-select-trigger", "aria-expanded"), "false");
+  await page.focus("#pg-example .krate-select-trigger");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.getAttribute("#pg-example .krate-select-trigger", "aria-expanded"), "false");
+  await openExample(page, "counter");
+  // Dev mode and Minify rebuild with the new option.
+  const optsBefore = await page.evaluate(() => JSON.parse(localStorage.getItem("krate-playground:v1")).opts);
+  await afterEdit(page, () => page.locator("label.krate-checkbox", { hasText: "Dev mode" }).click());
+  assert.equal(await page.locator("#pg-dev").isChecked(), true);
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("krate-playground:v1")).opts.dev === true, null, { timeout: 5000 });
+  await afterEdit(page, () => page.locator("label.krate-checkbox", { hasText: "Dev mode" }).click());
+  await afterEdit(page, () => page.locator("label.krate-checkbox", { hasText: "Minify" }).click());
+  assert.equal(await page.locator("#pg-minify").isChecked(), !optsBefore.minify);
+  await afterEdit(page, () => page.locator("label.krate-checkbox", { hasText: "Minify" }).click());
+  assert.equal(await page.locator("#pg-minify").isChecked(), optsBefore.minify);
+  // The output file pickers list the built files and switch the code shown.
+  await tab(page, "js");
+  const jsFiles = await page.locator("#pg-sel-js").evaluate((el) => el.value);
+  assert.ok(jsFiles.endsWith(".js"), "the JS picker shows a built file: " + jsFiles);
+  await page.click("#pg-sel-js .krate-select-trigger");
+  const jsOptions = await page.locator("#pg-sel-js [role=option]").allInnerTexts();
+  assert.ok(jsOptions.length >= 1 && jsOptions.includes(jsFiles), "the JS picker lists the built files");
+  await page.keyboard.press("Escape");
+  await tab(page, "html");
+  assert.equal(await pickerValue(page, "pg-sel-html"), "index.html");
+  await tab(page, "preview");
+  await openExample(page, "fetch");
+  log("example picker, Minify / Dev mode checkboxes and file pickers work");
 
   // ---- Layout: split drag, no horizontal overflow ----
   step = "layout";

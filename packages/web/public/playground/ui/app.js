@@ -14,6 +14,182 @@ const SPLIT_KEY = "krate-playground:split";
 const MAX_FILES = 40;
 const MAX_TOTAL = 400 * 1024;
 
+// ---- Select pickers ----------------------------------------------------------
+// The Krate select look (krate-select classes, styled by @krate/components)
+// driven from here, because the lists are refilled and set at runtime. The
+// keyboard model follows the Select component: ArrowDown/ArrowUp on the
+// button open the list and focus the search field; there arrows, Home and End
+// move the active option, Enter chooses, Escape closes and returns to the
+// button, Tab closes, and typing filters.
+const CHECK_SVG =
+  '<span class="krate-select-item-indicator" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg></span>';
+
+// Adds setOptions(list) and a value property to the picker root, and fires a
+// bubbling "change" event when the user chooses. An option may be
+// { value, label, hidden }: hidden ones are never listed but still name the
+// current value.
+function initPicker(root) {
+  const trigger = root.querySelector(".krate-select-trigger");
+  const valueEl = root.querySelector(".krate-select-value");
+  const placeholder = valueEl.textContent;
+  const uid = root.id + "-list";
+  const optLabel = (o) => (o.label === undefined ? o.value : o.label);
+  let options = [];
+  let value = "";
+  let query = "";
+  let active = -1;
+  let content = null;
+  let filter = null;
+  let viewport = null;
+
+  const isOpen = () => content !== null;
+  const shown = () => {
+    const q = query.toLowerCase();
+    return options.filter((o) => !o.hidden && (!q || optLabel(o).toLowerCase().includes(q) || o.value.toLowerCase().includes(q)));
+  };
+  const items = () => (viewport ? [...viewport.querySelectorAll(".krate-select-item")] : []);
+
+  function renderValue() {
+    const o = options.find((x) => x.value === value);
+    valueEl.textContent = o ? optLabel(o) : placeholder;
+  }
+
+  function renderList() {
+    const list = shown();
+    viewport.innerHTML = list.length
+      ? list
+          .map(
+            (o, i) =>
+              `<div class="krate-select-item${o.value === value ? " krate-select-item-selected" : ""}" role="option" id="${uid}-opt-${i}" data-index="${i}" aria-selected="${o.value === value}"><span class="krate-select-item-text">${escHTML(optLabel(o))}</span>${o.value === value ? CHECK_SVG : ""}</div>`,
+          )
+          .join("")
+      : '<div class="krate-select-empty">No results.</div>';
+    setActive(list.length ? active : -1);
+  }
+
+  function setActive(i, scroll) {
+    const els = items();
+    active = els.length ? Math.max(0, Math.min(i, els.length - 1)) : -1;
+    els.forEach((el, n) => {
+      const on = n === active;
+      el.classList.toggle("krate-select-item-active", on);
+      if (on) {
+        el.dataset.active = "true";
+        if (scroll) el.scrollIntoView({ block: "nearest" });
+      } else delete el.dataset.active;
+    });
+    if (active >= 0) filter.setAttribute("aria-activedescendant", `${uid}-opt-${active}`);
+    else filter.removeAttribute("aria-activedescendant");
+  }
+
+  function openList() {
+    if (isOpen()) return;
+    query = "";
+    const named = document.getElementById(trigger.getAttribute("aria-labelledby") || "");
+    content = document.createElement("div");
+    content.className = "krate-select-content";
+    content.innerHTML =
+      `<div class="krate-select-filter-wrapper"><input class="krate-select-filter" type="text" role="combobox" aria-expanded="true" aria-controls="${uid}" aria-autocomplete="list" placeholder="Search..." aria-label="Search options" autocomplete="off" spellcheck="false"></div>` +
+      `<div class="krate-select-viewport" role="listbox" id="${uid}" aria-label="${escHTML(named ? named.textContent : "Options")}"></div>`;
+    root.appendChild(content);
+    filter = content.querySelector(".krate-select-filter");
+    viewport = content.querySelector(".krate-select-viewport");
+    trigger.setAttribute("aria-expanded", "true");
+    trigger.setAttribute("aria-controls", uid);
+    active = Math.max(0, shown().findIndex((o) => o.value === value));
+    renderList();
+    setActive(active, true);
+    filter.focus();
+    filter.addEventListener("input", () => {
+      query = filter.value;
+      active = 0;
+      renderList();
+    });
+    filter.addEventListener("keydown", onFilterKey);
+    viewport.addEventListener("mousedown", (e) => e.preventDefault());
+    viewport.addEventListener("mousemove", (e) => {
+      const el = e.target.closest(".krate-select-item");
+      if (el && Number(el.dataset.index) !== active) setActive(Number(el.dataset.index));
+    });
+    viewport.addEventListener("click", (e) => {
+      const el = e.target.closest(".krate-select-item");
+      if (el) choose(shown()[Number(el.dataset.index)]);
+    });
+    document.addEventListener("mousedown", onDocDown, true);
+  }
+
+  function closeList(refocus) {
+    if (!isOpen()) return;
+    document.removeEventListener("mousedown", onDocDown, true);
+    content.remove();
+    content = filter = viewport = null;
+    query = "";
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.removeAttribute("aria-controls");
+    if (refocus) trigger.focus();
+  }
+
+  function choose(o) {
+    if (!o) return;
+    const changed = o.value !== value;
+    value = o.value;
+    renderValue();
+    closeList(true);
+    if (changed) root.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function onDocDown(e) {
+    if (!root.contains(e.target)) closeList(false);
+  }
+
+  function onFilterKey(e) {
+    const n = items().length;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (n) setActive((active + (e.key === "ArrowDown" ? 1 : -1) + n) % n, true);
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      setActive(e.key === "Home" ? 0 : n - 1, true);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (!e.isComposing) choose(shown()[active]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeList(true);
+    } else if (e.key === "Tab") {
+      closeList(false);
+    }
+  }
+
+  trigger.addEventListener("click", () => (isOpen() ? closeList(false) : openList()));
+  trigger.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      openList();
+    }
+  });
+  root.addEventListener("focusout", (e) => {
+    if (e.relatedTarget && !root.contains(e.relatedTarget)) closeList(false);
+  });
+
+  Object.defineProperty(root, "value", {
+    get: () => value,
+    set(v) {
+      value = String(v);
+      renderValue();
+      if (isOpen()) renderList();
+    },
+  });
+  root.setOptions = (list) => {
+    options = list;
+    renderValue();
+    if (isOpen()) renderList();
+  };
+  return root;
+}
+for (const el of document.querySelectorAll("[data-pg-select]")) initPicker(el);
+
 // ---- Island bridge -------------------------------------------------------
 
 const shared = (window.__pgState = window.__pgState || {});
@@ -173,7 +349,7 @@ function renderCode(kind) {
   const pre = $("pg-code-" + kind);
   const list = outList(kind);
   if (!list.includes(picked[kind])) picked[kind] = list[0] || "";
-  sel.innerHTML = list.map((p) => `<option value="${escHTML(p)}">${escHTML(p)}</option>`).join("");
+  sel.setOptions(list.map((p) => ({ value: p })));
   sel.value = picked[kind];
   if (!list.length) {
     pre.innerHTML = '<span class="pg-empty">Nothing built yet.</span>';
@@ -802,7 +978,7 @@ function loadExample(id) {
 
 function fillExampleSelect() {
   const sel = $("pg-example");
-  sel.innerHTML = examples.map((e) => `<option value="${escHTML(e.id)}">${escHTML(e.title)}</option>`).join("") + '<option value="" hidden>Custom project</option>';
+  sel.setOptions([...examples.map((e) => ({ value: e.id, label: e.title })), { value: "", label: "Custom project", hidden: true }]);
   sel.value = state.exampleId;
 }
 

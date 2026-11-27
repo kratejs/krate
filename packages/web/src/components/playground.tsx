@@ -1,4 +1,6 @@
 import { createSignal, onMount } from "@krate/runtime";
+import { Checkbox } from "@krate/components/checkbox";
+import "@krate/components/src/select/select.css";
 import "../styles/playground.css";
 
 // The playground shell is one small Krate client component. It owns the
@@ -6,6 +8,25 @@ import "../styles/playground.css";
 // editor, tokenizer and preview wiring are plain JS in /playground/ui/app.js,
 // loaded on mount so the island stays tiny. app.js reports through
 // "pg:state" events on window (and keeps the merged state in window.__pgState).
+
+// The pickers are the Krate select look (krate-select classes and tokens, CSS
+// from @krate/components/select) driven by plain JS in /playground/ui/app.js:
+// they need to be refilled and set from outside, which the Select component
+// does not allow. app.js fills the list and wires the keyboard behaviour.
+function Picker(props: { id: string; labelledby: string; placeholder: string }) {
+  return (
+    <div class="krate-select pg-select" id={props.id} data-pg-select>
+      <button class="krate-select-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-labelledby={props.labelledby}>
+        <span class="krate-select-value">{props.placeholder}</span>
+        <span class="krate-select-icon" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </span>
+      </button>
+    </div>
+  );
+}
 
 const mb = (n: number) => (n / 1048576).toFixed(1);
 const kb = (n: number) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");
@@ -59,8 +80,8 @@ export function Playground() {
       <div class="pg-toolbar">
         <h1 class="pg-title">Playground</h1>
         <div class="pg-field">
-          <label for="pg-example">Example</label>
-          <select id="pg-example"></select>
+          <span class="pg-label" id="pg-example-label">Example</span>
+          <Picker id="pg-example" labelledby="pg-example-label" placeholder="Loading examples..." />
         </div>
         <div class="pg-actions">
           <button id="pg-run" type="button" class="pg-btn pg-btn-primary" title="Rebuild now (Ctrl+Enter)">Run</button>
@@ -68,8 +89,8 @@ export function Playground() {
           <button id="pg-reset" type="button" class="pg-btn" title="Restore the selected example">Reset</button>
         </div>
         <div class="pg-opts">
-          <label class="pg-check"><input id="pg-minify" type="checkbox" /> Minify</label>
-          <label class="pg-check"><input id="pg-dev" type="checkbox" /> Dev mode</label>
+          <Checkbox id="pg-minify" class="pg-check">Minify</Checkbox>
+          <Checkbox id="pg-dev" class="pg-check">Dev mode</Checkbox>
         </div>
         <span class="pg-engine" role="status" aria-live="polite">
           {stage() === "ready" ? "Krate compiler " + version() : ""}
@@ -159,15 +180,15 @@ export function Playground() {
             </div>
 
             <div role="tabpanel" id="pg-panel-html" aria-labelledby="pg-tab-html" class="pg-panel" hidden>
-              <div class="pg-codehead"><label for="pg-sel-html">File</label><select id="pg-sel-html"></select></div>
+              <div class="pg-codehead"><span class="pg-label" id="pg-sel-html-label">File</span><Picker id="pg-sel-html" labelledby="pg-sel-html-label" placeholder="No files" /></div>
               <pre class="pg-code" id="pg-code-html" tabindex={0} aria-label="Generated HTML"></pre>
             </div>
             <div role="tabpanel" id="pg-panel-js" aria-labelledby="pg-tab-js" class="pg-panel" hidden>
-              <div class="pg-codehead"><label for="pg-sel-js">File</label><select id="pg-sel-js"></select></div>
+              <div class="pg-codehead"><span class="pg-label" id="pg-sel-js-label">File</span><Picker id="pg-sel-js" labelledby="pg-sel-js-label" placeholder="No files" /></div>
               <pre class="pg-code" id="pg-code-js" tabindex={0} aria-label="Generated JavaScript"></pre>
             </div>
             <div role="tabpanel" id="pg-panel-css" aria-labelledby="pg-tab-css" class="pg-panel" hidden>
-              <div class="pg-codehead"><label for="pg-sel-css">File</label><select id="pg-sel-css"></select></div>
+              <div class="pg-codehead"><span class="pg-label" id="pg-sel-css-label">File</span><Picker id="pg-sel-css" labelledby="pg-sel-css-label" placeholder="No files" /></div>
               <pre class="pg-code" id="pg-code-css" tabindex={0} aria-label="Generated CSS"></pre>
             </div>
             <div role="tabpanel" id="pg-panel-files" aria-labelledby="pg-tab-files" class="pg-panel" hidden>
