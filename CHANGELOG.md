@@ -1879,6 +1879,16 @@ host code runs in the native process. Names and options may change between relea
   with KR8009.
 - KR7116 (two modules export the same name and it cannot be renamed) is reported once per build as the
   changelog says; it was reported again for every page whose set of importing modules differed.
+- Syntax highlighting of `ts`, `tsx` and `typescript` code no longer marks the brackets of a type
+  argument list as errors: in `createSignal<Task[]>([])` the stock lexer read `<Task` as a JSX tag and
+  rendered `[` and `]` as error tokens. Type arguments and generic arrow parameters are now plain
+  punctuation, and JSX after a generic call still highlights as JSX.
+- CSS signals: a setter called from an event other than `onClick` (for example `onMouseEnter`) used to
+  build with the handler silently turned into a click. It is now a build error that points to
+  `createSignal`, as are extra event handlers on a CSS trigger (destructured or `{...scope.trigger()}`),
+  which were dropped without a trace.
+- Krate Native: `sdk/os` builds on platforms outside Linux, macOS and Windows (such as `GOOS=js`); the
+  locale helper was only compiled for Linux and macOS.
 
 ### Security
 

@@ -258,3 +258,79 @@ func TestBuildCSSSignalsDestructuredUnsupportedUseDiagnostic(t *testing.T) {
 		t.Errorf("error should explain how to use client JS: %v", err)
 	}
 }
+
+// A CSS-signal trigger is a <label>, so it can only react to a click. An
+// event handler for any other event must fail the build instead of being
+// silently turned into a click.
+func TestBuildCSSSignalsNonClickTriggerDiagnostic(t *testing.T) {
+	t.Parallel()
+	for _, event := range []string{"onMouseEnter", "onFocus", "onKeyDown", "onDblClick"} {
+		src := `export default function Page() {
+	const [size, setSize] = createCSSChoice('s', ['s', 'm']);
+	return (<main>
+		<button ` + event + `={() => setSize('m')}>M</button>
+		<p showIf={size() === 'm'}>m</p>
+	</main>);
+}`
+		_, _, err := buildPageSrc(t, src)
+		if err == nil {
+			t.Errorf("%s: expected a build error for a non-click setter handler", event)
+			continue
+		}
+		if !strings.Contains(err.Error(), "onClick") || !strings.Contains(err.Error(), "createSignal") {
+			t.Errorf("%s: error should say only onClick works and point to createSignal: %v", event, err)
+		}
+	}
+}
+
+func TestBuildCSSSignalsClickTriggerStillWorks(t *testing.T) {
+	t.Parallel()
+	src := `export default function Page() {
+	const [size, setSize] = createCSSChoice('s', ['s', 'm']);
+	return (<main>
+		<button onClick={() => setSize('m')}>M</button>
+		<p showIf={size() === 'm'}>m</p>
+	</main>);
+}`
+	if _, _, err := buildPageSrc(t, src); err != nil {
+		t.Fatalf("onClick trigger must build: %v", err)
+	}
+}
+
+// The handle form (`{...scope.trigger(v)}`) also compiles to a <label>; an
+// extra event handler on it would be dropped, so it is an error too.
+func TestBuildCSSSignalsHandleTriggerDroppedHandlerDiagnostic(t *testing.T) {
+	t.Parallel()
+	for _, extra := range []string{"onMouseEnter", "onClick"} {
+		src := `export default function Page() {
+	const size = createCSSChoice('s', ['s', 'm']);
+	return (<main>
+		<button {...size.trigger('m')} ` + extra + `={() => console.log(1)}>M</button>
+		<p {...size.panel('m')}>m</p>
+	</main>);
+}`
+		_, _, err := buildPageSrc(t, src)
+		if err == nil {
+			t.Errorf("%s: expected a build error for a handler that would be dropped", extra)
+			continue
+		}
+		if !strings.Contains(err.Error(), extra) || !strings.Contains(err.Error(), "createSignal") {
+			t.Errorf("%s: unclear error: %v", extra, err)
+		}
+	}
+}
+
+func TestBuildCSSSignalsTriggerExtraHandlerDiagnostic(t *testing.T) {
+	t.Parallel()
+	src := `export default function Page() {
+	const [size, setSize] = createCSSChoice('s', ['s', 'm']);
+	return (<main>
+		<button onClick={() => setSize('m')} onMouseEnter={() => console.log(1)}>M</button>
+		<p showIf={size() === 'm'}>m</p>
+	</main>);
+}`
+	_, _, err := buildPageSrc(t, src)
+	if err == nil || !strings.Contains(err.Error(), "onMouseEnter") {
+		t.Fatalf("expected an error naming onMouseEnter, got %v", err)
+	}
+}

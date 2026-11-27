@@ -385,9 +385,11 @@ func (b *builder) rewriteScopeSpread(el *ast.JSXElement) ast.Expr {
 
 		switch name {
 		case "trigger":
+			b.rejectDroppedHandlers(el, "")
 			opt := b.scopeOption(arg, "on")
 			return b.buildCSSTriggerAt(clone, csssignals.Trigger{Scope: ref.scope, Option: opt}, "")
 		case "close":
+			b.rejectDroppedHandlers(el, "")
 			// A toggle's controller is the single checkbox (option "on"); other
 			// scopes close via their "closed" sentinel.
 			opt := ref.scope.Sentinel
