@@ -91,7 +91,7 @@ func TestServerTierPagesHydrateTheirInteractiveChildren(t *testing.T) {
 	root := serverTierProject(t)
 	cases := []struct {
 		page, key, points string
-		wrapped          bool
+		wrapped           bool
 	}{
 		{"wrapped", "k:two", "[{points:5}]", true},
 		{"direct/one", "k:one", "[{points:2},{points:3}]", false},
