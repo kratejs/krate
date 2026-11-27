@@ -235,7 +235,9 @@ toast({ title: 'Saved', description: 'Your changes were saved.', variant: 'succe
 Options: `title`, `description`, `variant` (`default`, `success`, `destructive`),
 and `duration` in milliseconds (default 5000; `0` keeps it until closed).
 `toast()` returns `{ id, dismiss }` and is client-only; calling it during
-server rendering throws.
+server rendering throws. It needs no `<Toast>` or other host on the page: it
+creates its own region and ships the toast styles itself, so importing `toast`
+is enough.
 
 ## Not yet included
 

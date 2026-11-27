@@ -43,7 +43,9 @@ func (b *Bundler) resolveQueryImport(mod *Module, imp, base, query string) error
 	}
 	switch query {
 	case "raw":
-		b.order = append(b.order, &Module{Path: resolved, IsExternal: true})
+		// Keyed apart from the file's own module: a page that imports a
+		// component and its ?raw source must not see one module for both.
+		b.order = append(b.order, &Module{Path: resolved + "?raw", IsExternal: true})
 		return nil
 	case "url":
 		abs := resolved

@@ -679,6 +679,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A page that imports a module and its own source with `?raw` (`import Demo from './demo'` plus
+  `import src from './demo.tsx?raw'`) no longer loses the stylesheets of that module and of the
+  side-effect-free package components it imports. The raw import was recorded under the module's own
+  path and shadowed the real module when unused package CSS was pruned.
+- `toast()` is styled without a `<Toast>` on the page: `@krate/components` now imports the toast
+  stylesheet from `toast-api`, where `toast()` lives, instead of only from the `<Toast>` module.
 - Client-side navigation: server content inside a client component lost on a same-page swap. When the swap kept a
   client island (a table, say) and its new markup sat in a different number of elements than the old, the new
   island's server children (a `<Button asChild><Link>` in a cell) were read after the swap had moved their markup
