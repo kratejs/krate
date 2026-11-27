@@ -670,7 +670,7 @@ try {
   // server-action transport, without page reloads.
   let actions = { skipped: !actionsBase };
   if (actionsBase) {
-    const text = (id) => page.locator(`[data-testid=${id}]`).textContent();
+    const nativeText = (id) => page.locator(`[data-testid=${id}]`).textContent();
     const waitText = async (id, value) => {
       try {
         await page.waitForFunction(
@@ -849,6 +849,34 @@ try {
   if (decorated.ts !== "one-ts two-ts") fail(`.ts field decorators: ${decorated.ts}`);
   if (decorated.other !== "three-other") fail(`field decorator in a second module: ${decorated.other}`);
   if (decorated.label !== "static label") fail(`@static component: ${decorated.label}`);
+
+  // Krate-native reactivity: context values that are objects (a hook result
+  // or a literal carrying getters and setters) and primitives read in every
+  // expression position, derived local functions, and a bare getter as a
+  // resource source.
+  await go("/native-context/", "[data-testid=ctx-destructured]");
+  const nativeText = (id) => page.locator(`[data-testid=${id}]`).textContent();
+  const nativeWant = async (step, want) => {
+    for (const [id, value] of Object.entries(want)) {
+      const got = (await nativeText(id)).trim();
+      if (got !== value) fail(`native reactivity ${step}: ${id} is ${JSON.stringify(got)}, want ${JSON.stringify(value)}`);
+    }
+  };
+  await page.waitForFunction(() => document.querySelector("[data-testid=resource-value]").textContent === "got-a");
+  await nativeWant("initial", { "ctx-destructured": "0", "ctx-member": "n=0", "ctx-row": "Compact", "derived-total": "5", "derived-count": "2", "resource-value": "got-a" });
+  await page.locator("[data-testid=ctx-destructured]").click();
+  await page.locator("[data-testid=ctx-member]").click();
+  await nativeWant("context object", { "ctx-destructured": "6", "ctx-member": "n=6" });
+  const rowBefore = await page.locator("[data-testid=ctx-row]").evaluate((el) => `${el.className}|${el.dataset.info}`);
+  if (rowBefore !== "cx-compact|d=compact") fail(`context primitive in attributes: ${rowBefore}`);
+  await page.locator("[data-testid=ctx-toggle]").click();
+  await nativeWant("context primitive", { "ctx-row": "Wide" });
+  const rowAfter = await page.locator("[data-testid=ctx-row]").evaluate((el) => `${el.className}|${el.dataset.info}`);
+  if (rowAfter !== "cx-wide|d=wide") fail(`context primitive in attributes after a change: ${rowAfter}`);
+  await page.locator("[data-testid=derived-add]").click();
+  await nativeWant("derived function", { "derived-total": "10", "derived-count": "3" });
+  await page.locator("[data-testid=resource-next]").click();
+  await page.waitForFunction(() => document.querySelector("[data-testid=resource-value]").textContent === "got-ax");
 
   await settleErrors();
   for (let i = errors.length - 1; i >= 0; i--) {

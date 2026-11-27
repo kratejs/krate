@@ -79,6 +79,32 @@ const ThemeCtx = createContext('light');
 // ThemeCtx.defaultValue - fallback when no provider is present
 ```
 
+A context value that changes stays live in the consumer. A primitive can be used
+in any expression (string concatenation, template literals, attributes,
+conditions), and an object value keeps its getters and setters, so it can carry
+signal state:
+
+```tsx
+const CounterCtx = createContext({ count: () => 0, setCount: (n: number) => {} });
+
+function Counter() {
+  const { count, setCount } = CounterCtx.useContext();
+  return <button onClick={() => setCount(count() + 1)}>{count()}</button>;
+}
+
+function App() {
+  const [count, setCount] = createSignal(0);
+  // Signal getters in the provider value stay getters (they are not called).
+  return (
+    <CounterCtx.Provider value={{ count, setCount }}>
+      <Counter />
+    </CounterCtx.Provider>
+  );
+}
+```
+
+A value built by a hook works the same way: `<Ctx.Provider value={useCounter()}>`.
+
 ## Resources
 
 ```tsx
@@ -98,7 +124,9 @@ refetch()         // trigger a re-fetch
 ```
 
 Resources re-fetch automatically when their source signal changes and abort
-in-flight requests when the source changes mid-flight.
+in-flight requests when the source changes mid-flight. The source can be a
+signal getter itself (`createResource(userId, fetchUser)`) or an arrow function
+that reads signals.
 
 ## Conditional rendering (`showIf`)
 

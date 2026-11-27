@@ -679,6 +679,22 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A Krate-native context value that is an object works in the browser. `<Ctx.Provider value={{ count,
+  setCount }}>` and a value built by a hook (`value={useCounter()}`) keep their signal getters as getters
+  (they were called, so the consumer's `count()` threw `n.count is not a function`), and a consumer that
+  destructures the value (`const { count, setCount } = Ctx.useContext()`) or reads a member of it follows
+  the provider instead of reading the context default.
+- A Krate-native context read held in a local (`const density = Ctx.useContext()`) is live in every
+  expression, not only a plain text child: `class={"cx-" + density}`, template literals and conditions
+  rendered the getter's source (`cx-()=>r()`) or compared the getter itself, and never updated. The local
+  is now a derived getter and its reads are calls, as in the React lowering. CSS scope contexts
+  (`createScope`) are unchanged.
+- `createResource(id, fetcher)` with a bare signal getter as its source refetches when the signal
+  changes, like `createResource(() => id(), fetcher)`. The compiler called the getter once and froze the
+  first value.
+- Regression test for a derived local function (`const total = () => items().reduce(...)`, and the
+  function declaration form) staying live in a text binding.
+
 - A page that imports a module and its own source with `?raw` (`import Demo from './demo'` plus
   `import src from './demo.tsx?raw'`) no longer loses the stylesheets of that module and of the
   side-effect-free package components it imports. The raw import was recorded under the module's own
