@@ -57,6 +57,8 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 		}
 	}
 
+	lowerContextLocals(ann, []ModuleSource{{Program: prog, Path: sourceFile, RawSource: rawSource}})
+
 	// 6. Detect streaming config
 	ann.HasStreaming = detectStreamingConfig(prog.Body)
 
@@ -786,6 +788,7 @@ func MergeImportAliases(ann *irtree.Annotations, modules []ModuleSource, entry M
 	}
 	markLazyDefaults(ann, modules)
 	lowerContextUses(ann, modules)
+	lowerContextLocals(ann, modules)
 	collectCrossModuleHOCs(ann, modules)
 	aliases := BuildImportAliases(modules)
 	aliasLocals := make([]string, 0, len(aliases))

@@ -1,3 +1,5 @@
+import './toast.css';
+
 export interface ToastOptions {
   title?: string;
   description?: string;

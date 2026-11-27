@@ -679,6 +679,34 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- CSS signals: the destructured form (`const [size, setSize] = createCSSChoice(...)`, and the same for
+  `createCSSRange`, `createCSSToggle`, `createCSSFlags`, `createCSSGroup`) no longer leaves a
+  `createCSS*(...)` call in the page script. Like the handle form it now compiles to zero client JS
+  when every use is a literal `onClick` setter or a `showIf`/text read; a use that cannot be lowered is
+  still a build error that names the reason. The `CSSScope` and `CSSFlagsScope` types now declare the
+  `.is()` / `.on()` / `.off()` helpers the compiler and the docs already support.
+- A Krate-native context value that is an object works in the browser. `<Ctx.Provider value={{ count,
+  setCount }}>` and a value built by a hook (`value={useCounter()}`) keep their signal getters as getters
+  (they were called, so the consumer's `count()` threw `n.count is not a function`), and a consumer that
+  destructures the value (`const { count, setCount } = Ctx.useContext()`) or reads a member of it follows
+  the provider instead of reading the context default.
+- A Krate-native context read held in a local (`const density = Ctx.useContext()`) is live in every
+  expression, not only a plain text child: `class={"cx-" + density}`, template literals and conditions
+  rendered the getter's source (`cx-()=>r()`) or compared the getter itself, and never updated. The local
+  is now a derived getter and its reads are calls, as in the React lowering. CSS scope contexts
+  (`createScope`) are unchanged.
+- `createResource(id, fetcher)` with a bare signal getter as its source refetches when the signal
+  changes, like `createResource(() => id(), fetcher)`. The compiler called the getter once and froze the
+  first value.
+- Regression test for a derived local function (`const total = () => items().reduce(...)`, and the
+  function declaration form) staying live in a text binding.
+
+- A page that imports a module and its own source with `?raw` (`import Demo from './demo'` plus
+  `import src from './demo.tsx?raw'`) no longer loses the stylesheets of that module and of the
+  side-effect-free package components it imports. The raw import was recorded under the module's own
+  path and shadowed the real module when unused package CSS was pruned.
+- `toast()` is styled without a `<Toast>` on the page: `@krate/components` now imports the toast
+  stylesheet from `toast-api`, where `toast()` lives, instead of only from the `<Toast>` module.
 - Client-side navigation: server content inside a client component lost on a same-page swap. When the swap kept a
   client island (a table, say) and its new markup sat in a different number of elements than the old, the new
   island's server children (a `<Button asChild><Link>` in a cell) were read after the swap had moved their markup
@@ -1851,6 +1879,16 @@ host code runs in the native process. Names and options may change between relea
   with KR8009.
 - KR7116 (two modules export the same name and it cannot be renamed) is reported once per build as the
   changelog says; it was reported again for every page whose set of importing modules differed.
+- Syntax highlighting of `ts`, `tsx` and `typescript` code no longer marks the brackets of a type
+  argument list as errors: in `createSignal<Task[]>([])` the stock lexer read `<Task` as a JSX tag and
+  rendered `[` and `]` as error tokens. Type arguments and generic arrow parameters are now plain
+  punctuation, and JSX after a generic call still highlights as JSX.
+- CSS signals: a setter called from an event other than `onClick` (for example `onMouseEnter`) used to
+  build with the handler silently turned into a click. It is now a build error that points to
+  `createSignal`, as are extra event handlers on a CSS trigger (destructured or `{...scope.trigger()}`),
+  which were dropped without a trace.
+- Krate Native: `sdk/os` builds on platforms outside Linux, macOS and Windows (such as `GOOS=js`); the
+  locale helper was only compiled for Linux and macOS.
 
 ### Security
 

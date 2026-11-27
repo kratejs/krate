@@ -53,47 +53,9 @@ func collectLazyComponents(body []ast.Stmt, ann *irtree.Annotations, file, raw s
 // in any bundled module (the React lowering only sees its own module, so a
 // context imported from elsewhere was lowered as a possible promise).
 func lowerContextUses(ann *irtree.Annotations, modules []ModuleSource) {
-	contexts := map[string]bool{}
-	for _, m := range modules {
-		if m.Program == nil {
-			continue
-		}
-		for _, stmt := range m.Program.Body {
-			vs, ok := stmt.(*ast.VarStmt)
-			if !ok {
-				if exp, isExp := stmt.(*ast.ExportStmt); isExp {
-					vs, ok = exp.Declaration.(*ast.VarStmt)
-				}
-			}
-			if !ok || vs == nil {
-				continue
-			}
-			for _, d := range vs.Decls {
-				if call, ok := d.Init.(*ast.CallExpr); ok && d.Name != "" {
-					if id, ok := call.Callee.(*ast.Identifier); ok && (id.Name == "createContext" || id.Name == "createScope") {
-						contexts[d.Name] = true
-					}
-				}
-			}
-		}
-	}
+	contexts := contextBindings(modules, true)
 	if len(contexts) == 0 {
 		return
-	}
-	// Renamed imports of a context are contexts too.
-	for _, m := range modules {
-		if m.Program == nil {
-			continue
-		}
-		for _, stmt := range m.Program.Body {
-			if imp, ok := stmt.(*ast.ImportStmt); ok {
-				for _, n := range imp.Named {
-					if n.Local != "" && contexts[n.Remote] {
-						contexts[n.Local] = true
-					}
-				}
-			}
-		}
 	}
 	rewritten := map[*ast.FnDecl]*ast.FnDecl{}
 	for fnKey, fn := range ann.Functions {

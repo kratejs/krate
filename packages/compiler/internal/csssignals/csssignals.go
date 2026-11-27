@@ -633,14 +633,15 @@ func (a *Analyzer) names() map[string]bool {
 	return set
 }
 
-// MatchTrigger matches an element whose event handler is a valid setter call
-// for one of this component's scopes.
+// MatchTrigger matches an element whose onClick handler is a valid setter call
+// for one of this component's scopes. A trigger compiles to a <label>, so no
+// other event can drive it.
 func (a *Analyzer) MatchTrigger(el *ast.JSXElement) (Trigger, bool) {
 	if el == nil || el.Opening == nil {
 		return Trigger{}, false
 	}
 	for _, attr := range el.Opening.Attributes {
-		if attr == nil || attr.Value == nil || !isOnEvent(attr.Name) {
+		if attr == nil || attr.Value == nil || attr.Name != "onClick" {
 			continue
 		}
 		if t, ok := a.matchHandler(attr.Value); ok {

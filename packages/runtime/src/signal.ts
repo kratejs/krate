@@ -727,6 +727,8 @@ export type CSSFlagsScope<K extends string> = [
   trigger: (flag: K) => Record<string, unknown>;
   panel: (flag: K) => Record<string, unknown>;
   close: () => Record<string, unknown>;
+  /** Condition atom for `showIf`: true while `flag` is on. */
+  is: (flag: K) => boolean;
 };
 
 export function createCSSFlags<K extends string>(
@@ -745,6 +747,7 @@ export function createCSSFlags<K extends string>(
   scope.trigger = (flag: K) => ({ 'data-krate-scope': 'trigger', value: flag });
   scope.panel = (flag: K) => ({ 'data-krate-scope': 'panel', value: flag });
   scope.close = () => ({ 'data-krate-scope': 'close' });
+  scope.is = (flag: K) => getters[flag]?.() ?? false;
   return scope;
 }
 
@@ -797,6 +800,12 @@ export type CSSScope<T> = [() => T, (next: T) => void] & {
   close: () => Record<string, unknown>;
   /** The current selected value (live, via `--krate-current`). */
   current: () => T;
+  /** Condition atom for `showIf`: true while `value` is selected. */
+  is: (value: T) => boolean;
+  /** Condition atom for a toggle: true while it is on. */
+  on: () => boolean;
+  /** Negated condition atom for a toggle: true while it is off. */
+  off: () => boolean;
 };
 
 function withScopeHelpers<T>(result: [() => T, (next: T) => void]): CSSScope<T> {
@@ -805,6 +814,9 @@ function withScopeHelpers<T>(result: [() => T, (next: T) => void]): CSSScope<T> 
   scope.panel = (value?: T) => ({ 'data-krate-scope': 'panel', value });
   scope.close = () => ({ 'data-krate-scope': 'close' });
   scope.current = () => result[0]();
+  scope.is = (value: T) => result[0]() === value;
+  scope.on = () => Boolean(result[0]());
+  scope.off = () => !result[0]();
   return scope;
 }
 

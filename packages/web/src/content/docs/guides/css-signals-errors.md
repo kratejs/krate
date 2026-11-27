@@ -11,6 +11,13 @@ CSS fails the build with a hint. This page maps each error to its fix.
 
 ## State read / written in an unsupported place
 
+**`the setter is used in onMouseEnter; CSS state can only be set from an onClick trigger`**
+
+A CSS trigger compiles to a `<label>`, so it can only react to a click. Hover,
+focus and key events cannot set CSS state, and extra handlers on a trigger
+(including on `{...scope.trigger()}`) are rejected because they would be
+dropped. Use `onClick`, or switch the state to `createSignal` for client JS.
+
 **`the state is rendered as text; only showIf panels and onClick triggers are supported`**
 
 The getter is used somewhere other than a `showIf` panel, a bare live-text read,

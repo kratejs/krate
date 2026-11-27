@@ -297,6 +297,11 @@ func (f *localFolder) decl(decl *ast.VarDecl) {
 				return
 			}
 		}
+		// The destructured `[get, set] = createCSS*(...)` form is compile-time
+		// state like the handle form: never a runtime local.
+		if isCSSFactoryCall(decl.Init) {
+			return
+		}
 		f.destructuredDecl(decl)
 		return
 	}

@@ -220,6 +220,9 @@ func (b *Bundler) pruneSideEffectFreeCSS() {
 	free := make(map[*Module]bool)
 	anyFree := false
 	for _, m := range b.order {
+		if m.IsExternal {
+			continue
+		}
 		abs := m.Path
 		if !filepath.IsAbs(abs) {
 			abs = filepath.Join(b.root, abs)

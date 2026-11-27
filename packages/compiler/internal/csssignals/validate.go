@@ -89,6 +89,9 @@ func (a *Analyzer) validateJSX(el *ast.JSXElement, names map[string]bool) string
 				continue
 			}
 			if referencesCSS(attr.Value, names) {
+				if attr.Name != "onClick" {
+					return "the setter is used in " + attr.Name + "; CSS state can only be set from an onClick trigger (hover, focus and key events need client JS)"
+				}
 				return "the setter is called outside a recognised `() => set(...)` handler"
 			}
 			continue

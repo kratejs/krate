@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -40,9 +41,25 @@ func (b *builder) rewriteCSSSignalElement(el *ast.JSXElement) ast.Expr {
 
 	// Trigger: an element whose handler calls one of our setters.
 	if trigger, ok := a.MatchTrigger(el); ok {
+		b.rejectDroppedHandlers(el, "onClick")
 		return b.buildCSSTrigger(el, trigger)
 	}
 	return nil
+}
+
+// rejectDroppedHandlers reports an error for every event handler on a CSS
+// trigger other than the one that is the trigger itself (keep, may be empty).
+// The trigger becomes a <label>, which carries no handlers, so they would be
+// dropped without a trace.
+func (b *builder) rejectDroppedHandlers(el *ast.JSXElement, keep string) {
+	for _, attr := range el.Opening.Attributes {
+		if attr == nil || attr.Spread || !isOnEvent(attr.Name) || attr.Name == keep {
+			continue
+		}
+		b.cssErrs = append(b.cssErrs, fmt.Errorf(
+			"%s on a CSS trigger at line %d would be dropped: a trigger compiles to a <label> that only reacts to a click. Remove the handler, move it to another element, or use createSignal for client JS",
+			attr.Name, el.Position.Line))
+	}
 }
 
 // buildCSSTrigger rewrites a trigger element into a `<label>`.

@@ -1058,9 +1058,22 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 		return e
 	}
 	for i, arg := range e.Args {
+		if i == 0 && isCreateResourceCall(e) {
+			// A getter is the reactive source of a resource as it stands, like
+			// an arrow `() => id()`; calling it would freeze the first value.
+			if id, ok := arg.(*ast.Identifier); ok && sc.isGetter(id.Name) {
+				c.reads++
+				continue
+			}
+		}
 		e.Args[i] = c.rewriteExpr(arg, sc)
 	}
 	return e
+}
+
+func isCreateResourceCall(e *ast.CallExpr) bool {
+	id, ok := e.Callee.(*ast.Identifier)
+	return ok && id.Name == "createResource"
 }
 
 // jsxKind reports whether callee is a react/jsx-runtime element factory (either
@@ -1287,7 +1300,14 @@ func (c *reactCtx) rewriteJSXElement(el *ast.JSXElement, sc *scope) {
 				}
 			}
 			if attr.Value != nil {
-				attr.Value = c.rewriteExpr(attr.Value, sc)
+				if attr.Name == "value" && !c.react && strings.HasSuffix(el.Opening.Name, ".Provider") {
+					// A Krate-native provider carries getters as getters
+					// (`value={{ count, setCount }}`), like a native hook's
+					// return; the consumer calls `count()`.
+					attr.Value = c.rewriteReturnedGetters(attr.Value, sc)
+				} else {
+					attr.Value = c.rewriteExpr(attr.Value, sc)
+				}
 			}
 			kept = append(kept, attr)
 		}
