@@ -295,6 +295,19 @@ return [...new Uint8Array(s)].slice(0, 4).map((x) => x.toString(16).padStart(2, 
 const data = new Uint8Array([3]); const s = new Uint8Array(await crypto.subtle.sign("HMAC", k, data));
 const good = await crypto.subtle.verify("HMAC", k, s, data); s[0] ^= 1; const bad = await crypto.subtle.verify("HMAC", k, s, data);
 return good && !bad ? "ok" : "bad"`,
+	"crypto.subtle.deriveBits": `const k = await crypto.subtle.importKey("raw", new TextEncoder().encode("password"), "PBKDF2", false, ["deriveBits"]);
+const b = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: new TextEncoder().encode("salt"), iterations: 1, hash: "SHA-256" }, k, 256);
+let t = ""; try { await crypto.subtle.deriveBits({ name: "HKDF", salt: new Uint8Array(0), info: new Uint8Array(0), hash: "SHA-256" }, k, 256) } catch (e) { t = e.name }
+return [...new Uint8Array(b)].slice(0, 4).map((x) => x.toString(16).padStart(2, "0")).join("") === "120fb6cf" && t === "NotSupportedError" ? "ok" : "bad"`,
+	"crypto.subtle.deriveKey": `const k = await crypto.subtle.importKey("raw", new TextEncoder().encode("password"), "PBKDF2", false, ["deriveKey"]);
+const h = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: new TextEncoder().encode("salt"), iterations: 2, hash: "SHA-1" }, k, { name: "HMAC", hash: "SHA-256", length: 160 }, true, ["sign"]);
+const raw = await crypto.subtle.exportKey("raw", h);
+return h.algorithm.name === "HMAC" && h.algorithm.length === 160 && [...new Uint8Array(raw)].map((x) => x.toString(16).padStart(2, "0")).join("") === "ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957" ? "ok" : "bad"`,
+	"crypto.subtle.exportKey": `const k = await crypto.subtle.importKey("raw", new Uint8Array([7, 8]), { name: "HMAC", hash: "SHA-256" }, true, ["sign"]);
+const raw = new Uint8Array(await crypto.subtle.exportKey("raw", k));
+const locked = await crypto.subtle.importKey("raw", new Uint8Array([7]), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+let t = ""; try { await crypto.subtle.exportKey("raw", locked) } catch (e) { t = e.name }
+return raw.length === 2 && raw[1] === 8 && t === "InvalidAccessError" ? "ok" : "bad"`,
 	"CryptoKey":   `const k = await crypto.subtle.importKey("raw", new Uint8Array([1]), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]); return k instanceof CryptoKey ? "ok" : "bad"`,
 	"console":     `return ["log", "info", "debug", "warn", "error", "trace"].every((m) => typeof console[m] === "function") && console.table === undefined ? "ok" : "bad"`,
 	"globalThis":  `return globalThis.Object === Object ? "ok" : "bad"`,

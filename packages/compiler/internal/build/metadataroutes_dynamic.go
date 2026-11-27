@@ -317,6 +317,7 @@ func (b *Builder) buildDynamicDataRoute(f metaRouteFile, revalidate int) (metaRo
 		opts.MinifyWhitespace, opts.MinifyIdentifiers, opts.MinifySyntax = true, true, true
 	}
 	jseval.ApplyNodeESM(&opts)
+	withAuthConfig(&opts, b.Cfg)
 	withSourceMeta(&opts, sourceRootFor(b.Root), "")
 	res := esbuildBuild(opts)
 	if len(res.Errors) > 0 {

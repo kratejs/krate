@@ -10,7 +10,7 @@ func HasClientComponent(slots []SlotNode) bool {
 			if n.Component == nil {
 				continue
 			}
-			if n.Component.Tier == TierClient || HasClientComponent(n.Component.Children) || HasClientComponent(n.Component.ReturnSlots) {
+			if n.Component.Tier == TierClient || HasClientComponent(n.Component.Children) || HasClientComponent(n.Component.ReturnSlots) || HasClientComponent(n.Component.CallSiteSlots) {
 				return true
 			}
 		case *ConditionalSlot:

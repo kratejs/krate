@@ -107,7 +107,7 @@
     "crypto": {
       "title": "Crypto",
       "section": "webapi/crypto.js",
-      "description": "crypto.getRandomValues, randomUUID and crypto.subtle (digest and HMAC in the Go host).",
+      "description": "crypto.getRandomValues, randomUUID and crypto.subtle (digest, HMAC and PBKDF2 in the Go host).",
       "requires": [],
       "globals": [
         "CryptoKey",
@@ -813,7 +813,7 @@
       "api": "crypto.subtle",
       "status": "partial",
       "feature": "crypto",
-      "notes": "digest, and HMAC importKey/sign/verify with raw keys.",
+      "notes": "digest, HMAC importKey/sign/verify with raw keys, and PBKDF2 deriveBits/deriveKey.",
       "tests": [
         "TestCompatLedgerBehavior/crypto.subtle",
         "TestWebAPIMatrix/subtle unsupported",
@@ -837,10 +837,11 @@
       "api": "crypto.subtle.importKey",
       "status": "partial",
       "feature": "crypto",
-      "notes": "Only the raw format with the HMAC algorithm; anything else rejects with NotSupportedError.",
+      "notes": "Only the raw format with the HMAC and PBKDF2 algorithms; anything else rejects with NotSupportedError.",
       "tests": [
         "TestCompatLedgerBehavior/crypto.subtle.importKey",
         "TestWebAPIMatrix/hmac",
+        "TestWebAPIMatrix/pbkdf2",
         "corpus:crypto/hmac"
       ]
     },
@@ -888,24 +889,35 @@
     },
     {
       "api": "crypto.subtle.deriveKey",
-      "status": "not-supported",
+      "status": "partial",
       "feature": "crypto",
-      "notes": "Rejects with NotSupportedError.",
-      "hint": "Do this in a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+      "notes": "PBKDF2 to an HMAC key only; any other derived key type rejects with NotSupportedError.",
+      "tests": [
+        "TestCompatLedgerBehavior/crypto.subtle.deriveKey",
+        "TestWebAPIMatrix/pbkdf2",
+        "corpus:crypto/pbkdf2"
+      ]
     },
     {
       "api": "crypto.subtle.deriveBits",
-      "status": "not-supported",
+      "status": "partial",
       "feature": "crypto",
-      "notes": "Rejects with NotSupportedError.",
-      "hint": "Do this in a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+      "notes": "PBKDF2 only; any other algorithm rejects with NotSupportedError.",
+      "tests": [
+        "TestCompatLedgerBehavior/crypto.subtle.deriveBits",
+        "TestWebAPIMatrix/pbkdf2",
+        "corpus:crypto/pbkdf2"
+      ]
     },
     {
       "api": "crypto.subtle.exportKey",
-      "status": "not-supported",
+      "status": "partial",
       "feature": "crypto",
-      "notes": "Rejects with NotSupportedError.",
-      "hint": "Do this in a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+      "notes": "Only the raw format, for extractable HMAC keys; jwk, pkcs8 and spki reject with NotSupportedError.",
+      "tests": [
+        "TestCompatLedgerBehavior/crypto.subtle.exportKey",
+        "corpus:crypto/pbkdf2"
+      ]
     },
     {
       "api": "crypto.subtle.wrapKey",

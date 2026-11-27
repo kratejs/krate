@@ -51,8 +51,8 @@ scanned.
 | Status | APIs |
 |---|---|
 | Supported | 23 |
-| Partial | 20 |
-| Not supported | 68 |
+| Partial | 23 |
+| Not supported | 65 |
 | By design | 1 |
 
 ## Events and abort
@@ -171,24 +171,24 @@ Blob, File and FormData, with multipart parsing in the Go host. Feature group: `
 
 ## Crypto
 
-crypto.getRandomValues, randomUUID and crypto.subtle (digest and HMAC in the Go host). Feature group: `crypto`.
+crypto.getRandomValues, randomUUID and crypto.subtle (digest, HMAC and PBKDF2 in the Go host). Feature group: `crypto`.
 
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|
 | `crypto` | Partial | getRandomValues, randomUUID and a subset of crypto.subtle. |  | `TestCompatLedgerBehavior/crypto` |
 | `crypto.getRandomValues` | Partial | A float array throws a plain TypeError (Node throws a TypeMismatchError DOMException), and a DataView is accepted. |  | `TestCompatLedgerBehavior/crypto.getRandomValues`, `TestWebAPIMatrix/getRandomValues`, `corpus:crypto/get-random-values`, `corpus:crypto/get-random-values-errors`, `corpus:crypto/get-random-values-quota` |
 | `crypto.randomUUID` | Supported |  |  | `TestCompatLedgerBehavior/crypto.randomUUID`, `TestWebAPIMatrix/crypto uuid`, `corpus:crypto/random-uuid` |
-| `crypto.subtle` | Partial | digest, and HMAC importKey/sign/verify with raw keys. |  | `TestCompatLedgerBehavior/crypto.subtle`, `TestWebAPIMatrix/subtle unsupported`, `corpus:crypto/unsupported-subtle` |
+| `crypto.subtle` | Partial | digest, HMAC importKey/sign/verify with raw keys, and PBKDF2 deriveBits/deriveKey. |  | `TestCompatLedgerBehavior/crypto.subtle`, `TestWebAPIMatrix/subtle unsupported`, `corpus:crypto/unsupported-subtle` |
 | `crypto.subtle.digest` | Supported | SHA-1, SHA-256, SHA-384 and SHA-512. |  | `TestCompatLedgerBehavior/crypto.subtle.digest`, `TestBinaryHostFunctions`, `TestWebAPIMatrix/digest`, `corpus:crypto/digest`, `corpus:crypto/digest-errors` |
-| `crypto.subtle.importKey` | Partial | Only the raw format with the HMAC algorithm; anything else rejects with NotSupportedError. |  | `TestCompatLedgerBehavior/crypto.subtle.importKey`, `TestWebAPIMatrix/hmac`, `corpus:crypto/hmac` |
+| `crypto.subtle.importKey` | Partial | Only the raw format with the HMAC and PBKDF2 algorithms; anything else rejects with NotSupportedError. |  | `TestCompatLedgerBehavior/crypto.subtle.importKey`, `TestWebAPIMatrix/hmac`, `TestWebAPIMatrix/pbkdf2`, `corpus:crypto/hmac` |
 | `crypto.subtle.sign` | Partial | HMAC keys only. |  | `TestCompatLedgerBehavior/crypto.subtle.sign`, `TestWebAPIMatrix/hmac`, `corpus:crypto/hmac` |
 | `crypto.subtle.verify` | Partial | HMAC keys only (constant-time compare). |  | `TestCompatLedgerBehavior/crypto.subtle.verify`, `corpus:crypto/hmac` |
 | `crypto.subtle.encrypt` | Not supported | Rejects with NotSupportedError. | Do this in a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `crypto.subtle.decrypt` | Not supported | Rejects with NotSupportedError. | Do this in a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `crypto.subtle.generateKey` | Not supported | Rejects with NotSupportedError. | Do this in a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
-| `crypto.subtle.deriveKey` | Not supported | Rejects with NotSupportedError. | Do this in a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
-| `crypto.subtle.deriveBits` | Not supported | Rejects with NotSupportedError. | Do this in a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
-| `crypto.subtle.exportKey` | Not supported | Rejects with NotSupportedError. | Do this in a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
+| `crypto.subtle.deriveKey` | Partial | PBKDF2 to an HMAC key only; any other derived key type rejects with NotSupportedError. |  | `TestCompatLedgerBehavior/crypto.subtle.deriveKey`, `TestWebAPIMatrix/pbkdf2`, `corpus:crypto/pbkdf2` |
+| `crypto.subtle.deriveBits` | Partial | PBKDF2 only; any other algorithm rejects with NotSupportedError. |  | `TestCompatLedgerBehavior/crypto.subtle.deriveBits`, `TestWebAPIMatrix/pbkdf2`, `corpus:crypto/pbkdf2` |
+| `crypto.subtle.exportKey` | Partial | Only the raw format, for extractable HMAC keys; jwk, pkcs8 and spki reject with NotSupportedError. |  | `TestCompatLedgerBehavior/crypto.subtle.exportKey`, `corpus:crypto/pbkdf2` |
 | `crypto.subtle.wrapKey` | Not supported | Rejects with NotSupportedError. | Do this in a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `crypto.subtle.unwrapKey` | Not supported | Rejects with NotSupportedError. | Do this in a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `CryptoKey` | Supported | Instances come from crypto.subtle.importKey. |  | `TestCompatLedgerBehavior/CryptoKey` |

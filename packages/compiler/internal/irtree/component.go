@@ -34,7 +34,23 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	if node.Tier == TierClient {
 		b.finishClientComponent(node, fn, res, isPageRoot)
 	}
+	if node.Tier == TierServer {
+		b.keepServerPropsRegs(node, res)
+	}
 	return node
+}
+
+// keepServerPropsRegs keeps the props registrations of the client children a
+// server component renders. A server component ships no scope of its own, so
+// the emitter gives these a scope that only registers them; their values were
+// folded to literals (see childPropsReg).
+func (b *builder) keepServerPropsRegs(node *ComponentNode, res componentResult) {
+	for _, js := range res.propsRegs {
+		node.ExtraVars = append(node.ExtraVars, js)
+		if reg, ok := b.propsRegs[js]; ok {
+			node.PropsRegs = append(node.PropsRegs, reg)
+		}
+	}
 }
 
 // componentResult is what the scoped build of a component hands to

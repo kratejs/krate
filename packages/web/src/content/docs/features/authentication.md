@@ -88,8 +88,10 @@ the [browser client](#browser-client).
 
 Everything that is plain data goes in the `auth` key of `krate.config.ts`.
 The compiler validates it (unknown keys are warned about, invalid values fail
-the build) and delivers it to your API routes and middleware. Anything that
-needs a function stays in `defineAuth()`. When both set the same option, the
+the build) and delivers it to your API routes, middleware, server actions and
+server-rendered pages, even when the block only sets options such as `pages`
+or `session` for providers defined in code. Anything that needs a function
+stays in `defineAuth()`. When both set the same option, the
 code wins. Lists such as `protect` are merged.
 
 | Key | Default | Description |

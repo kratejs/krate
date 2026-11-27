@@ -1584,7 +1584,7 @@ func (b *Builder) BuildAll() error {
 			impls.buildAll(impls.boundaries)
 		}()
 		defer b.phase("parallel:server-bundles")()
-		serverBundles, serverBundleErrs = compileServerBundlesWith(impls, results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, actionMods, basePath, nil)
+		serverBundles, serverBundleErrs = compileServerBundlesWith(impls, results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, actionMods, basePath, nil, authBanner(b.Cfg))
 	})
 	wl := b.Prof.Laps("write:")
 	// Write shared runtime chunk only if at least one page needs client JS.

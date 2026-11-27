@@ -1139,7 +1139,9 @@ func (b *builder) childPropsReg(id string, props map[string]ast.Expr) PropsReg {
 			continue
 		}
 		val := b.renderChildPropValue(expr)
-		if b.livePropsParam == "props" && b.readsLiveProp(expr) {
+		if js, ok := b.serverPropValue(expr); ok {
+			val = js
+		} else if b.livePropsParam == "props" && b.readsLiveProp(expr) {
 			// Forwarding a live prop (`n={props.n}`) must stay a read of the
 			// parent's own props getter, not its build-time value, so the
 			// grandchild sees updates.
@@ -1154,6 +1156,25 @@ func (b *builder) childPropsReg(id string, props map[string]ast.Expr) PropsReg {
 		reg.Entries = append(reg.Entries, PropsRegEntry{Name: name, Value: val, Getter: b.isSignalDerivedProp(expr)})
 	}
 	return reg
+}
+
+// serverPropValue folds a prop a server component passes to a client child to
+// a literal. The server component's locals, params and imports exist only at
+// build time, so the registration must not reference them.
+func (b *builder) serverPropValue(expr ast.Expr) (string, bool) {
+	if b.currentNode == nil || b.currentNode.Tier != TierServer {
+		return "", false
+	}
+	v := b.evalValue(expr)
+	if v.ContainsUnknown() {
+		return "", false
+	}
+	lit := jsvalue.ToAST(v)
+	if lit == nil {
+		return "", false
+	}
+	js := generateExprJS(lit, nil)
+	return js, js != ""
 }
 
 // isSignalDerivedProp reports whether a call-site prop value reads one of the

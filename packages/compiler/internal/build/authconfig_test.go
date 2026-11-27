@@ -76,6 +76,69 @@ func TestAuthConfigReachesBothAPIArtifacts(t *testing.T) {
 	}
 }
 
+// TestAuthConfigWithoutProvidersIsDelivered: a block that only tunes pages
+// and sessions, for providers the app defines in code, still reaches routes.
+func TestAuthConfigWithoutProvidersIsDelivered(t *testing.T) {
+	t.Parallel()
+	trust := true
+	b, root := compatProject(t, map[string]string{"src/api/probe.ts": authProbe}, func(c *config.Config) {
+		c.Auth = config.AuthConfig{TrustHost: &trust, Pages: config.AuthPages{SignIn: "/login"}, Session: config.AuthSession{MaxAge: 3600}}
+	})
+	if err := b.CompileAPIRoutes([]string{filepath.Join(root, "src", "api", "probe.ts")}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(apiBundleDir(b.Cfg.OutDir), "probe.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(data); !strings.Contains(s, `globalThis.__KRATE_AUTH_CONFIG__={`) || !strings.Contains(s, `"/login"`) || !strings.Contains(s, `"maxAge":3600`) {
+		t.Errorf("the auth block did not reach the route:\n%s", s)
+	}
+}
+
+// TestAuthConfigReachesServerPages: auth() in a server-rendered page reads the
+// same config as the routes.
+func TestAuthConfigReachesServerPages(t *testing.T) {
+	t.Parallel()
+	b, root := scProject(t, map[string]string{
+		"src/pages/index.tsx": `export default function Home() { return <h1>home</h1>; }`,
+		"src/pages/me.tsx": `import { headers } from "@krate/runtime/server";
+export default async function Me() {
+  const h = await headers();
+  const cfg = (globalThis as { __KRATE_AUTH_CONFIG__?: { pages?: { signIn?: string } } }).__KRATE_AUTH_CONFIG__;
+  return <p>{h.get("x") ?? ""}{cfg?.pages?.signIn ?? "none"}</p>;
+}`,
+	})
+	b.Cfg.Auth = config.AuthConfig{Pages: config.AuthPages{SignIn: "/login"}}
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(b.Cfg.OutDir, ".krate", "server-bundles", "me.server.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(data), `globalThis.__KRATE_AUTH_CONFIG__={`) || !strings.Contains(string(data), `"/login"`) {
+		t.Errorf("the page bundle lacks the auth config:\n%.600s", data)
+	}
+}
+
+func TestServerPageBanner(t *testing.T) {
+	t.Parallel()
+	if serverPageBanner("", "") != nil {
+		t.Error("no base path and no auth must add no banner")
+	}
+	got := serverPageBanner("/docs", "A;\n")["js"]
+	if !strings.HasPrefix(got, "A;\n") || !strings.Contains(got, `"basePath":"/docs"`) {
+		t.Errorf("banner = %q", got)
+	}
+	if got := serverPageBanner("", "A;\n")["js"]; got != "A;\n" {
+		t.Errorf("auth-only banner = %q", got)
+	}
+}
+
 func TestAuthConfigAbsentWhenInactive(t *testing.T) {
 	t.Parallel()
 	b, root := compatProject(t, map[string]string{"src/api/probe.ts": authProbe}, nil)

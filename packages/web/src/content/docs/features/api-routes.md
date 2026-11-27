@@ -183,7 +183,8 @@ in the test suite):
   `queueMicrotask`, `performance.now()`, real `setTimeout`/`setInterval`
   (handlers can `await new Promise((r) => setTimeout(r, 100))`), `fetch`, and
   `crypto.getRandomValues` / `randomUUID` / `subtle.digest` / HMAC
-  `subtle.importKey`, `sign` and `verify`.
+  `subtle.importKey`, `sign`, `verify` and raw `exportKey`, and PBKDF2
+  `subtle.deriveBits` / `deriveKey` (to an HMAC key) for password hashing.
 
 Anything the embedded runtime does not implement (for example `TransformStream`,
 `WritableStream`, `WebSocket`, `Buffer`, AES in `crypto.subtle`) throws a
