@@ -1,0 +1,1 @@
+{"id":"progress","name":"Progress","group":"Feedback","summary":"Determinate progress built on native semantics.","builtWith":"Pure CSS","import":"import { Progress } from \"@krate/components\";"}

@@ -1,0 +1,1 @@
+{"id":"switch","name":"Switch","group":"Input","summary":"A native checkbox with role=switch.","builtWith":"Native input","import":"import { Switch } from \"@krate/components\";"}

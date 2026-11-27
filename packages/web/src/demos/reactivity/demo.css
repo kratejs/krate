@@ -1,0 +1,17 @@
+.rx-nodes { list-style: none; margin: 1rem 0 0.75rem; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.rx-nodes li { display: grid; grid-template-columns: minmax(0, 1fr) 4.5rem 3rem; gap: 0.5rem; align-items: center; padding: 0.55rem 0.8rem; border-top: 1px solid var(--line); }
+.rx-nodes li:first-child { border-top: 0; }
+.rx-nodes code { font-size: 0.82rem; color: var(--muted); overflow-wrap: anywhere; }
+.rx-val { font: 700 1.05rem ui-monospace, monospace; padding: 0.15rem 0.5rem; border-radius: 6px; text-align: center; background: var(--soft); }
+.rx-writes { font: 0.8rem ui-monospace, monospace; text-align: right; color: var(--muted); }
+.rx-writes::before { content: "writes "; }
+.rx-total { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+.rx-total strong { color: var(--fg); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: no-preference) {
+  .rx-flash { animation: rx-flash 0.7s ease-out; }
+}
+@keyframes rx-flash { from { background: var(--accent); color: #fff; } }
+@media (max-width: 480px) {
+  .rx-nodes li { grid-template-columns: minmax(0, 1fr) 3.5rem; }
+  .rx-writes { grid-column: 1 / -1; text-align: left; }
+}

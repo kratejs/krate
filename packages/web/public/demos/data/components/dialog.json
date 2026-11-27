@@ -1,0 +1,1 @@
+{"id":"dialog","name":"Dialog","group":"Overlay","summary":"Modal with focus trap, Escape to close and an inert page behind it.","builtWith":"CSS signals","import":"import { Dialog } from \"@krate/components\";"}

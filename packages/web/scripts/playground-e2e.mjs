@@ -349,7 +349,25 @@ try {
       assert.notEqual(t, "00:00.00", "the stopwatch ran");
     },
   };
+  // The demo-* examples are the gallery's demos: a few get a real interaction,
+  // the rest must build, render their heading and log no errors.
+  checks["demo-reactivity"] = async (f) => {
+    await f.getByRole("button", { name: "a + 1" }).click();
+    await f.locator('[data-node="0"]', { hasText: "3" }).waitFor({ timeout: 5000 });
+  };
+  checks["demo-css-signals"] = async (f) => {
+    assert.equal(await f.locator("script[src]").count(), 0, "the CSS signals demo loads no script");
+    await f.locator("label", { hasText: "Yearly" }).click();
+  };
+  checks["demo-data"] = async (f) => {
+    await f.locator(".dt-state strong", { hasText: "ready" }).waitFor({ timeout: 15000 });
+  };
   for (const e of examples) {
+    if (e.id.startsWith("demo-") && !checks[e.id]) {
+      checks[e.id] = async (f) => {
+        await f.locator("h1", { hasText: e.title.replace(/^Demo: /, "") }).waitFor({ timeout: 5000 });
+      };
+    }
     await openExample(page, e.id);
     await tab(page, "diagnostics");
     assert.equal(await page.locator(".pg-badge-error").count(), 0, `${e.id}: no error diagnostics`);

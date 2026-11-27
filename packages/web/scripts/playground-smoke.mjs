@@ -149,7 +149,7 @@ for (const ex of examples) {
     assert.ok(home, `${ex.id}: has a page`);
     const names = Object.keys(res.files);
     const scripts = [...home.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);
-    if (ex.id === "css-signals") assert.equal(scripts.length, 0, "css-signals ships no script");
+    if (ex.id === "css-signals" || ex.js === "zero") assert.equal(scripts.length, 0, `${ex.id} ships no script`);
     else if (ex.id !== "css-modules" && ex.id !== "multi-page") {
       assert.ok(names.some((n) => /^chunks\/runtime\.[\w-]+\.js$/.test(n)), `${ex.id}: the runtime chunk is emitted (have: ${names.join(", ")})`);
     }

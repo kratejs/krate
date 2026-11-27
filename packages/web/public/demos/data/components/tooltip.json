@@ -1,0 +1,1 @@
+{"id":"tooltip","name":"Tooltip","group":"Overlay","summary":"Shown on hover and focus, dismissed with Escape.","builtWith":"Signals","import":"import { Tooltip } from \"@krate/components\";"}

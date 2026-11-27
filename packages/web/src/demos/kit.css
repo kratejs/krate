@@ -1,0 +1,13 @@
+/* Shared basics for the demos. The site maps the tokens below onto its own
+   theme (see .demo-stage in styles/demos.css); the playground defines them. */
+.dk-btn { font: inherit; font-size: 0.9rem; line-height: 1; cursor: pointer; padding: 0.55rem 0.9rem; min-height: 38px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); transition: border-color 0.15s, background 0.15s, transform 0.1s; }
+.dk-btn:hover { border-color: var(--accent); }
+.dk-btn:active { transform: translateY(1px); }
+.dk-btn:focus-visible, .dk-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dk-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.dk-btn-primary:hover { filter: brightness(1.08); }
+.dk-input { font: inherit; font-size: 0.95rem; min-height: 38px; padding: 0.45rem 0.7rem; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); width: 100%; }
+.dk-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.dk-muted { color: var(--muted); }
+.dk-mono { font-family: ui-monospace, "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+.dk-label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem; }

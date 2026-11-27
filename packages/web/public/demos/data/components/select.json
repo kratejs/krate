@@ -1,0 +1,1 @@
+{"id":"select","name":"Select","group":"Input","summary":"Searchable select with keyboard navigation.","builtWith":"Signals","import":"import { Select } from \"@krate/components\";"}

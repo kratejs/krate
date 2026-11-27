@@ -1,0 +1,1 @@
+{"id":"toast","name":"Toast","group":"Feedback","summary":"Call toast() from any handler; announced politely.","builtWith":"Signals","import":"import { Toast } from \"@krate/components\";"}

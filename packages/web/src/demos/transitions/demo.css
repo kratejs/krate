@@ -1,0 +1,11 @@
+.tx-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 0.75rem; }
+.tx-tile { display: block; text-decoration: none; color: inherit; }
+.tx-art { display: block; aspect-ratio: 4 / 3; border-radius: 12px; }
+.tx-name { display: inline-block; margin-top: 0.4rem; font-weight: 600; font-size: 0.95rem; }
+.tx-tile:hover .tx-art { box-shadow: 0 0 0 2px var(--accent); }
+.tx-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 12px; }
+.tx-detail { max-width: 32rem; }
+.tx-hero { aspect-ratio: 16 / 9; border-radius: 16px; }
+.tx-detail h2 { display: inline-block; margin: 1rem 0 0.25rem; font-size: 1.6rem; }
+.tx-detail p { margin: 0 0 1rem; color: var(--muted); }
+.tx-back { color: var(--accent); font-weight: 600; }

@@ -21,6 +21,9 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 a { color: var(--accent); }
 `;
 
+// The shared base stylesheet; the demo examples append src/demos/kit.css to it.
+export const baseCss = base;
+
 export const examples = [
   {
     id: "counter",

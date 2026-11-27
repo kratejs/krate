@@ -1,0 +1,161 @@
+/* Demos gallery and demo pages. */
+
+/* Maps the demo tokens (the playground names) onto the site theme. */
+.demo-stage {
+    --fg: var(--color-fg);
+    --bg: var(--color-bg);
+    --soft: var(--color-bg-subtle);
+    --line: var(--color-border);
+    --muted: var(--color-muted);
+    --accent: var(--color-action);
+    --accent-text: var(--color-link);
+    color: var(--color-fg);
+}
+
+.demo-page,
+.demos-index {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 1.5rem 1.5rem 4rem;
+}
+
+.demo-crumbs { margin-bottom: 1rem; font-size: 0.9rem; }
+.demo-crumbs a { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--color-muted); }
+.demo-crumbs a:hover { color: var(--color-fg); }
+
+.demo-head h1 {
+    margin: 0 0 0.6rem;
+    font-size: clamp(2rem, 1.3rem + 2.8vw, 3.1rem);
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+    font-weight: 800;
+    text-wrap: balance;
+}
+.demo-blurb { margin: 0 0 1rem; max-width: 60ch; color: var(--color-muted); font-size: 1.1rem; }
+.demo-badges { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+.demo-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.65rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--color-accent-border);
+    background: var(--color-accent-bg);
+    color: var(--color-link);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+.demo-chip-zero { border-color: color-mix(in srgb, var(--color-positive) 40%, transparent); background: color-mix(in srgb, var(--color-positive) 12%, transparent); color: var(--color-positive); }
+.demo-chip-tag { border-color: var(--color-border); background: var(--color-bg-subtle); color: var(--color-muted); font-weight: 500; }
+
+.demo-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: 1.25rem;
+    margin-top: 2rem;
+    align-items: start;
+}
+.demo-body > * { min-width: 0; }
+
+.demo-stage {
+    padding: clamp(1rem, 2.5vw, 1.75rem);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-subtle);
+    box-shadow: var(--shadow-sm), var(--hairline);
+}
+
+.demo-notes h2, .demo-source h2 { margin: 0 0 0.5rem; font-size: 1.1rem; letter-spacing: -0.01em; }
+.demo-notes p { margin: 0 0 1.25rem; color: var(--color-muted); }
+
+.demo-source { margin-top: 2.5rem; }
+.demo-file { margin-bottom: 0.75rem; }
+.demo-file > summary {
+    cursor: pointer;
+    padding: 0.4rem 0;
+    font: 600 0.85rem var(--font-mono);
+    color: var(--color-muted);
+}
+.demo-file .krate-code-block { margin: 0.25rem 0 0; max-width: 100%; }
+.demo-file .krate-code-block pre { max-height: 32rem; overflow: auto; }
+
+.demo-pager { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem; }
+.demo-pager a {
+    display: flex; flex-direction: column; gap: 0.15rem;
+    padding: 0.75rem 1rem; max-width: 48%;
+    border: 1px solid var(--color-border); border-radius: var(--radius);
+    color: var(--color-fg); font-weight: 600;
+}
+.demo-pager a span { font-size: 0.75rem; font-weight: 500; color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.demo-pager a:hover { border-color: var(--color-action); }
+.demo-pager-next { text-align: right; margin-left: auto; }
+
+@media (max-width: 860px) {
+    .demo-body { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Compiled output tabs: the trigger <button>s compile to <label>s. */
+.co-lede { margin: 0 0 1rem; color: var(--color-muted); max-width: 70ch; }
+.co-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+.co-tabs > * {
+    padding: 0.4rem 0.85rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-pill);
+    background: var(--krate-active-bg, var(--color-bg-subtle));
+    border-color: var(--krate-active-color, var(--color-border));
+    color: var(--color-fg);
+    font-size: 0.85rem;
+    cursor: pointer;
+    user-select: none;
+}
+.co .krate-code-block pre { max-height: 26rem; overflow: auto; }
+
+/* Gallery */
+.demos-hero { padding: clamp(1.5rem, 4vw, 3rem) 0 2rem; }
+.demos-hero h1 {
+    margin: 0 0 0.75rem;
+    font-size: clamp(2.4rem, 1.2rem + 5vw, 4.5rem);
+    line-height: 1;
+    letter-spacing: -0.04em;
+    font-weight: 800;
+}
+.demos-hero p { max-width: 60ch; margin: 0; color: var(--color-muted); font-size: 1.15rem; }
+.demos-hero p a { text-decoration: underline; text-underline-offset: 3px; }
+
+.demos-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(17rem, 100%), 1fr));
+    gap: 1rem;
+}
+.demos-grid > li { display: flex; }
+.demo-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 1.1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-subtle);
+    color: var(--color-fg);
+    box-shadow: var(--shadow-xs), var(--hairline);
+    transition: border-color 0.16s var(--ease-in-out), transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out);
+}
+.demo-card:hover { color: var(--color-fg); border-color: var(--color-action); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.demo-card h2 { margin: 0.25rem 0 0; font-size: 1.1rem; letter-spacing: -0.015em; line-height: 1.25; }
+.demo-card p { margin: 0; color: var(--color-muted); font-size: 0.9rem; line-height: 1.5; flex: 1; }
+.demo-card-top { display: flex; justify-content: space-between; align-items: center; }
+.demo-card-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 42px; height: 42px;
+    border-radius: 11px;
+    background: var(--color-accent-bg);
+    border: 1px solid var(--color-accent-border);
+    color: var(--color-link);
+}
+.demo-card-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
+.demo-card-tags span { font-size: 0.72rem; color: var(--color-muted); padding: 0.1rem 0.5rem; border: 1px solid var(--color-border); border-radius: var(--radius-pill); }
+@media (prefers-reduced-motion: reduce) { .demo-card, .demo-card:hover { transition: none; transform: none; } }

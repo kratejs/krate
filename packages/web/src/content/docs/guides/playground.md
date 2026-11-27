@@ -72,6 +72,13 @@ Your work is also saved in the browser's local storage and restored the next tim
 you visit. **Reset** returns to the selected example, and a link such as
 `/playground/#example=counter` opens an example directly.
 
+## Demos
+
+The [demos gallery](/demos/) is built from the same examples. Each demo page shows
+its source and an **Open in playground** button that loads the matching
+`demo-*` example (for instance `/playground/#example=demo-css-signals`), so you
+can edit what you just used. The demos run on the static site with no server.
+
 ## How the preview works
 
 The compiler's output refers to files by root-absolute URLs such as

@@ -1,5 +1,15 @@
 const PROJECTS = [
   {
+    name: "Live demos",
+    url: "/demos/",
+    detail: "Eleven interactive demos running on this static site: signals, zero-JS CSS signals, view transitions, canvas, forms and more, each with its source.",
+  },
+  {
+    name: "Playground",
+    url: "/playground/",
+    detail: "The Krate compiler running in your browser as WebAssembly. Edit a project and see the HTML, JS and CSS it builds.",
+  },
+  {
     name: "Krate docs",
     url: "https://krate.js.org/docs/",
     detail: "This documentation site - built with Krate itself (docs plugin, Pagefind search, versioned pages).",

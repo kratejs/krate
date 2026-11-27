@@ -1,0 +1,1 @@
+{"id":"command","name":"Command","group":"Input","summary":"Filterable command palette with combobox semantics.","builtWith":"Signals","import":"import { Command } from \"@krate/components\";"}
