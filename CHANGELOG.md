@@ -1889,6 +1889,18 @@ host code runs in the native process. Names and options may change between relea
   which were dropped without a trace.
 - Krate Native: `sdk/os` builds on platforms outside Linux, macOS and Windows (such as `GOOS=js`); the
   locale helper was only compiled for Linux and macOS.
+- Server components (`// @server`): a wrapper component that renders `{children}` no longer drops
+  them when they include an interactive component. The children rendered empty, or failed the build
+  with KR8352 on a `generateStaticParams` page. An interactive component rendered by a server
+  component now gets its props in the browser: they were never registered, so `props` was
+  `undefined` after hydration. Only the props its client code reads are sent, as the values the build
+  computed.
+- Auth: an `auth` block in `krate.config.ts` that only sets options such as `pages`, `session` or
+  `trustHost` (with the providers defined in code, as credentials providers must be) now reaches the
+  runtime; it was validated and then dropped. The block also reaches server-rendered pages, dynamic
+  metadata routes and deploy server bundles, not just API routes, middleware and server actions.
+- Embedded API runtime: `crypto.subtle` supports PBKDF2 (`importKey`, `deriveBits`, and `deriveKey`
+  to an HMAC key) and raw `exportKey` of extractable HMAC keys, matching Node byte for byte.
 
 ### Security
 

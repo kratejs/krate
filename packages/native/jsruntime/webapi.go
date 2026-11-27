@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -221,7 +222,7 @@ func (r *Runtime) registerCryptoHost() error {
 	}); err != nil {
 		return err
 	}
-	return r.registerBinaryHost("__go_hmac", "sbb", func(args []any) (any, error) {
+	if err := r.registerBinaryHost("__go_hmac", "sbb", func(args []any) (any, error) {
 		h, err := newHash(strArg(args, 0))
 		if err != nil {
 			return nil, err
@@ -229,8 +230,26 @@ func (r *Runtime) registerCryptoHost() error {
 		m := hmac.New(h, bytesArg(args, 1))
 		m.Write(bytesArg(args, 2))
 		return m.Sum(nil), nil
+	}); err != nil {
+		return err
+	}
+	return r.registerBinaryHost("__go_pbkdf2", "sbb", func(args []any) (any, error) {
+		h, err := newHash(strArg(args, 0))
+		if err != nil {
+			return nil, err
+		}
+		iter, _ := intArg(args, 3)
+		size, _ := intArg(args, 4)
+		if iter < 1 || size < 1 || size > maxPBKDF2Bytes {
+			return nil, fmt.Errorf("pbkdf2: invalid iterations %d or length %d", iter, size)
+		}
+		return pbkdf2.Key(h, string(bytesArg(args, 1)), bytesArg(args, 2), iter, size)
 	})
 }
+
+// maxPBKDF2Bytes bounds a derived key, as a guard against a length typo
+// allocating gigabytes.
+const maxPBKDF2Bytes = 1 << 16
 
 // registerFormDataHost registers multipart parsing, plus entropy for the
 // boundaries of serialized multipart bodies.

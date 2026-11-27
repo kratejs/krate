@@ -160,3 +160,22 @@ func TestAuthSchemaIncludesAuth(t *testing.T) {
 		t.Error("schema is missing the auth block")
 	}
 }
+
+func TestAuthDeclared(t *testing.T) {
+	if (AuthConfig{}).Declared() {
+		t.Error("an empty block declares nothing")
+	}
+	off := false
+	for name, a := range map[string]AuthConfig{
+		"pages":    {Pages: AuthPages{SignIn: "/login"}},
+		"session":  {Session: AuthSession{MaxAge: 60}},
+		"disabled": {Enabled: &off},
+	} {
+		if !a.Declared() {
+			t.Errorf("%s: a block that sets options is declared", name)
+		}
+		if name == "pages" && a.Active() {
+			t.Errorf("%s: a block without providers is not active", name)
+		}
+	}
+}

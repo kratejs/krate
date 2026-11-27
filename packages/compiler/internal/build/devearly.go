@@ -30,8 +30,10 @@ func (b *Builder) beginEarlyBundles() {
 		return
 	}
 	impls := &clientSSRImpls{res: b.importResolver(), root: b.Root, bundleDir: filepath.Join(b.Cfg.OutDir, ".krate", "server-bundles"), actions: b.actionModules(), basePath: b.Cfg.BaseURLPath()}
+	run := newServerBundleRun(impls, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+	run.authBanner = authBanner(b.Cfg)
 	b.early = &earlyServerBundles{
-		run:    newServerBundleRun(impls, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath()),
+		run:    run,
 		memo:   m,
 		global: b.ssrGlobalSig(),
 		done:   map[string]string{},

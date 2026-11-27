@@ -1312,6 +1312,7 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		banner := "import { createRequire as __krateCreateRequire } from 'node:module'; const require = __krateCreateRequire(" + anchor + ");"
 		opts.Banner = map[string]string{"js": banner}
 	}
+	withAuthConfig(&opts, cfg)
 	// Each module of the bundle names its own source file in import.meta.url,
 	// __dirname and friends, relative to the directory of the output that
 	// holds the source root (bundled CommonJS dependencies such as @next/env

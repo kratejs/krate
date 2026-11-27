@@ -1,12 +1,12 @@
 {
-  "description": "SubtleCrypto operations beyond digest and HMAC.",
+  "description": "SubtleCrypto operations beyond digest, HMAC and PBKDF2.",
   "requests": [
     {
       "method": "GET"
     }
   ],
   "divergence": {
-    "reason": "Only digest and HMAC importKey/sign/verify are implemented; other SubtleCrypto operations are documented as unsupported and reject with NotSupportedError.",
+    "reason": "Only digest, HMAC importKey/sign/verify, raw HMAC exportKey and PBKDF2 deriveBits/deriveKey are implemented; other SubtleCrypto operations are documented as unsupported and reject with NotSupportedError.",
     "nodeVersion": "v24.22.2",
     "quickjs": [
       {

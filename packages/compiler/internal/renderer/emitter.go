@@ -809,8 +809,29 @@ func (e *Emitter) emitServer(node *irtree.ComponentNode) SlotOutput {
 	for _, child := range node.Children {
 		mergeSlotOutput(&out, e.emitSlotNode(child))
 	}
+	// A wrapper renders its call-site children through the placeholder, as in
+	// emitStatic; without the splice they are dropped.
+	if (strings.Contains(out.HTML, "<!--__children__-->") || strings.Contains(out.Templates, "<!--__children__-->")) && len(node.CallSiteSlots) > 0 {
+		callSiteOut, _ := e.spliceCallSiteChildren(&out, node)
+		mergeSlotOutput(&out, callSiteOut)
+	}
 	wrapped := `<div data-krate-server="` + escape.HTMLAttr(node.Name) + `">` + out.HTML + `</div>`
 	out.HTML = wrapped
+	// The props of the client children it renders are registered by a scope
+	// of its own that runs before theirs.
+	if len(node.ExtraVars) > 0 {
+		sig := irtree.ComponentSignature{
+			ComponentID: node.ID,
+			Tier:        irtree.TierClient,
+			ExtraVars:   node.ExtraVars,
+			PropsRegs:   node.PropsRegs,
+			Name:        node.Name,
+		}
+		if len(e.clientStack) > 0 {
+			sig.ParentID = e.clientStack[len(e.clientStack)-1]
+		}
+		out.Signatures = append([]irtree.ComponentSignature{sig}, out.Signatures...)
+	}
 	return out
 }
 

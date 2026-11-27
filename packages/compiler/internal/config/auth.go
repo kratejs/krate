@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -142,6 +143,13 @@ func (a AuthConfig) Active() bool {
 		return *a.Enabled
 	}
 	return len(a.Providers) > 0 || a.TwoFactor.Enabled || a.Passkeys.Enabled
+}
+
+// Declared reports whether the auth block sets anything. Every set option
+// reaches the runtime, including a block that only tunes pages, sessions or
+// cookies for providers the app defines in code.
+func (a AuthConfig) Declared() bool {
+	return !reflect.ValueOf(a).IsZero()
 }
 
 func (a AuthConfig) BasePathOrDefault() string {

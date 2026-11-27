@@ -150,7 +150,7 @@ func (b *Builder) rebuildClientSSRModules(ssrPages []*PageResult) map[string]str
 	}
 	stopCombined()
 	defer b.phase("ssr:page-bundles")()
-	bundles, _ := compileServerBundlesWith(impls, ssrPages, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath(), b.earlyBundles())
+	bundles, _ := compileServerBundlesWith(impls, ssrPages, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath(), b.earlyBundles(), authBanner(b.Cfg))
 	return bundles
 }
 

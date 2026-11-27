@@ -31,7 +31,7 @@ func CompileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
 	impls := newClientSSRImpls(res, results, root, outDir, actionModules, actionBasePath)
 	impls.prebuild(impls.boundaries)
-	return compileServerBundlesWith(impls, results, root, outDir, sourcemap, actionModules, actionBasePath, nil)
+	return compileServerBundlesWith(impls, results, root, outDir, sourcemap, actionModules, actionBasePath, nil, "")
 }
 
 // ssrBundlePages returns one representative non-SSG page per unique SourcePath
@@ -84,6 +84,9 @@ type serverBundleRun struct {
 	// resolve.
 	serverMemo *resolveMemo
 	files      *serverBundleFiles
+	// authBanner delivers the config's auth block to the page bundles (see
+	// authBanner), so auth() in a server-rendered page sees it.
+	authBanner string
 }
 
 func newServerBundleRun(impls *clientSSRImpls, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) *serverBundleRun {
@@ -188,7 +191,7 @@ func (r *serverBundleRun) compile(page *PageResult, logf func(format string, arg
 		JSXSideEffects:  false,
 		JSXImportSource: "@krate/runtime/server",
 		TsconfigRaw:     `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@krate/runtime/server" } }`,
-		Banner:          basePathBanner(actionBasePath),
+		Banner:          serverPageBanner(actionBasePath, r.authBanner),
 		External: []string{
 			"@krate/runtime",
 			"@krate/runtime/*",
@@ -223,7 +226,7 @@ func (r *serverBundleRun) compile(page *PageResult, logf func(format string, arg
 // compileServerBundlesWith is compileServerBundles with the server render
 // modules built by impls, which a caller may have prebuilt. A page whose
 // bundle is in done was compiled already (see compileEarly).
-func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string, done map[string]string) (map[string]string, []error) {
+func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string, done map[string]string, auth string) (map[string]string, []error) {
 	ssrPages := ssrBundlePages(results)
 	if len(ssrPages) == 0 {
 		return nil, nil
@@ -234,6 +237,7 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 
 	bundles := make(map[string]string, len(ssrPages))
 	run := newServerBundleRun(impls, root, outDir, sourcemap, actionModules, actionBasePath)
+	run.authBanner = auth
 	var fatal []error
 	var mu sync.Mutex
 	var wg sync.WaitGroup
