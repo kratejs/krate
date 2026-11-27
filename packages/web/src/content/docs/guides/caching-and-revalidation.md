@@ -33,7 +33,9 @@ has shown what a page or region reads, a request that carries a query renders
 instead of being answered from the cache (a restart, or an evicted record, costs
 one render), so an entry is never matched to a query it was not made for.
 
-The caches are bounded (`ssr.maxCacheSize`, 512 by default) with a segmented LRU:
+The caches are bounded by entries (`ssr.maxCacheSize`, 512 by default) and by
+memory (`ssr.cacheMemory`, 64 MB per process by default, half of it for pages)
+with a segmented LRU:
 a new entry starts in a probation segment and is promoted by its first hit, so a
 client requesting thousands of one-off variants (any slug renders on an open
 `[param]` route) only churns probation and cannot flush the pages and regions that

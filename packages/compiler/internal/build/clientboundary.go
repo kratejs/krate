@@ -1595,6 +1595,9 @@ type clientSSRImpls struct {
 	// build (tests compare the two); shareless builds every page server
 	// bundle as if it were alone.
 	separate, shareless bool
+	// link makes the page server bundles of a production build import the
+	// modules they share from chunks (see linkPageBundles).
+	link bool
 	// combinedInputs lists the files the combined build read, set when it
 	// succeeded (see devmemo.go).
 	combinedInputs []string

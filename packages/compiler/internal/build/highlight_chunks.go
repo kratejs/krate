@@ -297,13 +297,20 @@ func (b *Builder) writeHighlightTables(serverBundles map[string]string) error {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	pool := newWorkerPool(buildWorkerLimit())
+	paths := make([]string, 0, len(serverBundles))
 	for _, rel := range serverBundles {
+		paths = append(paths, filepath.Join(b.Cfg.OutDir, filepath.FromSlash(rel)))
+	}
+	// Linked page bundles import the code they share from chunks.
+	chunks, _ := filepath.Glob(filepath.Join(b.Cfg.OutDir, ".krate", "server-bundles", pageLinkChunks, "*.mjs"))
+	paths = append(paths, chunks...)
+	for _, path := range paths {
 		wg.Add(1)
 		pool.acquire()
 		go func() {
 			defer wg.Done()
 			defer pool.release()
-			data, err := os.ReadFile(filepath.Join(b.Cfg.OutDir, filepath.FromSlash(rel)))
+			data, err := os.ReadFile(path)
 			if err != nil || !bytes.Contains(data, []byte("lang")) {
 				return
 			}

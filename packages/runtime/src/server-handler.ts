@@ -20,6 +20,7 @@ import {
   type RenderRequest,
   type SSRCore,
 } from "./ssr-core.js";
+import { cacheByteBudgets } from "./memsize.js";
 import { runAfterTasks } from "./after.js";
 import { platformWaitUntil, type PlatformContext } from "./platform.js";
 import { cacheRuntime, installRenderStore, patchFetch, type RevalidateScope } from "./cache-scope.js";
@@ -100,7 +101,7 @@ export interface HandlerConfig {
   /** Resolved security headers; an empty string means "do not send". */
   security: { nosniff: boolean; frameOptions: string; referrerPolicy: string; permissionsPolicy: string; hsts: string; csp: string };
   cors: { enabled: boolean; origins: string[]; methods: string[]; headers: string[]; credentials: boolean; maxAge: number };
-  ssr: { timeout: number; maxCacheSize: number; ppr: boolean; pprRevalidate: number };
+  ssr: { timeout: number; maxCacheSize: number; cacheBytes?: number; ppr: boolean; pprRevalidate: number };
   /** Page URL form: "always" (default) redirects /x to /x/, "never" redirects /x/ to /x, "ignore" serves both. */
   trailingSlash?: "always" | "never" | "ignore";
 }
@@ -568,7 +569,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   patchFetch();
 
   // The ISR and data caches: this instance's memory, or the shared cache adapter.
-  const memoryIsr = new MemoryIsrStore(cfg.ssr.maxCacheSize > 0 ? cfg.ssr.maxCacheSize : 512);
+  const memoryIsr = new MemoryIsrStore(cfg.ssr.maxCacheSize > 0 ? cfg.ssr.maxCacheSize : 512, cacheByteBudgets(cfg.ssr.cacheBytes).pages);
   const sharedCache = options.isrStore
     ? { store: options.isrStore, ready: Promise.resolve<CacheAdapter | null>(null) }
     : isrStoreFor(options.cache ?? cacheSpecFromConfig(cfg.cache), memoryIsr);
@@ -593,6 +594,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       return fn;
     },
     maxCacheSize: cfg.ssr.maxCacheSize,
+    cacheBytes: cfg.ssr.cacheBytes,
     timeoutMs: cfg.ssr.timeout > 0 ? cfg.ssr.timeout : 5000,
     ppr: cfg.ssr.ppr,
     pprRevalidate: cfg.ssr.pprRevalidate,

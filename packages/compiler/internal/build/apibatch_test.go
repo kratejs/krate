@@ -68,6 +68,8 @@ func TestAPIRouteBatchMatchesSeparateBuilds(t *testing.T) {
 			}
 			bb := nodeOnlyProject(t, batRoot)
 			bb.Cfg.SSR.APIRuntime, bb.Cfg.Sourcemap = runtime, sourcemap
+			// Linking splits shared modules out of the batched bundles.
+			bb.noLinkedNodeRoutes = true
 			routes := nodeOnlyRoutes(batRoot)
 
 			// Every route is served by the batches.

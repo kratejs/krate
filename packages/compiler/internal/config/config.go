@@ -300,8 +300,17 @@ type SSRConfig struct {
 	// Default: 5000ms.
 	Timeout int `json:"timeout,omitempty"`
 	// MaxCacheSize is the max number of ISR pages to keep in memory cache.
-	// Default: 128.
+	// Default: 512.
 	MaxCacheSize int `json:"maxCacheSize,omitempty"`
+	// CacheMemory is the memory budget of each process's in-memory render and
+	// data caches, in MB: rendered pages get half, PPR regions and the data
+	// cache a quarter each. Default 64.
+	CacheMemory int `json:"cacheMemory,omitempty"`
+	// NodeHeapLimit caps the V8 old-generation heap of each Node process the
+	// server starts (SSR renderer and API sidecar workers), in MB. 0 (the
+	// default) derives it from the container's memory limit when there is
+	// one; -1 leaves V8's default.
+	NodeHeapLimit int `json:"nodeHeapLimit,omitempty"`
 	// MiddlewareRuntime controls which runtime executes middleware.ts.
 	// "quickjs" (default) = embedded, "node"/"bun"/"deno" = sidecar.
 	MiddlewareRuntime string `json:"middlewareRuntime,omitempty"`
@@ -326,8 +335,8 @@ type SSRConfig struct {
 	// picked up. Default false.
 	APIIsolation bool `json:"apiIsolation,omitempty"`
 	// NodeWorkers forks this many Node worker processes for the API sidecar
-	// (node/bun/deno runtimes) to use more than one CPU. Default:
-	// min(NumCPU, 8).
+	// (node/bun/deno runtimes) to use more than one CPU. Default 1: one
+	// process, which serves requests itself.
 	NodeWorkers int `json:"nodeWorkers,omitempty"`
 	// SSRRuntime selects which runtime launches the SSR sidecar renderer.
 	// "node" (default) = plain node on the staged driver, "bun" = `bun run`,
@@ -1385,4 +1394,12 @@ func (c *Config) PublicEnvPrefixes() []string {
 		return []string{DefaultEnvPrefix}
 	}
 	return []string(c.EnvPrefix)
+}
+
+// CacheBytes is ssr.cacheMemory in bytes, 0 when unset (the runtime default).
+func (s SSRConfig) CacheBytes() int64 {
+	if s.CacheMemory <= 0 {
+		return 0
+	}
+	return int64(s.CacheMemory) << 20
 }

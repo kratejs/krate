@@ -44,6 +44,8 @@ type SSRServer struct {
 	pageIdx         atomic.Pointer[pageIndex] // lookup index for manifest
 	timeout         int                       // per-render timeout (ms); 0 = sidecar default
 	maxCacheSize    int                       // ISR cache entries; 0 = sidecar default
+	cacheBytes      int64                     // render/data cache budget; 0 = sidecar default
+	nodeHeapFlag    string                    // --max-old-space-size for a node renderer, or ""
 	ppr             bool
 	pprRevalidate   int
 	rendererWorkers int
@@ -147,6 +149,22 @@ func (s *SSRServer) SetTuning(timeoutMs, maxCacheSize int) {
 	defer s.mu.Unlock()
 	s.timeout = timeoutMs
 	s.maxCacheSize = maxCacheSize
+}
+
+// SetNodeHeapFlag sets the heap limit flag a node renderer starts with (see
+// nodeHeapArg); "" leaves V8's default.
+func (s *SSRServer) SetNodeHeapFlag(flag string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nodeHeapFlag = flag
+}
+
+// SetCacheBytes sets the memory budget of the renderer's caches, exported as
+// KRATE_SSR_CACHE_BYTES. 0 keeps the renderer's default.
+func (s *SSRServer) SetCacheBytes(n int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cacheBytes = n
 }
 
 // SetPPR configures partial-prerendering region caching for non-ISR pages,
@@ -320,6 +338,9 @@ func (s *SSRServer) Start() error {
 	manifestPath := s.manifestPathLocked()
 
 	runtimeCmd, runtimeArgs, err := ssrRuntimeCommand(s.runtime, rendererPath)
+	if runtimeCmd == "node" {
+		runtimeArgs = withNodeHeapArg(runtimeArgs, s.nodeHeapFlag)
+	}
 	if err != nil {
 		s.mu.Unlock()
 		return err
@@ -339,6 +360,9 @@ func (s *SSRServer) Start() error {
 	}
 	if s.maxCacheSize > 0 {
 		env = append(env, fmt.Sprintf("KRATE_SSR_MAX_CACHE=%d", s.maxCacheSize))
+	}
+	if s.cacheBytes > 0 {
+		env = append(env, fmt.Sprintf("KRATE_SSR_CACHE_BYTES=%d", s.cacheBytes))
 	}
 	if s.rendererWorkers > 1 {
 		env = append(env, fmt.Sprintf("KRATE_SSR_WORKERS=%d", s.rendererWorkers))

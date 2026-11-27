@@ -316,10 +316,13 @@ func composedLayoutPlugin(root string, pageModule, pageSource, pageDir string, l
 		Name: "krate-composed-layouts",
 		Setup: func(pb api.PluginBuild) {
 			const ns = "krate-composed-page"
-			pb.OnResolve(api.OnResolveOptions{Filter: "^" + specFilterEscape.ReplaceAllStringFunc(pageModule, func(s string) string { return `\` + s }) + "$"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			// The filters name this page's module alone: a build of several
+			// pages has one plugin, and one virtual module, per page.
+			exact := "^" + specFilterEscape.ReplaceAllStringFunc(pageModule, func(s string) string { return `\` + s }) + "$"
+			pb.OnResolve(api.OnResolveOptions{Filter: exact}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				return api.OnResolveResult{Path: pageModule, Namespace: ns}, nil
 			})
-			pb.OnLoad(api.OnLoadOptions{Filter: ".*", Namespace: ns}, func(api.OnLoadArgs) (api.OnLoadResult, error) {
+			pb.OnLoad(api.OnLoadOptions{Filter: exact, Namespace: ns}, func(api.OnLoadArgs) (api.OnLoadResult, error) {
 				return api.OnLoadResult{Contents: &pageSource, Loader: api.LoaderTSX, ResolveDir: pageDir}, nil
 			})
 			pb.OnLoad(api.OnLoadOptions{Filter: `\.[cm]?[jt]sx?$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {

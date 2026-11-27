@@ -72,8 +72,11 @@ overrides:
 - **Module state persists per worker across requests** (the same semantics as
   Node/Next: a module's top-level state survives between requests). Set
   `ssr.apiIsolation: true` to run every request in a fresh VM instead.
-- The Node sidecar runs `node:cluster` across `ssr.nodeWorkers` processes, and
-  imports each route once (module cache) in production.
+- The Node sidecar is one process by default (`ssr.nodeWorkers` forks a
+  `node:cluster` of more), and imports each route once (module cache) in
+  production. In a production build the routes share the app modules they
+  import: a module (and its module-level state, such as a database pool) has
+  one instance per process, not one per route.
 - Set `ssr.apiRuntime: "bun"` to run the JS/TS routes in a **Bun sidecar** using
   `Bun.serve` (no Node `http` stack, no cluster shim) - the fastest of the
   sidecar options. `ssr.apiRuntime: "node"` (or `"deno"`) uses the Node `http`

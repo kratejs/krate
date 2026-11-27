@@ -1257,6 +1257,20 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				case float64:
 					cfg.SSR.MaxCacheSize = int(n)
 				}
+			case "nodeHeapLimit":
+				switch n := v.(type) {
+				case int64:
+					cfg.SSR.NodeHeapLimit = int(n)
+				case float64:
+					cfg.SSR.NodeHeapLimit = int(n)
+				}
+			case "cacheMemory":
+				switch n := v.(type) {
+				case int64:
+					cfg.SSR.CacheMemory = int(n)
+				case float64:
+					cfg.SSR.CacheMemory = int(n)
+				}
 			case "middlewareRuntime":
 				if s, ok := v.(string); ok {
 					cfg.SSR.MiddlewareRuntime = s

@@ -184,13 +184,17 @@ type Builder struct {
 	// server render modules one by one instead of in one code-split build,
 	// noMetadataFastPath evaluates every metadata chain in full,
 	// noSharedServerWork builds every page server bundle as if it were alone,
-	// and legacyNodeOnly finds Node-only API routes from their full QuickJS
-	// bundle.
-	noClientChunkSplit bool
-	noCombinedSSR      bool
-	noMetadataFastPath bool
-	noSharedServerWork bool
-	legacyNodeOnly     bool
+	// noLinkedServerBundles keeps a production build's page server bundles
+	// self-contained, noLinkedNodeRoutes does the same for its Node API route
+	// bundles, and legacyNodeOnly finds Node-only API routes from their
+	// full QuickJS bundle.
+	noClientChunkSplit    bool
+	noCombinedSSR         bool
+	noMetadataFastPath    bool
+	noSharedServerWork    bool
+	noLinkedServerBundles bool
+	noLinkedNodeRoutes    bool
+	legacyNodeOnly        bool
 	// precompressDefault, when set, overrides precompressByDefault.
 	precompressDefault *bool
 	// jsEngine, when set, picks the build-time JavaScript engine in place of
@@ -1573,6 +1577,7 @@ func (b *Builder) BuildAll() error {
 	actionMods, basePath := b.actionModules(), b.Cfg.BaseURLPath()
 	impls := newClientSSRImpls(b.importResolver(), results, b.Root, b.Cfg.OutDir, actionMods, basePath)
 	impls.separate, impls.shareless = b.noCombinedSSR, b.noSharedServerWork
+	impls.link = !b.DevMode && !b.noLinkedServerBundles
 	if b.DevMode {
 		b.recordDevBoundaries(impls.boundaries, true)
 	}
@@ -5789,6 +5794,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 
 	var metaMu sync.Mutex
 	metas := make(map[string]apiRouteMeta, len(routes))
+	bySource := make(map[string]apiRouteMeta, len(routes))
 	// The routes share their options, so a package import resolves (and is
 	// probed) once for all of them.
 	fam := &apiRouteFamily{}
@@ -5819,6 +5825,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 			}
 			metaMu.Lock()
 			metas[meta.File] = meta
+			bySource[r] = meta
 			metaMu.Unlock()
 		}(route)
 	}
@@ -5828,6 +5835,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 	if len(errCh) > 0 {
 		return <-errCh
 	}
+	b.linkNodeRoutes(apiSrcDir, bySource)
 	return b.mergeAPIRouteMeta(metas)
 }
 
