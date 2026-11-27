@@ -1,0 +1,127 @@
+/* Homepage sections: hero tabs, compiler pipeline, benchmark bars. */
+
+/* The trigger <button>s compile to <label>s; the selected one gets
+   --krate-active-bg / --krate-active-color. */
+.ht-tabs, .bc-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.9rem; }
+.ht-tabs, .bc-tabs { --krate-css-active-fg: var(--color-link); }
+.ht-tabs > *, .bc-tabs > * {
+    padding: calc(0.5rem + 1px) calc(1rem + 1px);
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--krate-active-bg, var(--pill-bg));
+    color: var(--color-fg);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s var(--ease-in-out);
+}
+.ht-tabs > *:hover, .bc-tabs > *:hover { background: var(--krate-active-bg, var(--pill-bg-strong)); }
+
+.ht { max-width: calc(var(--max-width) - 3rem); text-align: left; }
+.ht-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 1rem;
+    align-items: stretch;
+}
+.ht-panel > * { min-width: 0; }
+.ht-code .krate-code-block {
+    height: 100%;
+    margin: 0;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+}
+.ht-code .krate-code-block pre { font-size: 0.85rem; line-height: 1.65; overflow-x: auto; }
+.ht-live {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.9rem;
+    padding: 1.5rem 1.25rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-subtle);
+    box-shadow: var(--shadow-sm), var(--hairline);
+    text-align: center;
+}
+.ht-live .demo { border: 0; background: none; box-shadow: none; padding: 0; }
+.ht-live-label { font-size: 0.85rem; font-weight: 700; color: var(--color-link); }
+.ht-live-note { max-width: 30ch; color: var(--color-muted); font-size: 0.85rem; line-height: 1.5; }
+.ht-open { font-size: 0.85rem; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+
+/* The CSS-signal preview */
+.ts { display: grid; gap: 0.75rem; justify-items: center; }
+.ts-seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--pill-bg); }
+.ts-seg > * { padding: 0.4rem 1rem; border-radius: 7px; font-size: 0.9rem; color: var(--color-muted); background: var(--krate-active-bg, transparent); cursor: pointer; }
+.ts-card { padding: 1rem 1.5rem; border-radius: 12px; font-weight: 600; min-width: 14rem; }
+.ts-light { background: #fff7ed; color: #7c2d12; border: 1px solid #fed7aa; }
+.ts-dark { background: #1c1917; color: #fdba74; border: 1px solid #44403c; }
+
+/* The resource preview */
+.fd { display: grid; gap: 0.75rem; justify-items: center; }
+.fd-pick { display: inline-flex; gap: 0.4rem; }
+.fd-pick button {
+    font: inherit; font-size: 0.85rem; padding: 0.35rem 0.8rem; min-height: 36px;
+    border: 0; border-radius: var(--radius-pill);
+    background: var(--pill-bg); color: var(--color-fg); cursor: pointer;
+}
+.fd-pick button:hover { background: var(--pill-bg-strong); }
+.fd-pick button[aria-pressed="true"] { background: var(--pill-bg-active); color: var(--color-link); font-weight: 600; }
+.fd-out { margin: 0; min-height: 3em; max-width: 26ch; font-size: 0.9rem; }
+
+/* Pipeline */
+.pl { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-bg-subtle); box-shadow: var(--shadow-sm), var(--hairline); overflow: hidden; }
+.pl-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--color-border); }
+.pl-steps li { display: flex; border-left: 1px solid var(--color-border); }
+.pl-steps li:first-child { border-left: 0; }
+.pl-steps li > * {
+    flex: 1;
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.9rem 1rem;
+    font-size: 0.92rem; font-weight: 600;
+    background: var(--krate-active-bg, transparent);
+    border-bottom: 2px solid var(--krate-active-color, transparent);
+    margin-bottom: -1px;
+    cursor: pointer;
+    user-select: none;
+}
+.pl-steps li > *:hover { background: var(--color-accent-bg); }
+.pl-body { padding: 1.25rem; }
+.pl-pane > p { margin: 0 0 1rem; max-width: 70ch; color: var(--color-muted); }
+.pl-pane .krate-code-block { margin: 0; max-width: 100%; }
+.pl-pane .krate-code-block pre { max-height: 22rem; overflow: auto; font-size: 0.85rem; }
+.pl-found { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.5rem; max-width: 70ch; }
+.pl-more { margin: 0; padding: 0 1.25rem 1.1rem; font-size: 0.9rem; }
+
+/* Benchmark bars */
+.bc { margin-bottom: 1.5rem; }
+.bc-table { width: 100%; border-collapse: collapse; }
+.bc-table caption { text-align: left; color: var(--color-muted); font-size: 0.9rem; padding-bottom: 0.6rem; }
+.bc-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.bc-table th[scope="row"] { width: 11rem; padding: 0.45rem 0.75rem 0.45rem 0; text-align: left; font-weight: 500; font-size: 0.9rem; white-space: nowrap; }
+.bc-table td { padding: 0.45rem 0; }
+.bc-table td:nth-child(2) { width: auto; }
+.bc-val { width: 6rem; text-align: right; font-size: 0.9rem; font-weight: 600; font-variant-numeric: tabular-nums; padding-left: 0.75rem !important; }
+.bc-bar { display: block; height: 14px; border-radius: 4px; background: var(--color-border-strong); transform-origin: left; }
+.bc-krate th, .bc-krate .bc-val { color: var(--color-link); font-weight: 700; }
+.bc-krate .bc-bar { background: var(--color-primary); }
+.bc-note { margin: 0.9rem 0 0; font-size: 0.82rem; color: var(--color-muted); }
+@media (prefers-reduced-motion: no-preference) {
+    .bc-bar { animation: bc-grow 0.7s var(--ease-out) both; }
+}
+@keyframes bc-grow { from { transform: scaleX(0); } }
+
+.home-demos .demo-card h3 { margin: 0.25rem 0 0; font-size: 1.05rem; letter-spacing: -0.015em; line-height: 1.25; }
+
+@media (max-width: 860px) {
+    .ht-panel { grid-template-columns: minmax(0, 1fr); }
+    .pl-steps { grid-template-columns: repeat(2, 1fr); }
+    .pl-steps li:nth-child(3) { border-left: 0; }
+    .pl-steps li:nth-child(n+3) { border-top: 1px solid var(--color-border); }
+    .bc-table th[scope="row"] { width: 7.5rem; white-space: normal; font-size: 0.82rem; }
+}
+
+/* Code blocks inside .section keep the block's own colours. */
+.section .krate-code-block code { background: none; border: 0; padding: 0; border-radius: 0; color: inherit; font-size: inherit; }

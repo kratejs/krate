@@ -24,6 +24,11 @@
     --radius-lg: 16px;
     --radius-pill: 999px;
 
+    /* Pills and tabs carry a background fill only, never an outline. */
+    --pill-bg: color-mix(in srgb, var(--color-fg) 6%, transparent);
+    --pill-bg-strong: color-mix(in srgb, var(--color-fg) 11%, transparent);
+    --pill-bg-active: color-mix(in srgb, var(--color-primary) 16%, transparent);
+
     /* Neutral ramp (light) */
     --color-bg: #ffffff;
     --color-bg-subtle: #fafafa;
@@ -560,10 +565,8 @@ video {
 }
 
 .hero-demo-live-label {
-    font-size: 0.7rem;
+    font-size: 0.85rem;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
     color: var(--color-link);
 }
 
@@ -619,7 +622,6 @@ video {
 }
 
 .demo-value {
-    font-family: var(--font-mono);
     font-size: 1.6rem;
     font-weight: 700;
     min-width: 3ch;
@@ -829,11 +831,8 @@ video {
 .compare thead th {
     background: var(--color-bg-subtle);
     color: var(--color-muted);
-    font-family: var(--font-mono);
-    font-size: 0.74rem;
+    font-size: 0.85rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     border-bottom-color: var(--color-border-strong);
 }
 
@@ -892,7 +891,6 @@ video {
 }
 
 .stat-value {
-    font-family: var(--font-mono);
     font-size: clamp(2.2rem, 1.2rem + 2.6vw, 3.4rem);
     font-weight: 700;
     line-height: 1.05;
@@ -1021,11 +1019,8 @@ video {
 
 .site-footer-column-title {
     margin-bottom: 0.6rem;
-    font-family: var(--font-mono);
-    font-size: 0.74rem;
+    font-size: 0.85rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
     color: var(--color-fg);
 }
 
@@ -1053,8 +1048,7 @@ video {
     padding-top: 1.25rem;
     border-top: 1px solid var(--color-border);
     color: var(--color-muted);
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: 0.85rem;
 }
 
 /* ---- Blog index: dated rows ---- */
@@ -1082,6 +1076,7 @@ video {
     grid-row: 1 / span 2;
     justify-self: start;
     border: 0;
+    background: none;
     padding: 0;
     font-size: 0.82rem;
     font-variant-numeric: tabular-nums;
@@ -1115,12 +1110,12 @@ video {
 }
 
 .site-badge {
-    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--color-muted);
-    border: 1px solid var(--color-border);
+    border: 0;
     border-radius: var(--radius-pill);
-    padding: 0.12rem 0.55rem;
+    background: var(--pill-bg);
+    padding: calc(0.12rem + 1px) calc(0.55rem + 1px);
 }
 
 /* ---- Article prose (blog posts) ---- */
@@ -1144,7 +1139,6 @@ video {
     margin: 0 0 2.5rem;
     padding-bottom: 2rem;
     border-bottom: 1px solid var(--color-border);
-    font-family: var(--font-mono);
     font-size: 0.85rem;
 }
 
@@ -1252,7 +1246,6 @@ video {
 }
 
 .not-found-code {
-    font-family: var(--font-mono);
     font-size: clamp(5rem, 3rem + 14vw, 12rem);
     font-weight: 700;
     color: var(--color-link);
@@ -1623,34 +1616,30 @@ body .chroma .w {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    padding: 0.2rem 0.6rem;
-    border: 1px solid var(--color-border);
+    padding: calc(0.2rem + 1px) calc(0.6rem + 1px);
+    border: 0;
     border-radius: var(--radius-pill);
     color: var(--color-muted);
-    background: var(--color-bg-subtle);
-    font-family: var(--font-mono);
-    font-size: 0.68rem;
+    background: var(--pill-bg);
+    font-size: 0.85rem;
     font-weight: 600;
     line-height: 1.4;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
     white-space: nowrap;
 }
 
 .roadmap-status-now,
 .roadmap-status-beta {
-    border-color: var(--color-accent-border);
-    background: var(--color-accent-bg);
+    background: var(--pill-bg-active);
     color: var(--color-link);
 }
 
 .roadmap-status-next {
-    border-color: var(--color-border-strong);
+    background: var(--pill-bg-strong);
     color: var(--color-fg);
 }
 
 .roadmap-status-gate {
-    border-color: var(--color-link);
+    background: var(--pill-bg-active);
     color: var(--color-link);
 }
 
@@ -1800,10 +1789,8 @@ body .chroma .w {
 
 .roadmap-phase-id {
     color: var(--color-muted);
-    font-family: var(--font-mono);
-    font-size: 0.72rem;
+    font-size: 0.85rem;
     font-weight: 700;
-    letter-spacing: 0.08em;
 }
 
 .roadmap-phase-body {

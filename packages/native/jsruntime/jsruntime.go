@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"modernc.org/quickjs"
+	quickjs "github.com/kratejs/krate/packages/native/jsruntime/internal/qjs"
 )
 
 const (
@@ -104,6 +104,9 @@ func New() (*Runtime, error) {
 // NewWithOptions is New with control over which prelude features are
 // installed up front.
 func NewWithOptions(o Options) (*Runtime, error) {
+	if err := fullRuntimeUnavailable(); err != nil {
+		return nil, err
+	}
 	r, err := newRuntime(o)
 	if err != nil {
 		return nil, err

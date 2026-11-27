@@ -1,0 +1,1 @@
+{"id":"accordion","name":"Accordion","group":"Disclosure","summary":"Single or multiple open sections with aria-expanded.","builtWith":"CSS signals","import":"import { Accordion } from \"@krate/components\";"}

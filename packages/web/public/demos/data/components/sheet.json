@@ -1,0 +1,1 @@
+{"id":"sheet","name":"Sheet","group":"Overlay","summary":"An edge-anchored dialog for drawers and side panels.","builtWith":"CSS signals","import":"import { Sheet } from \"@krate/components\";"}

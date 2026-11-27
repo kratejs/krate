@@ -1,0 +1,71 @@
+.dt-pick .dk-btn[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--soft);
+    font-weight: 600;
+}
+
+.dt-card {
+    margin-top: 1rem;
+    padding: 1rem 1.1rem;
+    min-height: 11rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--bg);
+}
+
+.dt-state {
+    margin: 0 0 0.6rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+}
+
+.dt-state strong {
+    color: var(--fg);
+}
+
+.dt-card h2 {
+    margin: 0 0 0.4rem;
+    font-size: 1.15rem;
+}
+
+.dt-group {
+    margin-left: 0.4rem;
+    padding: calc(0.1rem + 1px) calc(0.5rem + 1px);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--fg) 9%, transparent);
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--muted);
+    vertical-align: middle;
+}
+
+.dt-card p {
+    margin: 0 0 0.5rem;
+}
+
+.dt-code {
+    display: block;
+    padding: 0.5rem 0.7rem;
+    border-radius: 8px;
+    background: var(--soft);
+    font-size: 0.8rem;
+    overflow-x: auto;
+}
+
+.dt-error {
+    color: var(--accent-text, var(--accent));
+}
+
+.dt-break {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 0.9rem;
+    font-size: 0.9rem;
+}
+
+.dt-break input {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+}

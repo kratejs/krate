@@ -1,0 +1,1 @@
+{"id":"otp-field","name":"OTP field","group":"Input","summary":"One box per digit with paste and autofill support.","builtWith":"Signals","import":"import { OTPfield } from \"@krate/components\";"}

@@ -7,7 +7,12 @@
   "type": "module",
   "scripts": {
     "dev": "krate dev",
-    "build": "krate build && node scripts/check-output.mjs",
+    "build": "node scripts/build-playground.mjs && node scripts/build-compiled-demo.mjs && node scripts/build-demo-sources.mjs && krate build && node scripts/check-output.mjs",
+    "build:playground": "node scripts/build-playground.mjs",
+    "test:playground": "node scripts/playground-smoke.mjs",
+    "test:playground:e2e": "node scripts/playground-e2e.mjs",
+    "build:demos": "node scripts/build-compiled-demo.mjs && node scripts/build-demo-sources.mjs",
+    "test:demos:e2e": "node scripts/demos-e2e.mjs",
     "serve": "krate serve",
     "preview": "krate serve",
     "typecheck": "node ../../node_modules/typescript7/bin/tsc --noEmit",
@@ -15,9 +20,9 @@
   },
   "devDependencies": {
     "@krate/base-docs-theme": "workspace:*",
-    "@krate/components": "0.5.0-rc.14",
-    "@krate/core": "0.5.0-rc.14",
-    "@krate/runtime": "0.5.0-rc.14",
+    "@krate/components": "0.5.0-rc.15",
+    "@krate/core": "0.5.0-rc.15",
+    "@krate/runtime": "0.5.0-rc.15",
     "typescript": "^5.5.0"
   }
 }

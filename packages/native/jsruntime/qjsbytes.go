@@ -1,3 +1,5 @@
+//go:build !js
+
 package jsruntime
 
 // Raw byte transfer between Go and a QuickJS VM.

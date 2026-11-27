@@ -21,6 +21,7 @@ Practical, end-to-end walkthroughs.
 | [Creating Plugins](/docs/guides/creating-plugins/) | Write Go or JavaScript plugins |
 | [Error Handling](/docs/guides/error-handling/) | Handle build, render, and client errors |
 | [Troubleshooting](/docs/guides/troubleshooting/) | Fix common errors |
+| [Playground](/docs/guides/playground/) | Build Krate projects in the browser with the compiler running as WebAssembly |
 | [Migrating from Next.js](/docs/guides/migrating-from-nextjs/) | Move an existing site to Krate |
 | [React Compatibility](/docs/guides/react-compatibility/) | Transpile React hooks and JSX to Krate |
 | [Compatibility Matrix](/docs/guides/compatibility/) | Which framework features are supported |

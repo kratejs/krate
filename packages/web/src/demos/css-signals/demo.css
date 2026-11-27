@@ -1,0 +1,126 @@
+.cz {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1rem;
+}
+
+.cz-block {
+    padding: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--bg);
+}
+
+.cz-block h2 {
+    margin: 0 0 0.75rem;
+    font-size: 0.9rem;
+}
+
+.cz-seg {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--soft);
+}
+
+/* The compiler turns each trigger into a <label> and sets --krate-active-* on the selected one. */
+.cz-seg > * {
+    font-size: 0.9rem;
+    padding: 0.4rem 0.9rem;
+    border-radius: 7px;
+    background: var(--krate-active-bg, transparent);
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.cz-seg > *:hover {
+    color: var(--fg);
+}
+
+.cz-price {
+    margin: 0.9rem 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.cz-amount::after {
+    content: var(--price);
+    font-weight: 700;
+    font-size: 1.6rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+    margin-right: 0.3rem;
+}
+
+.cz-period::after {
+    content: var(--period);
+}
+
+.cz-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.cz-chips > * {
+    font-size: 0.85rem;
+    user-select: none;
+    padding: calc(0.3rem + 1px) calc(0.8rem + 1px);
+    border-radius: 999px;
+    border: 0;
+    background: var(--krate-active-bg, var(--soft));
+    color: var(--fg);
+    cursor: pointer;
+}
+
+.cz-list {
+    margin: 0.9rem 0 0;
+    padding-left: 1.1rem;
+    font-size: 0.9rem;
+}
+
+.cz-q {
+    display: block;
+    width: 100%;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.55rem 0;
+    border-top: 1px solid var(--line);
+    color: var(--fg);
+    cursor: pointer;
+}
+
+.cz-block > .cz-q:first-of-type {
+    border-top: 0;
+}
+
+.cz-a {
+    padding: 0 0 0.6rem;
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+
+.cz-bar {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--line);
+    overflow: hidden;
+}
+
+.cz-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.25s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cz-fill {
+        transition: none;
+    }
+}
+
+.cz-step {
+    margin: 0.6rem 0 0.9rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+}

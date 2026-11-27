@@ -1,0 +1,1 @@
+{"id":"slider","name":"Slider","group":"Input","summary":"Range input styled to the theme, with an optional live handler.","builtWith":"Native input","import":"import { Slider } from \"@krate/components\";"}

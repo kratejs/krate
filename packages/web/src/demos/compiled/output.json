@@ -1,0 +1,8 @@
+{
+  "html": "<main>\n  <div class=\"cm\">\n    <p class=\"cm-label\">Clicked <strong><!--k:5-->0<!--/k:5--></strong> times</p>\n    <button data-k=\"k:6\" type=\"button\" class=\"dk-btn dk-btn-primary\">Click me</button>\n  </div>\n</main>",
+  "htmlBytes": 194,
+  "js": "(function(r){\nr[\"3o3emn5v4\"]=function(__ka){\nconst [count,setCount]=createSignal(0);\nkbindText(__ka[0],()=>count());\nkbindHandler(__ka[1],\"onClick\",()=>setCount((count() + 1)));\n};\n})(window.__krate_c||(window.__krate_c={}));\n(function(){\nrefreshSlots();\nif(typeof krateRefsHold==='function')krateRefsHold();\n// component 1.Demo.Demo_c0\n(function(){\ntry{\n__ku(\"3o3emn5v4\",[\"5\",\"6\"]);\n}catch(e){__krateScopeErr(e);}\n})();\nif(window.krateMountPortals)window.krateMountPortals();\nif(typeof krateRefsFlush==='function')krateRefsFlush();\nif(typeof krateMountFields==='function')krateMountFields(document.getElementById('root')||document.body);\nif(typeof reinitRouter==='function'){reinitRouter();}else if(typeof initRouter==='function'){initRouter();}\n})();",
+  "jsBytes": 752,
+  "jsGzipBytes": 382,
+  "runtimeGzipBytes": 21458
+}

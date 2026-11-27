@@ -1,0 +1,114 @@
+.tk-add {
+    margin-bottom: 1rem;
+}
+
+.tk-add .dk-input {
+    flex: 1 1 10rem;
+    width: auto;
+}
+
+.tk-board {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.tk-col {
+    padding: 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--bg);
+    min-height: 9rem;
+}
+
+.tk-col h2 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0 0 0.5rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.tk-n {
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    padding: 1px calc(0.45rem + 1px);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+
+.tk-col ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.4rem;
+}
+
+.tk-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--soft);
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
+}
+
+.tk-done > span:first-child {
+    text-decoration: line-through;
+    color: var(--muted);
+}
+
+.tk-actions {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.tk-actions button {
+    font: inherit;
+    line-height: 1;
+    min-width: 32px;
+    min-height: 32px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+    cursor: pointer;
+}
+
+.tk-actions button:hover {
+    border-color: var(--accent);
+}
+
+.tk-actions button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.tk-hint {
+    margin: 0.9rem 0 0;
+    font-size: 0.85rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .tk-card {
+        animation: tk-in 0.25s ease-out;
+    }
+}
+
+@keyframes tk-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+}
+
+@media (max-width: 640px) {
+    .tk-board {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

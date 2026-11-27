@@ -1,0 +1,78 @@
+.cx {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 1rem;
+}
+
+.cx section {
+    padding: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--bg);
+}
+
+.cx h2 {
+    margin: 0 0 0.6rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.cx-bar {
+    margin-bottom: 0.9rem;
+}
+
+.cx-bar .dk-btn[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--soft);
+    font-weight: 600;
+}
+
+.cx-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.cx-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+    border-top: 1px solid var(--line);
+    font-size: 0.92rem;
+}
+
+.cx-list li:first-child {
+    border-top: 0;
+}
+
+.cx-badge {
+    margin: 0 0 0.4rem;
+    font-size: 0.9rem;
+}
+
+.cx-total {
+    margin: 0.6rem 0;
+}
+
+.cx-x {
+    font: inherit;
+    line-height: 1;
+    min-width: 32px;
+    min-height: 32px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+    cursor: pointer;
+}
+
+.cx-x:hover {
+    border-color: var(--accent);
+}
+
+.cx-empty {
+    margin: 0;
+    font-size: 0.88rem;
+}

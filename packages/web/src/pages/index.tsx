@@ -1,5 +1,8 @@
 import { Code } from "@krate/components/code";
-import { CounterDemo } from "../components/counter-demo";
+import { HeroTabs, Pipeline, BenchChart } from "../home/sections";
+import { DemoTeasers } from "../home/panes";
+import "../styles/demos.css";
+import "../styles/home.css";
 import benchmarks from "../data/benchmarks.json";
 
 // Scores come from the published benchmark run (packages/benchmark, `publish`).
@@ -30,24 +33,20 @@ export default function Home() {
         <div class="hero-actions">
           <a class="btn btn-primary" href="/docs/">Read the docs</a>
           <a class="btn btn-secondary" href="/docs/getting-started/">Getting started</a>
+          <a class="btn btn-secondary" href="/demos/">Live demos</a>
+          <a class="btn btn-secondary" href="/playground/">Try it in the playground</a>
           <a class="btn btn-secondary" href="/blog/">Blog</a>
         </div>
-        <div class="hero-demo">
-          <div class="hero-demo-code"><Code lang="typescript" showCopy title="counter.tsx">{`export default function Counter() {
-  const [count, setCount] = createSignal(0);
-  return (
-    <div>
-      <span>{count()}</span>
-      <button onClick={() => setCount(c => c + 1)}>+</button>
-    </div>
-  );
-}`}</Code></div>
-          <div class="hero-demo-live">
-            <span class="hero-demo-live-label">Live preview</span>
-            <CounterDemo />
-            <span class="hero-demo-live-note">Signals update the DOM directly - no virtual DOM.</span>
-          </div>
-        </div>
+        <HeroTabs />
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">From TSX to a few hundred bytes.</h2>
+        <p class="section-lede">
+          Step through what the compiler does to a counter. This is real output, built with the
+          same compiler that runs in the <a href="/playground/">playground</a>.
+        </p>
+        <Pipeline />
       </section>
 
       <section class="features bento">
@@ -87,6 +86,16 @@ export default function Home() {
       </section>
 
       <section class="section">
+        <h2 class="section-title">See it run.</h2>
+        <p class="section-lede">
+          Eleven live demos, each with its source and a one-click link into the playground:
+          reactivity you can watch, widgets that work without JavaScript, view transitions, a canvas and more.
+          <a href="/demos/">Browse all demos</a>.
+        </p>
+        <DemoTeasers />
+      </section>
+
+      <section class="section">
         <h2 class="section-title">How Krate compares</h2>
         <p class="section-lede">
           A Go-native compiler with whole-program knowledge, a signal runtime,
@@ -117,6 +126,7 @@ export default function Home() {
           Next.js on the same page, and Go API routes compiled into a native
           sidecar. <a href="/docs/guides/benchmarks/">See the benchmarks</a>.
         </p>
+        <BenchChart />
         <div class="stats">
           <div class="stat"><div class="stat-value">{buildTime(krateBuild.medianMs)}</div><div class="stat-label">Cold build, counter page</div></div>
           <div class="stat"><div class="stat-value">{thousands(goApi.rps)}</div><div class="stat-label">req/s, Go API route</div></div>

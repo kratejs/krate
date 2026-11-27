@@ -1,0 +1,1 @@
+{"id":"tabs","name":"Tabs","group":"Layout","summary":"Roving tabindex, arrow keys, zero JS pointer behaviour.","builtWith":"CSS signals","import":"import { Tabs } from \"@krate/components\";"}
