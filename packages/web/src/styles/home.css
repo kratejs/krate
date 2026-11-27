@@ -47,7 +47,7 @@
     text-align: center;
 }
 .ht-live .demo { border: 0; background: none; box-shadow: none; padding: 0; }
-.ht-live-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-link); }
+.ht-live-label { font-size: 0.85rem; font-weight: 700; color: var(--color-link); }
 .ht-live-note { max-width: 30ch; color: var(--color-muted); font-size: 0.85rem; line-height: 1.5; }
 .ht-open { font-size: 0.85rem; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 

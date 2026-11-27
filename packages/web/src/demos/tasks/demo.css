@@ -26,9 +26,7 @@
     justify-content: space-between;
     align-items: center;
     margin: 0 0 0.5rem;
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: 0.85rem;
     color: var(--muted);
 }
 

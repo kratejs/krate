@@ -565,10 +565,8 @@ video {
 }
 
 .hero-demo-live-label {
-    font-size: 0.7rem;
+    font-size: 0.85rem;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
     color: var(--color-link);
 }
 
@@ -833,10 +831,8 @@ video {
 .compare thead th {
     background: var(--color-bg-subtle);
     color: var(--color-muted);
-    font-size: 0.74rem;
+    font-size: 0.85rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     border-bottom-color: var(--color-border-strong);
 }
 
@@ -1023,10 +1019,8 @@ video {
 
 .site-footer-column-title {
     margin-bottom: 0.6rem;
-    font-size: 0.74rem;
+    font-size: 0.85rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
     color: var(--color-fg);
 }
 
@@ -1054,8 +1048,7 @@ video {
     padding-top: 1.25rem;
     border-top: 1px solid var(--color-border);
     color: var(--color-muted);
-    font-size: 0.78rem;
-    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
 }
 
 /* ---- Blog index: dated rows ---- */
@@ -1628,11 +1621,9 @@ body .chroma .w {
     border-radius: var(--radius-pill);
     color: var(--color-muted);
     background: var(--pill-bg);
-    font-size: 0.68rem;
+    font-size: 0.85rem;
     font-weight: 600;
     line-height: 1.4;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
     white-space: nowrap;
 }
 
@@ -1798,9 +1789,8 @@ body .chroma .w {
 
 .roadmap-phase-id {
     color: var(--color-muted);
-    font-size: 0.72rem;
+    font-size: 0.85rem;
     font-weight: 700;
-    letter-spacing: 0.08em;
 }
 
 .roadmap-phase-body {
