@@ -326,7 +326,7 @@ export default function Home() {
 `,
       "src/components/card.module.css": `.card { padding: 1rem 1.25rem; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
 .title { margin: 0 0 0.5rem; font-size: 1.1rem; color: var(--accent); }
-.tag { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); font: 0.8rem ui-monospace, monospace; }
+.tag { display: inline-block; padding: calc(0.1rem + 1px) calc(0.5rem + 1px); border-radius: 999px; background: var(--soft); font-size: 0.8rem; }
 `,
       "src/styles.css": base,
     },
@@ -538,7 +538,7 @@ export default function Home() {
 `,
       "src/styles.css":
         base +
-        `.time { font: 700 3.5rem ui-monospace, monospace; margin: 0.5rem 0 1rem; font-variant-numeric: tabular-nums; }
+        `.time { font-weight: 700; font-size: 3.5rem; margin: 0.5rem 0 1rem; font-variant-numeric: tabular-nums; }
 .row { display: flex; gap: 0.5rem; }
 `,
     },

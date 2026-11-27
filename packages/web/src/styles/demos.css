@@ -37,16 +37,16 @@
 .demo-chip {
     display: inline-flex;
     align-items: center;
-    padding: 0.2rem 0.65rem;
+    padding: calc(0.2rem + 1px) calc(0.65rem + 1px);
     border-radius: var(--radius-pill);
-    border: 1px solid var(--color-accent-border);
-    background: var(--color-accent-bg);
+    border: 0;
+    background: var(--pill-bg-active);
     color: var(--color-link);
     font-size: 0.78rem;
     font-weight: 600;
 }
-.demo-chip-zero { border-color: color-mix(in srgb, var(--color-positive) 40%, transparent); background: color-mix(in srgb, var(--color-positive) 12%, transparent); color: var(--color-positive); }
-.demo-chip-tag { border-color: var(--color-border); background: var(--color-bg-subtle); color: var(--color-muted); font-weight: 500; }
+.demo-chip-zero { background: color-mix(in srgb, var(--color-positive) 16%, transparent); color: var(--color-positive); }
+.demo-chip-tag { background: var(--pill-bg); color: var(--color-muted); font-weight: 500; }
 
 .demo-body {
     display: grid;
@@ -73,7 +73,8 @@
 .demo-file > summary {
     cursor: pointer;
     padding: 0.4rem 0;
-    font: 600 0.85rem var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 600;
     color: var(--color-muted);
 }
 .demo-file .krate-code-block { margin: 0.25rem 0 0; max-width: 100%; }
@@ -96,13 +97,12 @@
 
 /* Compiled output tabs: the trigger <button>s compile to <label>s. */
 .co-lede { margin: 0 0 1rem; color: var(--color-muted); max-width: 70ch; }
-.co-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+.co-tabs { --krate-css-active-fg: var(--color-link); display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
 .co-tabs > * {
-    padding: 0.4rem 0.85rem;
-    border: 1px solid var(--color-border);
+    padding: calc(0.4rem + 1px) calc(0.85rem + 1px);
+    border: 0;
     border-radius: var(--radius-pill);
-    background: var(--krate-active-bg, var(--color-bg-subtle));
-    border-color: var(--krate-active-color, var(--color-border));
+    background: var(--krate-active-bg, var(--pill-bg));
     color: var(--color-fg);
     font-size: 0.85rem;
     cursor: pointer;
@@ -157,5 +157,5 @@
     color: var(--color-link);
 }
 .demo-card-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
-.demo-card-tags span { font-size: 0.72rem; color: var(--color-muted); padding: 0.1rem 0.5rem; border: 1px solid var(--color-border); border-radius: var(--radius-pill); }
+.demo-card-tags span { font-size: 0.72rem; color: var(--color-muted); padding: calc(0.1rem + 1px) calc(0.5rem + 1px); border: 0; border-radius: var(--radius-pill); background: var(--pill-bg); }
 @media (prefers-reduced-motion: reduce) { .demo-card, .demo-card:hover { transition: none; transform: none; } }

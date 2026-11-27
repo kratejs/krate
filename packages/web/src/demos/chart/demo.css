@@ -1,13 +1,86 @@
-.ch-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; margin-bottom: 0.75rem; }
-.ch-stats > div { padding: 0.5rem 0.7rem; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
-.ch-k { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
-.ch-stats strong { font: 700 1.15rem ui-monospace, monospace; font-variant-numeric: tabular-nums; }
-.ch-svg { display: block; width: 100%; height: 11rem; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
-.ch-line { stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
-.ch-area { fill: var(--accent); opacity: 0.12; }
-.ch-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin-top: 0.9rem; }
-.ch-live[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
-.ch-field { display: grid; gap: 0.2rem; font-size: 0.8rem; font-weight: 600; min-width: 10rem; }
-.ch-field output { font-family: ui-monospace, monospace; color: var(--muted); font-weight: 400; margin-left: 0.3rem; }
-.ch-field input { accent-color: var(--accent); }
-@media (max-width: 480px) { .ch-stats { grid-template-columns: repeat(2, 1fr); } }
+.ch-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.ch-stats > div {
+    padding: 0.5rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg);
+}
+
+.ch-k {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+}
+
+.ch-stats strong {
+    font-weight: 700;
+    font-size: 1.15rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.ch-svg {
+    display: block;
+    width: 100%;
+    height: 11rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--bg);
+}
+
+.ch-line {
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-linejoin: round;
+}
+
+.ch-area {
+    fill: var(--accent);
+    opacity: 0.12;
+}
+
+.ch-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 0.9rem;
+}
+
+.ch-live[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.ch-field {
+    display: grid;
+    gap: 0.2rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    min-width: 10rem;
+}
+
+.ch-field output {
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    font-weight: 400;
+    margin-left: 0.3rem;
+}
+
+.ch-field input {
+    accent-color: var(--accent);
+}
+
+@media (max-width: 480px) {
+    .ch-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}

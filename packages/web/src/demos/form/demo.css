@@ -1,13 +1,68 @@
-.fm { display: grid; gap: 1.1rem; max-width: 30rem; }
-.fm-field { min-width: 0; }
-.fm-msg { margin: 0.35rem 0 0; font-size: 0.82rem; color: var(--muted); }
-.fm-msg[data-bad="true"] { color: var(--accent-text, var(--accent)); }
-.fm-meter { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 0.5rem; }
-.fm-meter i { height: 5px; border-radius: 3px; background: var(--line); }
-.fm-meter[data-level="1"] i:nth-child(-n+1), .fm-meter[data-level="2"] i:nth-child(-n+2),
-.fm-meter[data-level="3"] i:nth-child(-n+3), .fm-meter[data-level="4"] i:nth-child(-n+4) { background: var(--accent); }
-.fm-check { display: flex; gap: 0.5rem; align-items: center; font-size: 0.9rem; }
-.fm-check input { width: 18px; height: 18px; accent-color: var(--accent); }
-.fm .dk-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
-.fm-done { margin: 0; min-height: 1.4em; font-weight: 600; color: var(--accent-text, var(--accent)); }
-.dk-input[aria-invalid="true"] { border-color: var(--accent); }
+.fm {
+    display: grid;
+    gap: 1.1rem;
+    max-width: 30rem;
+}
+
+.fm-field {
+    min-width: 0;
+}
+
+.fm-msg {
+    margin: 0.35rem 0 0;
+    font-size: 0.82rem;
+    color: var(--muted);
+}
+
+.fm-msg[data-bad="true"] {
+    color: var(--accent-text, var(--accent));
+}
+
+.fm-meter {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    margin-top: 0.5rem;
+}
+
+.fm-meter i {
+    height: 5px;
+    border-radius: 3px;
+    background: var(--line);
+}
+
+.fm-meter[data-level="1"] i:nth-child(-n+1),
+.fm-meter[data-level="2"] i:nth-child(-n+2),
+.fm-meter[data-level="3"] i:nth-child(-n+3),
+.fm-meter[data-level="4"] i:nth-child(-n+4) {
+    background: var(--accent);
+}
+
+.fm-check {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    font-size: 0.9rem;
+}
+
+.fm-check input {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+}
+
+.fm .dk-btn[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.fm-done {
+    margin: 0;
+    min-height: 1.4em;
+    font-weight: 600;
+    color: var(--accent-text, var(--accent));
+}
+
+.dk-input[aria-invalid="true"] {
+    border-color: var(--accent);
+}

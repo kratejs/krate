@@ -57,10 +57,10 @@ export function Pipeline() {
   return (
     <div class="pl">
       <ol class="pl-steps">
-        <li><button type="button" {...step.trigger("tsx")}><b>1</b> Your TSX</button></li>
-        <li><button type="button" {...step.trigger("parse")}><b>2</b> Parse and analyze</button></li>
-        <li><button type="button" {...step.trigger("html")}><b>3</b> Static HTML</button></li>
-        <li><button type="button" {...step.trigger("js")}><b>4</b> Tiny script</button></li>
+        <li><button type="button" {...step.trigger("tsx")}>1 - Your TSX</button></li>
+        <li><button type="button" {...step.trigger("parse")}>2 - Parse and analyze</button></li>
+        <li><button type="button" {...step.trigger("html")}>3 - Static HTML</button></li>
+        <li><button type="button" {...step.trigger("js")}>4 - Tiny script</button></li>
       </ol>
       <div class="pl-body">
         <div {...step.panel("tsx")} class="pl-pane">

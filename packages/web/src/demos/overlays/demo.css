@@ -1,7 +1,45 @@
-.ov kbd { margin-left: 0.4rem; padding: 0.05rem 0.4rem; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.5); font: 0.72rem ui-monospace, monospace; }
-.ov-last { margin: 1rem 0 0; font-size: 0.9rem; }
-.ov-last strong { color: var(--fg); }
-.ov-palette { padding: 0; width: min(32rem, 92vw); }
-.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.ov-palette .ov-close { position: static; display: block; width: auto; height: auto; margin: 0.25rem 0.75rem 0.6rem auto; padding: 0.25rem 0.6rem; font-size: 0.8rem; }
-.ov-inline { margin-top: 1rem; }
+.ov kbd {
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.22);
+    font-size: 0.72rem;
+}
+
+.ov-last {
+    margin: 1rem 0 0;
+    font-size: 0.9rem;
+}
+
+.ov-last strong {
+    color: var(--fg);
+}
+
+.ov-palette {
+    padding: 0;
+    width: min(32rem, 92vw);
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+.ov-palette .ov-close {
+    position: static;
+    display: block;
+    width: auto;
+    height: auto;
+    margin: 0.25rem 0.75rem 0.6rem auto;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.8rem;
+}
+
+.ov-inline {
+    margin-top: 1rem;
+}
