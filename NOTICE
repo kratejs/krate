@@ -1,0 +1,16 @@
+Krate
+Copyright 2026 The Krate Authors
+
+This product includes software developed as part of the Krate project
+(https://github.com/kratejs/krate, https://krate.js.org).
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file.
+
+Under section 4(d) of the License, any redistribution of this work or of
+a Derivative Work, including a fork, must retain this NOTICE file, or the
+attribution notices it contains, in at least one of the places that section
+describes.
+
+Some packages carry their own NOTICE file with additional third-party
+attributions (for example packages/3d, packages/konva, packages/three).
+Those notices apply to the packages that contain them.
