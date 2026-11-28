@@ -694,6 +694,26 @@ func (b *Builder) forgetPrograms(progs []*ast.Program) {
 	}
 }
 
+// forgetStalePrograms drops the per-program state of every program the module
+// cache no longer holds. A long-lived dev server parses each page entry again
+// on every build and an edited module again after each edit, so without this
+// the maps keyed by program kept every AST it ever parsed.
+func (b *Builder) forgetStalePrograms() {
+	live := b.moduleCache.LivePrograms()
+	stale := func(m *sync.Map) {
+		m.Range(func(k, _ any) bool {
+			if p, ok := k.(*ast.Program); ok && !live[p] {
+				m.Delete(k)
+			}
+			return true
+		})
+	}
+	stale(&b.progLocks)
+	stale(&b.deferInline)
+	stale(&b.progIconDiags)
+	stale(&b.progImageDiags)
+}
+
 // ensureTransformed applies the universal AST transforms (icons, images, spread
 // flattening, content inlining) to prog exactly once per build. Cached module
 // ASTs are shared across concurrent page builds, so these in-place mutations
@@ -3877,6 +3897,7 @@ func (b *Builder) resetBuildCaches() {
 	b.collectionSites = sync.Map{}
 	b.templateCovered = sync.Map{}
 	b.gspMemo = sync.Map{}
+	b.forgetStalePrograms()
 	b.roundJobs.reset()
 	// File scans the plugins memoize by modification time and size are
 	// per build too.

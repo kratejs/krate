@@ -273,6 +273,28 @@ func (c *ModuleCache) DropPrograms() []*ast.Program {
 	return out
 }
 
+// LivePrograms is the set of programs the cache holds now (parsed modules
+// and their renamed copies). State kept per program elsewhere is stale for
+// any program not in it: an edited module was parsed again, and an entry
+// module is parsed on every build.
+func (c *ModuleCache) LivePrograms() map[*ast.Program]bool {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[*ast.Program]bool, len(c.programs))
+	for _, e := range c.programs {
+		out[e.program] = true
+	}
+	for _, e := range c.renamed {
+		for _, p := range e.copies {
+			out[p] = true
+		}
+	}
+	return out
+}
+
 // ResetResolver clears the filesystem-existence and import-resolution memo so a
 // new build re-probes the filesystem. Call once per build.
 func (c *ModuleCache) ResetResolver() {

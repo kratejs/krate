@@ -54,6 +54,10 @@ renderer).
 ## Dev server 404s / no hot reload
 
 - The watcher ignores `dist`, `.krate` (which holds the dev server's own output, `.krate/dev-out`), `node_modules`, and `_`-prefixed files.
+- In a git work tree it also ignores git-ignored files and directories that no
+  page, layout or API route imports, such as a `data/` directory an API route
+  or a background job writes into. Writing them does not rebuild the site.
+  A git-ignored file that a build imports (generated source) still rebuilds it.
 - If you renamed a page, wait for the rebuild banner; a compile error blocks the
   reload (the browser shows a build-error overlay).
 - The dev dock shows the state: `Rebuilding ...` while the watcher builds, the

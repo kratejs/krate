@@ -73,6 +73,7 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 		outDir = filepath.Join(root, outDir)
 	}
 	outDir = filepath.Clean(outDir)
+	ignores := newGitIgnores(root)
 
 	publicDir := b.publicDir()
 
@@ -301,6 +302,10 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 				continue
 			}
 
+			if filepath.Base(ev.Name) == ".gitignore" {
+				ignores.reset()
+			}
+
 			// Skip krate's own internal artifacts: files whose basename starts
 			// with '_' or '.' are private/convention-skipped everywhere else in
 			// the compiler (private API files, _layout.*, runtime-component
@@ -309,6 +314,12 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 			// them here prevents those rewrites from re-triggering the watcher
 			// in an infinite loop.
 			if (internalName(ev.Name) && !layoutOrLoadingFile(ev.Name)) || generatedDeclaration(ev.Name) {
+				continue
+			}
+			// A git-ignored file or directory no build depends on is runtime
+			// data or output (an API route's log, a media job's progress file
+			// or video segments): writing it must not rebuild the site.
+			if (isDirEvent || wasDir || b.watchedFile(ev.Name)) && b.ignoredChange(ignores, ev.Name, isDirEvent || wasDir) {
 				continue
 			}
 			// Keep the recursive watch in sync as directories are created,
@@ -820,6 +831,23 @@ func (b *Builder) watchedFile(path string) bool {
 	b.depMu.Lock()
 	defer b.depMu.Unlock()
 	return len(b.depGraph[path]) > 0
+}
+
+// ignoredChange reports whether a change to path (a directory when isDir) is
+// git-ignored and outside every build's dependencies.
+func (b *Builder) ignoredChange(ign *gitIgnores, path string, isDir bool) bool {
+	b.depMu.Lock()
+	dep := len(b.depGraph[path]) > 0
+	if isDir && !dep {
+		for f := range b.depGraph {
+			if isWithin(f, path) {
+				dep = true
+				break
+			}
+		}
+	}
+	b.depMu.Unlock()
+	return !dep && ign.ignored(path, isDir)
 }
 
 // externalDepDirs lists the directories of known dependencies that live outside
