@@ -103,6 +103,7 @@ export default async function Page() { return <main><h1>other one</h1><Other /><
 		t.Fatal(err)
 	}
 	withPreact(t, root)
+	backdateTree(t, root)
 	captureProgress(t)
 	b.DevMode = true
 	UseDevOutDir(root, b.Cfg)
@@ -193,6 +194,7 @@ export default async function Page() { return <main><h1>toggle</h1><Toggle /></m
 		t.Fatal(err)
 	}
 	withPreact(t, root)
+	backdateTree(t, root)
 	captureProgress(t)
 	b.DevMode = true
 	UseDevOutDir(root, b.Cfg)
@@ -226,6 +228,24 @@ export default async function Page() { return <main><h1>toggle</h1><Toggle /></m
 	}
 	if !devMemoTreeHas(t, filepath.Join(b.Cfg.OutDir, "chunks"), "second") {
 		t.Fatal("the island chunk does not hold the edited component")
+	}
+}
+
+// backdateTree dates the fixture's files in the past. A file written just
+// before a build is not trusted as unchanged (see stampFiles), so a fixture
+// written right before the first build would make it never reusable.
+// Symlinks are skipped: they point into the repository.
+func backdateTree(t *testing.T, root string) {
+	t.Helper()
+	past := time.Now().Add(-2 * time.Minute)
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		return os.Chtimes(p, past, past)
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
