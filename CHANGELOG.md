@@ -546,6 +546,28 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- Node memory: the API sidecar is one process by default (`ssr.nodeWorkers` was `min(NumCPU, 8)`).
+  Every worker held its own copy of the routes, their packages and their connection pools, so an idle
+  sidecar sat at several hundred MB. Set `ssr.nodeWorkers` to cluster CPU-bound routes.
+- Node memory: production builds link the page server bundles and the Node API route bundles, so the
+  app modules they share are emitted once as chunks (`_chunks/`) instead of inlined into every page and
+  route. Each process loads a shared module once, and its module-level state (a database pool, a
+  cache) has one instance per process instead of one per page or route, as in Next.js. A page whose
+  build depends on per-page plugin output that a shared module would see differently (baked Go
+  components, or a client boundary, file or package, whose stub for some export differs from another
+  linked page's) stays self-contained. Set `KRATE_DEBUG_PAGE_LINK=1` to log why a page was not linked. `krate dev` is unchanged.
+- Node memory: the in-memory ISR, PPR region and data caches are bounded by size as well as entry
+  count. `ssr.cacheMemory` (MB, default 64 per process) splits half to pages and a quarter each to
+  regions and the data cache; least-recently-used entries are evicted, and an entry larger than its
+  share is not cached. Before, up to 512 pages, 512 regions and 1000 data entries were kept whatever
+  their size.
+- Node memory: under a memory limit (a container or a systemd `MemoryMax`; cgroup v2 or v1, read from
+  the server's own cgroup up to the root), each Node process the server starts gets `--max-old-space-size` derived from it (60% of the limit split between the processes,
+  at least 256 MB), so V8 collects garbage before the container is killed. `ssr.nodeHeapLimit` sets
+  it in MB, `-1` turns it off, and a limit in `NODE_OPTIONS` wins.
+- The Node and Bun API sidecars bound their route-file cache, which also cached misses and could
+  grow without limit under a scanner requesting distinct paths.
+
 - `create-krate-app` keeps its global CSS in `src/styles/global.css`, imported by `src/pages/_layout.tsx`, so it
   goes through Krate's CSS pipeline (Tailwind, minification, hashed names) instead of being served as-is from
   `public/`. The scaffold's favicon is a neutral placeholder, and `krate.config.ts` in both templates sets

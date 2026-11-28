@@ -76,6 +76,8 @@ export function Alt() { return <i>{util()}</i>; }`,
 		t.Helper()
 		nb := New(root, b.Cfg)
 		nb.noSharedServerWork = !share
+		// The bundles are compared one by one: they must not be linked.
+		nb.noLinkedServerBundles = true
 		if err := nb.BuildAll(); err != nil {
 			t.Fatalf("BuildAll: %v", err)
 		}

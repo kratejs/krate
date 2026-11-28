@@ -3,6 +3,7 @@ package build
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -190,7 +191,15 @@ func (s *islandServerStubs) stubModule(spec string, sp *islandStubSpec) string {
 
 // islandServerStubPlugin serves the stub modules to the page's server bundle.
 func islandServerStubPlugin(s *islandServerStubs, source string) api.Plugin {
-	sourcefile, dir := filepath.Base(source), filepath.Dir(source)
+	return islandServerStubPluginFor(s, source, []string{source, filepath.Base(source), "<stdin>"}, "krate-island-stub")
+}
+
+// islandServerStubPluginFor is islandServerStubPlugin for the imports of the
+// modules named importers, with the stubs in namespace ns. A build of several
+// pages gives each page its own namespace, so pages that import the same
+// specifier keep their own stubs.
+func islandServerStubPluginFor(s *islandServerStubs, source string, importers []string, ns string) api.Plugin {
+	dir := filepath.Dir(source)
 	return api.Plugin{
 		Name: "krate-island-server-stubs",
 		Setup: func(pb api.PluginBuild) {
@@ -199,15 +208,15 @@ func islandServerStubPlugin(s *islandServerStubs, source string) api.Plugin {
 				specs = append(specs, spec)
 			}
 			pb.OnResolve(api.OnResolveOptions{Filter: exactSpecFilter(specs)}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
-				if (args.Importer != source && args.Importer != sourcefile && args.Importer != "<stdin>") || args.ResolveDir != dir || args.Kind == api.ResolveEntryPoint {
+				if !slices.Contains(importers, args.Importer) || args.ResolveDir != dir || args.Kind == api.ResolveEntryPoint {
 					return api.OnResolveResult{}, nil
 				}
 				if _, ok := s.Specs[args.Path]; !ok {
 					return api.OnResolveResult{}, nil
 				}
-				return api.OnResolveResult{Path: args.Path, Namespace: "krate-island-stub", PluginData: args.ResolveDir}, nil
+				return api.OnResolveResult{Path: args.Path, Namespace: ns, PluginData: args.ResolveDir}, nil
 			})
-			pb.OnResolve(api.OnResolveOptions{Filter: `.*`, Namespace: "krate-island-stub"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			pb.OnResolve(api.OnResolveOptions{Filter: `.*`, Namespace: ns}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				// The stub re-exports the rest of the real module.
 				res := pb.Resolve(args.Path, api.ResolveOptions{Kind: args.Kind, ResolveDir: args.ResolveDir, Importer: "<stub>"})
 				if len(res.Errors) > 0 {
@@ -215,7 +224,7 @@ func islandServerStubPlugin(s *islandServerStubs, source string) api.Plugin {
 				}
 				return api.OnResolveResult{Path: res.Path, External: res.External}, nil
 			})
-			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-island-stub"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				src := s.stubModule(args.Path, s.Specs[args.Path])
 				dir, _ := args.PluginData.(string)
 				return api.OnLoadResult{Contents: &src, Loader: api.LoaderTSX, ResolveDir: dir}, nil

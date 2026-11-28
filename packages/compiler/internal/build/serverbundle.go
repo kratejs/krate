@@ -87,6 +87,11 @@ type serverBundleRun struct {
 	// authBanner delivers the config's auth block to the page bundles (see
 	// authBanner), so auth() in a server-rendered page sees it.
 	authBanner string
+
+	// linkMu guards linkSpecs, the pages whose bundles built cleanly, kept
+	// for linkPageBundles when impls.link is set.
+	linkMu    sync.Mutex
+	linkSpecs []pageLinkSpec
 }
 
 func newServerBundleRun(impls *clientSSRImpls, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) *serverBundleRun {
@@ -218,6 +223,11 @@ func (r *serverBundleRun) compile(page *PageResult, logf func(format string, arg
 	if err := reportMissingServerExports(page, outPath); err != nil {
 		failures = append(failures, err)
 	}
+	if impls.link && len(failures) == 0 {
+		r.linkMu.Lock()
+		r.linkSpecs = append(r.linkSpecs, pageLinkSpec{page: page, absSource: absSource, outPath: outPath, injectedSource: injectedSource, entryFile: stdinFile, clientPage: clientPage})
+		r.linkMu.Unlock()
+	}
 
 	relBundle, _ := filepath.Rel(outDir, outPath)
 	return relBundle, failures
@@ -274,6 +284,9 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 	}
 
 	wg.Wait()
+	if impls.link {
+		run.linkPageBundles()
+	}
 
 	return bundles, fatal
 }

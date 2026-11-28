@@ -20,6 +20,7 @@
  */
 
 import { HEAD_CLOSE, HEAD_OPEN } from './head-tags.js';
+import { approxBytes, cacheByteBudgets } from './memsize.js';
 
 /** What one render read through the cache. */
 export interface CacheScope {
@@ -68,14 +69,24 @@ interface GoCacheBridge {
 const STATE_KEY = Symbol.for('krate.cache.runtime');
 const REVALIDATE_STORE_KEY = Symbol.for('krate.revalidate.store');
 
-/** In-process data cache with tag index and FIFO bound. */
+/**
+ * In-process data cache with tag index and FIFO bound, by entry count and,
+ * with maxBytes, by the approximate size of the values.
+ */
 export class DataCache {
   private map = new Map<string, DataEntry>();
   private byTag = new Map<string, Set<string>>();
-  constructor(private max = 1000) {}
+  private sizes = new Map<string, number>();
+  private used = 0;
+  constructor(private max = 1000, private maxBytes = 0) {}
 
   get size(): number {
     return this.map.size;
+  }
+
+  /** The approximate memory the cached values take (0 without maxBytes). */
+  get bytes(): number {
+    return this.used;
   }
 
   get(key: string): unknown | undefined {
@@ -91,13 +102,19 @@ export class DataCache {
   set(key: string, value: unknown, ttlSeconds: number, tags: string[]): void {
     if (!(ttlSeconds > 0)) return;
     if (this.map.has(key)) this.delete(key);
-    while (this.map.size >= this.max) {
+    const n = this.maxBytes > 0 ? approxBytes(value) + key.length : 0;
+    if (this.maxBytes > 0 && n > this.maxBytes) return;
+    while (this.map.size >= this.max || (this.maxBytes > 0 && this.map.size > 0 && this.used + n > this.maxBytes)) {
       const oldest = this.map.keys().next().value;
       if (oldest === undefined) break;
       this.delete(oldest);
     }
     const expires = ttlSeconds === Infinity ? Infinity : Date.now() + ttlSeconds * 1000;
     this.map.set(key, { value, expires, tags: [...tags] });
+    if (n > 0) {
+      this.sizes.set(key, n);
+      this.used += n;
+    }
     for (const t of tags) {
       let keys = this.byTag.get(t);
       if (!keys) this.byTag.set(t, (keys = new Set()));
@@ -109,6 +126,8 @@ export class DataCache {
     const e = this.map.get(key);
     if (!e) return;
     this.map.delete(key);
+    this.used -= this.sizes.get(key) || 0;
+    this.sizes.delete(key);
     for (const t of e.tags) {
       const keys = this.byTag.get(t);
       if (keys) {
@@ -135,6 +154,8 @@ export class DataCache {
   clear(): void {
     this.map.clear();
     this.byTag.clear();
+    this.sizes.clear();
+    this.used = 0;
   }
 }
 
@@ -170,7 +191,7 @@ export function cacheRuntime(): CacheRuntime {
   if (!rt) {
     const max = envNumber('KRATE_DATA_CACHE_MAX') || 1000;
     const created: CacheRuntime = {
-      dataCache: new DataCache(max),
+      dataCache: new DataCache(max, cacheByteBudgets(envNumber('KRATE_SSR_CACHE_BYTES')).data),
       epoch: 0,
       invalidate(payload) {
         created.epoch++;

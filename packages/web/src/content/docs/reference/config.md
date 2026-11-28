@@ -498,13 +498,15 @@ ssr: {
   ssrRuntime: "node",         // sidecar runtime: "node" | "bun" | "deno"
   rendererPort: 0,            // renderer sidecar port (0 = default)
   timeout: 5000,              // max render time (ms)
-  maxCacheSize: 128,          // ISR in-memory cache size
+  maxCacheSize: 512,          // ISR in-memory cache entries
+  cacheMemory: 64,            // MB for the in-memory render and data caches, per process
+  nodeHeapLimit: 0,           // MB V8 heap per Node process (0 = from the container limit, -1 = V8 default)
   middlewareRuntime: "quickjs",  // middleware.ts runtime
   apiRuntime: "quickjs",        // API route runtime: quickjs | node | bun | deno | scriptc (experimental)
   scriptcStrict: false,         // apiRuntime "scriptc": fail the build for a route scriptc cannot compile
   apiWorkers: 1,                // embedded QuickJS API worker pool (default 1)
   apiIsolation: false,          // true = fresh VM per request (no shared state; slower)
-  nodeWorkers: 8,               // Node sidecar worker processes (cluster)
+  nodeWorkers: 1,               // Node sidecar worker processes (cluster)
   rendererWorkers: 1,           // SSR renderer worker processes (cluster; default 1)
 }
 ```
@@ -538,12 +540,30 @@ ssr: {
   [API routes](/docs/features/api-routes/#native-typescript-routes-with-scriptc-experimental).
 - **`nodeWorkers`** forks that many Node worker processes (`cluster`) for the
   API sidecar when `apiRuntime` (or `middlewareRuntime`) is
-  `node`/`bun`/`deno`. (Ignored by the Bun sidecar, which is single-process.)
+  `node`/`bun`/`deno`. Default `1`: one process that serves requests itself,
+  like `next start`. Each extra worker loads its own copy of the routes, their
+  dependencies and their connection pools, so raise it only for CPU-bound
+  routes. (Ignored by the Bun sidecar, which is single-process.)
 - **`rendererWorkers`** forks that many Node worker processes (`cluster`) for the
   SSR renderer, so page/region rendering uses more than one CPU. Default `1`
   (single process). Region and ISR caches are per-worker, and ISR disk
   persistence is disabled while clustered. Irrelevant when all request-time
   regions render on the Go host (Go components).
+- **`cacheMemory`** is the memory budget, in MB, of each process's in-memory
+  caches (default `64`): rendered ISR pages get half, PPR regions and the data
+  cache (`fetch` and `unstable_cache`) a quarter each. Least-recently-used
+  entries are evicted to stay under it, alongside the `maxCacheSize` entry
+  limit, and a single entry larger than its share is not cached. With a shared
+  `cache` adapter (Redis) this only bounds the local fallback.
+- **`nodeHeapLimit`** caps the V8 old-generation heap of each Node process the
+  server starts (the SSR renderer and the API sidecar's workers), in MB. The
+  default `0` derives it from the memory limit of the server's cgroup (cgroup
+  v2 or v1: a container limit or a systemd `MemoryMax`, the strictest on the
+  way from its own cgroup to the root):
+  60% of the limit split between the Node processes, at least 256 MB, so V8
+  collects garbage before the container is killed instead of sizing its heap
+  from the host's memory. Without a container limit V8's default is kept. `-1`
+  turns it off, and a `--max-old-space-size` in `NODE_OPTIONS` wins.
 - **`apiWorkers`** sizes the embedded QuickJS API worker pool (default `1`).
   Workers are long-lived VMs that each load a route once and reuse it, so
   module state persists across requests (Node semantics) and a pool larger than

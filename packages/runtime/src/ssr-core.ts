@@ -22,6 +22,7 @@ import {
 } from "./request-context.js";
 import { HEAD_CLOSE, HEAD_OPEN, takeHead } from "./head-tags.js";
 import { metadataHeadTags, type MetadataSegment } from "./metadata.js";
+import { approxBytes, cacheByteBudgets } from "./memsize.js";
 import { SegmentedLRU } from "./segmented-lru.js";
 import {
   cacheRuntime,
@@ -173,6 +174,12 @@ export function trackedQuery(query: Record<string, string> | undefined, t: Query
   });
 }
 
+// cacheEntryBytes is the approximate size of a cached page: its HTML plus
+// the small records kept with it.
+export function cacheEntryBytes(e: CacheEntry): number {
+  return e.html.length + approxBytes({ params: e.params, query: e.query, tags: e.tags }) + 64;
+}
+
 export class ISRCache {
   // A segmented LRU: see segmented-lru.ts. One client requesting many one-off
   // variants cannot push out the pages that were requested more than once.
@@ -180,8 +187,13 @@ export class ISRCache {
   private byTag = new Map<string, Set<string>>();
   private revalidationIntervals = new Map<string, number>(); // route -> seconds
 
-  constructor(maxSize = 512) {
-    this.cache = new SegmentedLRU<CacheEntry>(maxSize);
+  constructor(maxSize = 512, maxBytes = 0) {
+    this.cache = new SegmentedLRU<CacheEntry>(maxSize, maxBytes > 0 ? { maxBytes, sizeOf: cacheEntryBytes } : undefined);
+  }
+
+  /** The approximate memory the cached pages take, in bytes. */
+  get bytes(): number {
+    return this.cache.bytes;
   }
 
   setRevalidation(route: string, seconds: number) {
@@ -326,6 +338,11 @@ export interface SSRCoreOptions {
   loadRuntimeRenderer(relPath: string): (props: string | Record<string, any>) => string | Promise<string>;
   /** ISR/region cache entry bound (default 512). */
   maxCacheSize?: number;
+  /**
+   * Memory budget of the in-memory render caches in bytes (default 64 MiB):
+   * rendered pages get half, PPR regions a quarter (see cacheByteBudgets).
+   */
+  cacheBytes?: number;
   /** Per-render timeout in ms (default 5000, 0 disables). */
   timeoutMs?: number;
   ppr?: boolean;
@@ -363,8 +380,8 @@ export interface IsrStore {
 /** The in-process IsrStore: a bounded map with a tag index. */
 export class MemoryIsrStore implements IsrStore {
   readonly cache: ISRCache;
-  constructor(maxSize = 512) {
-    this.cache = new ISRCache(maxSize);
+  constructor(maxSize = 512, maxBytes = 0) {
+    this.cache = new ISRCache(maxSize, maxBytes);
   }
   get(key: string) {
     return this.cache.get(key);
@@ -494,7 +511,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
 
   // ISR cache size and the render timeout are configurable via the compiler
   // (ssr.maxCacheSize / ssr.timeout), which exports them to the sidecar env.
-  const isrStore: IsrStore = opts.isrStore || new MemoryIsrStore(opts.maxCacheSize && opts.maxCacheSize > 0 ? opts.maxCacheSize : 512);
+  const isrStore: IsrStore = opts.isrStore || new MemoryIsrStore(opts.maxCacheSize && opts.maxCacheSize > 0 ? opts.maxCacheSize : 512, cacheByteBudgets(opts.cacheBytes).pages);
   // pageIntervals remembers each ISR page's revalidate window (seconds).
   const pageIntervals = new Map<string, number>();
 
@@ -867,7 +884,10 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   // Bounded like the page cache, and with the same segmented eviction: a
   // client minting params variants cannot push out the regions hit twice.
   const REGION_CACHE_MAX = opts.maxCacheSize && opts.maxCacheSize > 0 ? opts.maxCacheSize : 512;
-  const regionCache = new SegmentedLRU<RegionEntry>(REGION_CACHE_MAX);
+  const regionCache = new SegmentedLRU<RegionEntry>(REGION_CACHE_MAX, {
+    maxBytes: cacheByteBudgets(opts.cacheBytes).regions,
+    sizeOf: (e) => e.html.length + e.route.length + e.paramsKey.length + approxBytes(e.tags) + 64,
+  });
   const inFlightRegionRevalidations = new Map<string, Promise<void>>();
 
   function paramsKeyOf(params?: Record<string, string>): string {

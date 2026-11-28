@@ -255,7 +255,7 @@ repository root).
 |---|---|---|
 | Go host (HTTP server, static files, routing, embedded QuickJS API routes and middleware) | always | 1 |
 | Node SSR renderer | a page or region renders at request time with JS | 1, or `ssr.rendererWorkers` (node cluster) |
-| Node API/action sidecar | an API route is Node-only (imports a native addon or a built-in, uses a global such as `Buffer` the embedded runtime lacks, or exports `runtime = "nodejs"`), `ssr.apiRuntime` is `node`/`bun`/`deno`, the project has server actions, or it has an [instrumentation](#instrumentation) file | 1 supervisor with `ssr.nodeWorkers` workers (default `min(NumCPU, 8)`) |
+| Node API/action sidecar | an API route is Node-only (imports a native addon or a built-in, uses a global such as `Buffer` the embedded runtime lacks, or exports `runtime = "nodejs"`), `ssr.apiRuntime` is `node`/`bun`/`deno`, the project has server actions, or it has an [instrumentation](#instrumentation) file | 1 process; with `ssr.nodeWorkers` above 1 (default `1`), a supervisor and that many workers |
 | Go API sidecar | the project has Go API routes | 1, over a Unix socket |
 
 Only the host listens on a public port. The sidecars listen on `127.0.0.1` on
@@ -266,6 +266,25 @@ before the sidecar binds), a free port below that range is used instead, so two
 instances on one machine do not collide. `krate dev` skips the derived ports and always
 takes a free port below that range. Sidecars are restarted with a growing
 delay if they crash, and they exit with the host.
+
+### Memory
+
+The Node processes are sized to stay flat under load:
+
+- The API sidecar is one process unless `ssr.nodeWorkers` asks for more. Each
+  worker would hold its own copy of the routes, their packages and their
+  connection pools.
+- In a production build, the page server bundles and the Node API route
+  bundles import the app modules they share from chunks
+  (`.krate/server-bundles/_chunks/`, `.krate/api-node/_chunks/`), so each
+  process loads a shared module once and every page or route sees the same
+  instance of it (one database pool, one module-level cache), as in Next.js.
+  `krate dev` keeps self-contained bundles so a rebuild touches one file.
+- The in-memory render and data caches are bounded by memory as well as by
+  entries: `ssr.cacheMemory` (64 MB per process by default).
+- In a container with a memory limit, each Node process starts with a V8 heap
+  limit derived from it (`ssr.nodeHeapLimit`), so garbage is collected before
+  the container is killed. Without a limit V8's default stands.
 
 The node target is a single Node process: pages, API routes, actions and
 middleware all run in it, with no cluster. Run several instances (a systemd

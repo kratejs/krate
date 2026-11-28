@@ -21,6 +21,7 @@ import { encodeFrame, REGION_FRAMES_TYPE, wantsRegionFrames } from "./region-wir
 import { installRenderStore, patchFetch, type CacheScope } from "./cache-scope.js";
 import { cacheSpecFromEnv } from "./cache-adapter.js";
 import { isrStoreFor } from "./shared-isr.js";
+import { cacheByteBudgets, cacheBytesFromEnv } from "./memsize.js";
 import { registerLanguage, setFenceResolver, type HighlightTable } from "./highlight.js";
 import { installProcessGuards } from "./process-guard.js";
 
@@ -314,7 +315,8 @@ function loadRuntimeRenderer(relPath: string): (props: string | Record<string, a
 // Render core
 
 const pprEnabledEnv = process.env.KRATE_PPR === "1";
-const isrMemory = new MemoryIsrStore(parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512);
+const cacheBytes = cacheBytesFromEnv(process.env);
+const isrMemory = new MemoryIsrStore(parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512, cacheByteBudgets(cacheBytes).pages);
 // With a shared cache adapter (KRATE_CACHE) the ISR cache and the data cache live
 // in the adapter, so every instance serves and invalidates the same pages.
 const sharedCache = isrStoreFor(cacheSpecFromEnv(process.env), isrMemory);
@@ -325,6 +327,7 @@ const core = createSSRCore({
   loadPageModule,
   loadRuntimeRenderer,
   maxCacheSize: parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512,
+  cacheBytes,
   timeoutMs: parseInt(process.env.KRATE_SSR_TIMEOUT || "", 10) || 5000,
   ppr: pprEnabledEnv,
   pprRevalidate: parseInt(process.env.KRATE_PPR_REVALIDATE || "", 10) || 60,

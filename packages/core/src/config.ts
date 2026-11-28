@@ -196,6 +196,19 @@ export interface SSRConfig {
   rendererPort?: number;
   timeout?: number;
   maxCacheSize?: number;
+  /**
+   * Memory budget of each process's in-memory render and data caches, in MB.
+   * Rendered pages get half, PPR regions and the data cache a quarter each.
+   * Least-recently-used entries are evicted to stay under it. Default 64.
+   */
+  cacheMemory?: number;
+  /**
+   * V8 old-generation heap limit of each Node process the server starts (SSR
+   * renderer and API sidecar workers), in MB. 0 (default) derives it from the
+   * container's memory limit when there is one; -1 leaves V8's default. A
+   * --max-old-space-size in NODE_OPTIONS wins.
+   */
+  nodeHeapLimit?: number;
   middlewareRuntime?: RuntimeName;
   /**
    * Runtime for API routes. "scriptc" is experimental and production only:
@@ -214,7 +227,8 @@ export interface SSRConfig {
   apiIsolation?: boolean;
   /**
    * Node worker processes the API sidecar (node/bun/deno runtimes) forks to
-   * use more than one CPU. Default min(CPUs, 8).
+   * use more than one CPU. Default 1 (one process; each worker holds its own
+   * copy of the routes and their dependencies).
    */
   nodeWorkers?: number;
   /** SSR renderer processes (node cluster). Default 1. Caches are per worker. */

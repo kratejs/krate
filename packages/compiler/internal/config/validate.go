@@ -208,6 +208,12 @@ func (c *Config) Validate() (warnings []string, err error) {
 	if c.SSR.MaxCacheSize < 0 {
 		return nil, fmt.Errorf("ssr.maxCacheSize must be >= 0, got %d", c.SSR.MaxCacheSize)
 	}
+	if c.SSR.NodeHeapLimit < -1 || c.SSR.NodeHeapLimit > 1<<20 {
+		return nil, fmt.Errorf("ssr.nodeHeapLimit must be -1 (off), 0 (from the container limit) or a size in MB, got %d", c.SSR.NodeHeapLimit)
+	}
+	if c.SSR.CacheMemory < 0 || c.SSR.CacheMemory > 1<<20 {
+		return nil, fmt.Errorf("ssr.cacheMemory must be between 0 and 1048576 (MB), got %d", c.SSR.CacheMemory)
+	}
 	switch strings.ToLower(c.SSR.APIRuntime) {
 	case "", "quickjs", "node", "bun", "deno", "scriptc":
 	default:

@@ -1,5 +1,6 @@
 // The ISR page cache on a shared cache adapter (see cache-adapter.ts).
 
+import { cacheByteBudgets } from "./memsize.js";
 import { MemoryIsrStore, variantKey, type CacheEntry, type IsrStore } from './ssr-core.js';
 import { installCacheAdapter, loadCacheAdapter, tagName, type CacheAdapter, type CacheGuard, type CacheSpec } from './cache-adapter.js';
 
@@ -18,7 +19,7 @@ export class SharedIsrStore implements IsrStore {
     private readonly ttlSeconds = 7 * 24 * 3600,
     maxMemory = 512,
   ) {
-    this.memory = new MemoryIsrStore(maxMemory);
+    this.memory = new MemoryIsrStore(maxMemory, cacheByteBudgets().pages);
   }
 
   async get(key: string): Promise<CacheEntry | undefined> {

@@ -288,7 +288,12 @@ async function krateHandle(req, res) {
           break;
         }
       }
-      if (!targetFile) targetFile = resolveDynamicFile(API_DIR, cleanRel, extensions);
+      // Shared chunks of the linked route bundles are not routes.
+      if (cleanRel[0] === '_chunks') targetFile = null;
+      else if (!targetFile) targetFile = resolveDynamicFile(API_DIR, cleanRel, extensions);
+      // Misses are cached too, so bound the cache: a scanner requesting
+      // endless distinct paths must not grow it forever.
+      if (fileCache.size >= 10000) fileCache.clear();
       fileCache.set(cleanKey, targetFile);
     }
 
@@ -560,7 +565,9 @@ function resolveFile(clean) {
     const indexCheck = path.join(API_DIR, ...clean, 'index' + ext);
     if (fs.existsSync(indexCheck)) { target = indexCheck; break; }
   }
-  if (!target) target = resolveDynamicFile(API_DIR, clean, exts);
+  if (clean[0] === '_chunks') target = null;
+  else if (!target) target = resolveDynamicFile(API_DIR, clean, exts);
+  if (fileCache.size >= 10000) fileCache.clear();
   fileCache.set(key, target);
   return target;
 }
@@ -1524,9 +1531,12 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	apiRTOption := strings.ToLower(cfg.SSR.APIRuntime)
 	nodeOnlyRoutes := loadNodeOnlyAPIRoutes(root)
 	apiBudgets := apiRouteBudgets(root)
+	// One process by default, as in Next.js: API routes mostly wait on I/O,
+	// and every worker holds its own copy of the routes, their dependencies
+	// and their connection pools.
 	nodeWorkers := cfg.SSR.NodeWorkers
 	if nodeWorkers <= 0 {
-		nodeWorkers = jsruntime.DefaultAPIWorkers()
+		nodeWorkers = 1
 	}
 	needNodeSidecar := sidecarNeedsNode(apiRTOption, middlewareRTOption, middlewareRT, middlewarePath, nodeOnlyRoutes) || hasActions
 	// instrumentation.ts runs once per server start, in the Node sidecar's
@@ -1599,7 +1609,8 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 					scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
 					_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
 					_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
-					cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir, instrumentationArg)
+					// Cluster workers inherit the flag through execArgv.
+					cmd = exec.Command("node", withNodeHeapArg([]string{scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir, instrumentationArg}, nodeHeapArg(cfg))...)
 					noteSidecarRuntime("Node API sidecar", "node")
 				}
 				execx.ConfigureTree(cmd)
@@ -1614,6 +1625,9 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 					fmt.Sprintf("KRATE_PARENT_PID=%d", os.Getpid()),
 					"KRATE_BASE_PATH="+cfg.BaseURLPath(),
 				)
+				if n := cfg.SSR.CacheBytes(); n > 0 {
+					cmd.Env = append(cmd.Env, fmt.Sprintf("KRATE_SSR_CACHE_BYTES=%d", n))
+				}
 				cmd.Env = append(cmd.Env, revalHost.EnvList()...)
 				if cacheRuntime != "" {
 					cmd.Env = append(cmd.Env, "KRATE_CACHE_RUNTIME="+cacheRuntime)
@@ -1982,6 +1996,8 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	ssr.SetEnv(serverEnv)
 	ssr.SetInternalSecret(revalHost.secret)
 	ssr.SetTuning(cfg.SSR.Timeout, cfg.SSR.MaxCacheSize)
+	ssr.SetCacheBytes(cfg.SSR.CacheBytes())
+	ssr.SetNodeHeapFlag(nodeHeapArg(cfg))
 	ssr.SetPPR(cfg.PPR, cfg.PPRRevalidate)
 	ssr.SetRendererWorkers(cfg.SSR.RendererWorkers)
 	var ssrOn atomic.Bool
@@ -3754,7 +3770,7 @@ func hasRouteBundles(dir string) bool {
 		if err != nil || found {
 			return filepath.SkipDir
 		}
-		if d.IsDir() && d.Name() == metaAPIKeyDir {
+		if d.IsDir() && (d.Name() == metaAPIKeyDir || d.Name() == nodeRouteChunks) {
 			return filepath.SkipDir
 		}
 		if !d.IsDir() && strings.HasSuffix(d.Name(), ".js") {

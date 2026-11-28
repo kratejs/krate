@@ -179,10 +179,11 @@ type handlerCORS struct {
 }
 
 type handlerSSR struct {
-	Timeout       int  `json:"timeout"`
-	MaxCacheSize  int  `json:"maxCacheSize"`
-	PPR           bool `json:"ppr"`
-	PPRRevalidate int  `json:"pprRevalidate"`
+	Timeout       int   `json:"timeout"`
+	MaxCacheSize  int   `json:"maxCacheSize"`
+	CacheBytes    int64 `json:"cacheBytes,omitempty"`
+	PPR           bool  `json:"ppr"`
+	PPRRevalidate int   `json:"pprRevalidate"`
 }
 
 func resolvedHeader(v, def string) string {
@@ -224,7 +225,7 @@ func buildHandlerConfig(cfg *config.Config) handlerConfig {
 			Enabled: c.Enabled, Origins: nonNilStrings(c.Origins), Methods: nonNilStrings(c.Methods),
 			Headers: nonNilStrings(c.Headers), Credentials: c.Credentials, MaxAge: c.MaxAge,
 		},
-		SSR: handlerSSR{Timeout: cfg.SSR.Timeout, MaxCacheSize: cfg.SSR.MaxCacheSize, PPR: cfg.PPR, PPRRevalidate: cfg.PPRRevalidate},
+		SSR: handlerSSR{Timeout: cfg.SSR.Timeout, MaxCacheSize: cfg.SSR.MaxCacheSize, CacheBytes: cfg.SSR.CacheBytes(), PPR: cfg.PPR, PPRRevalidate: cfg.PPRRevalidate},
 	}
 	if cc := cfg.Cache; cc.Shared() {
 		hc.Cache = &handlerCache{Adapter: cc.Adapter, URLEnv: cc.URLEnv, Prefix: cc.Prefix, TimeoutMs: cc.TimeoutMs, TTLSeconds: cc.TTLSeconds, Options: cc.Options}
