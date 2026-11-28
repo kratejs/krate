@@ -701,6 +701,15 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate dev` no longer grows by about 100 MB with every full rebuild. The per-program state of the
+  build (transform locks, deferred content inlining, `<Icon>` and `<Image>` diagnostics) kept every AST
+  the server had parsed, so a dev server that rebuilt often reached many gigabytes. It now keeps only
+  the programs still in the module cache: 30 forced full rebuilds of a 66-file app went from 227 MB to
+  3.6 GB before and stay near 300 MB now.
+- The dev watcher ignores changes to git-ignored files and directories that no build imports. An API
+  route that wrote its audit log and a video job's progress `.json` and `.ts` segments into a
+  git-ignored `data/` directory set off a full rebuild every few seconds (the live-reloaded page called
+  the API again).
 - A keyed list of client islands keeps each row's state across `router.refresh()` (and any same-page
   swap): the server writes an island's React `key` into its marker and the router pairs keyed islands by
   key, not by position. Before, deleting the first row of an admin review list handed its optimistic
