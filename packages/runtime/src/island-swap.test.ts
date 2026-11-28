@@ -8,6 +8,12 @@ function island(e: string, props: unknown, html: string, m = 'cmod'): string {
   return `<!--krate-island:${json}-->${html}<!--/krate-island-->`;
 }
 
+// A keyed island, as the server renders an element with a React key.
+function keyedIsland(e: string, k: string, props: unknown, html: string, m = 'cmod'): string {
+  const json = JSON.stringify({ m, e, s: '/chunks/' + e + '.js', k, p: props }).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/--/g, '-\\u002d');
+  return `<!--krate-island:${json}-->${html}<!--/krate-island-->`;
+}
+
 function slot(id: string, html: string): string {
   return `<!--krate-slot:${id}-->${html}<!--/krate-slot:${id}-->`;
 }
@@ -209,6 +215,79 @@ describe('swapPreservingIslands', () => {
     swap(`<div>${island('C', {}, '<b id="b">server</b>')}</div>`);
     expect(document.getElementById('b')).not.toBe(b);
     expect(recs[0].gone).toBe(true);
+  });
+});
+
+describe('keyed islands', () => {
+  const card = (k: string) => keyedIsland('Card', k, { id: k }, `<article id="${k}">${k}</article>`);
+
+  it('a refresh that drops the first row keeps the other rows with their own state', () => {
+    // A's card hid itself (optimistic state); the refresh returns B and C.
+    const [a, b, c] = render(`<section>${card('a')}${card('b')}${card('c')}</section>`);
+    const bEl = document.getElementById('b');
+    const cEl = document.getElementById('c');
+    swap(`<section>${card('b')}${card('c')}</section>`);
+    expect(a.handle.unmount).toHaveBeenCalledTimes(1);
+    expect(a.gone).toBe(true);
+    expect(b.handle.unmount).not.toHaveBeenCalled();
+    expect(c.handle.unmount).not.toHaveBeenCalled();
+    // Each kept island has its own props: none re-renders with a neighbour's.
+    expect(b.handle.update).not.toHaveBeenCalled();
+    expect(c.handle.update).not.toHaveBeenCalled();
+    expect(document.getElementById('b')).toBe(bEl);
+    expect(document.getElementById('c')).toBe(cEl);
+    expect(root.textContent).toBe('bc');
+  });
+
+  it('a reorder moves each island with its key', () => {
+    const [a, b] = render(`<ul><li>${card('a')}</li><li>${card('b')}</li></ul>`);
+    const aEl = document.getElementById('a');
+    const bEl = document.getElementById('b');
+    swap(`<ul><li>${card('b')}</li><li>${card('a')}</li></ul>`);
+    expect(a.handle.unmount).not.toHaveBeenCalled();
+    expect(b.handle.unmount).not.toHaveBeenCalled();
+    expect(document.getElementById('a')).toBe(aEl);
+    expect(document.getElementById('b')).toBe(bEl);
+    expect(root.textContent).toBe('ba');
+    expect(Array.from(root.querySelectorAll('article')).map((e) => e.id)).toEqual(['b', 'a']);
+  });
+
+  it('a kept keyed island re-renders with its new props', () => {
+    const [a, b] = render(`${keyedIsland('Card', 'a', { n: 1 }, '<i>a1</i>')}${keyedIsland('Card', 'b', { n: 1 }, '<i>b1</i>')}`);
+    swap(`${keyedIsland('Card', 'b', { n: 2 }, '<i>b2</i>')}`);
+    expect(a.handle.unmount).toHaveBeenCalled();
+    expect(b.handle.unmount).not.toHaveBeenCalled();
+    expect(b.handle.update).toHaveBeenCalledTimes(1);
+    expect(b.handle.update.mock.calls[0][0]).toEqual({ n: 2 });
+  });
+
+  it('a new key mounts anew and never takes a removed row\'s island', () => {
+    const [a] = render(card('a'));
+    swap(card('z'));
+    expect(a.handle.unmount).toHaveBeenCalled();
+    expect(root.textContent).toBe('z');
+  });
+
+  it('pairs a keyed real-React island element by data-key', () => {
+    const host = (k: string) =>
+      `<script type="application/json" data-krate-props>{"id":"${k}"}</script><krate-island style="display:contents" data-module="rmod" data-export="Row" data-key="${k}" data-src="/chunks/Row.js"></krate-island>`;
+    const [a, b] = render(`${host('a')}${host('b')}`);
+    const bEl = b.el;
+    swap(host('b'));
+    expect(a.handle.unmount).toHaveBeenCalled();
+    expect(b.handle.unmount).not.toHaveBeenCalled();
+    expect(b.handle.update).not.toHaveBeenCalled();
+    expect(root.querySelector('krate-island')).toBe(bEl);
+  });
+
+  it('unkeyed islands still pair in document order, apart from the keyed ones', () => {
+    const [u1, u2, k] = render(`${island('Card', { n: 1 }, '<b>1</b>')}${island('Card', { n: 2 }, '<b>2</b>')}${card('k')}`);
+    swap(`${card('k')}${island('Card', { n: 2 }, '<b>2</b>')}`);
+    // In order, the remaining unkeyed island pairs with the first live one.
+    expect(u1.handle.unmount).not.toHaveBeenCalled();
+    expect(u1.handle.update).toHaveBeenCalledWith({ n: 2 });
+    expect(u2.handle.unmount).toHaveBeenCalled();
+    expect(k.handle.unmount).not.toHaveBeenCalled();
   });
 });
 

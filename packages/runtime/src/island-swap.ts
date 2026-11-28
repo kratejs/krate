@@ -18,9 +18,13 @@
 // Preact island, the server children (slots) it adopted from the document.
 //
 // Keying: islands are matched per container (the swapped region, or one
-// server-children slot of a kept island), outermost islands only, in document
-// order by module and export: the n-th island of a component in the live
-// region pairs with the n-th one in the new markup. A navigation to another
+// server-children slot of a kept island), outermost islands only, by module
+// and export. An island rendered with a React key (the marker's k, a host's
+// data-key) pairs with the live island of the same component and key wherever
+// it is, so a list that lost or reordered rows keeps each row's state, as
+// React reconciles a keyed list; a live keyed island whose key is gone is
+// unmounted. Unkeyed islands pair in document order: the n-th unkeyed island
+// of a component in the live region pairs with the n-th one in the new markup. A navigation to another
 // pathname only keeps an island whose server props are unchanged too (a
 // layout's island); one whose props differ belongs to the other page and is
 // mounted anew, as React remounts a page's components.
@@ -62,7 +66,9 @@ const CLOSE_TAG = '<!--' + CLOSE + '-->';
 const SLOT_OPEN = /^krate-slot:([0-9a-z]+)$/;
 
 interface Isl {
+  /** Module and export, and the React key when the island has one. */
   key: string;
+  keyed: boolean;
   start?: Comment;
   end?: Comment;
   el?: Element;
@@ -121,24 +127,32 @@ function propsText(el: Element): string {
   return s && s.localName === 'script' && s.hasAttribute('data-krate-props') ? s.textContent || '' : '';
 }
 
+/** The pairing key of an island: its component, and its React key when it has one. */
+function islandKey(component: string, k: string | null): string {
+  return k === null ? component : component + '#' + JSON.stringify(k);
+}
+
 /** The outermost islands in list, in document order. */
 function scan(list: ArrayLike<Node>, chain: Element[] = [], out: Isl[] = []): Isl[] {
   for (let i = 0; i < list.length; i++) {
     const n = list[i];
     if (isOpen(n)) {
       const end = closeOf(n);
-      let p: { m?: string; e?: string } | null = null;
+      let p: { m?: string; e?: string; k?: unknown } | null = null;
       try {
         p = JSON.parse(n.data.slice(OPEN.length));
       } catch {
         p = null;
       }
       if (!end || !p) continue;
-      out.push({ key: p.m + '#' + p.e, start: n, end, json: n.data.slice(OPEN.length), chain, rec: (n as any).__krateIsland });
+      const keyed = typeof p.k === 'string';
+      out.push({ key: islandKey(p.m + '#' + p.e, keyed ? (p.k as string) : null), keyed, start: n, end, json: n.data.slice(OPEN.length), chain, rec: (n as any).__krateIsland });
       while (i < list.length - 1 && list[i] !== end) i++;
     } else if (isHost(n)) {
+      const k = n.getAttribute('data-key');
       out.push({
-        key: n.getAttribute('data-module') + '#' + n.getAttribute('data-export'),
+        key: islandKey(n.getAttribute('data-module') + '#' + n.getAttribute('data-export'), k),
+        keyed: k !== null,
         el: n,
         json: propsText(n),
         chain,
@@ -383,10 +397,21 @@ function pairIslands(liveList: ArrayLike<Node>, newList: ArrayLike<Node>, allow:
   const live = scan(liveList);
   const next = scan(newList);
   const pairs = new Map<Isl, Isl>();
+  // A keyed island pairs by key wherever it is (the first live island with a
+  // key, when two share it); unkeyed ones pair in order.
+  const byKey = new Map<string, Isl>();
+  for (const l of live) if (l.keyed && !byKey.has(l.key)) byKey.set(l.key, l);
   let from = 0;
   for (const n of next) {
+    if (n.keyed) {
+      const l = byKey.get(n.key);
+      if (!l) continue;
+      byKey.delete(n.key);
+      if (mounted(l.rec) && (!allow || allow(l, n))) pairs.set(n, l);
+      continue;
+    }
     for (let j = from; j < live.length; j++) {
-      if (live[j].key !== n.key) continue;
+      if (live[j].keyed || live[j].key !== n.key) continue;
       from = j + 1;
       if (mounted(live[j].rec) && (!allow || allow(live[j], n))) pairs.set(n, live[j]);
       break;
@@ -453,9 +478,19 @@ function resolve(p: Plan, list: ArrayLike<Node>): Node[] {
   return out;
 }
 
-/** Whether every island on both sides is paired (nothing to mount or unmount). */
+/**
+ * Whether every island on both sides is paired (nothing to mount or unmount)
+ * and in the same order (a keyed list that was reordered moves its islands).
+ */
 function allPaired(p: Plan): boolean {
-  return p.gone.length === 0 && p.pairs.size === p.next.length;
+  if (p.gone.length !== 0 || p.pairs.size !== p.next.length) return false;
+  let last = -1;
+  for (const n of p.next) {
+    const at = p.live.indexOf(p.pairs.get(n)!);
+    if (at < last) return false;
+    last = at;
+  }
+  return true;
 }
 
 export interface SwapOptions {

@@ -227,9 +227,13 @@ are already mounted, as in Next.js:
   and focus are kept, and it re-renders in place when its server props
   changed. `useSearchParams`, `usePathname` and `useParams` inside it follow
   the new URL. Server HTML outside islands is replaced.
-- Islands are matched by component (module and export), in document order:
-  the n-th island of a component in the old page is the n-th one in the new
-  page. On a navigation to another pathname an island is kept only when its
+- Islands are matched by component (module and export). An island rendered
+  with a `key` (`rows.map((r) => <Card key={r.id} ... />)`) is matched by its
+  key, as React reconciles a keyed list: when a refresh drops or reorders
+  rows, each card keeps its own state, and the card of a row that is gone is
+  unmounted. Islands without a key are matched in document order: the n-th
+  island of a component in the old page is the n-th one in the new page. On a
+  navigation to another pathname an island is kept only when its
   server props are unchanged too (an island of a shared layout), so a page's
   own islands start fresh on another page, as React remounts a page.
 - Server children of a kept island follow the new server HTML in place (the
