@@ -108,6 +108,33 @@ describe('clientBoundary', () => {
     expect(ids(first.result)[2].endsWith('_0')).toBe(true);
   });
 
+  it('writes the React key of a keyed island into its marker, not into its props', async () => {
+    installRenderStore(new AsyncLocalStorage<CacheScope>());
+    const Card = clientBoundary('mk', 'Card', '/k.js', function Card() { return null; }, render) as any;
+    const rows = (ids: string[]) => ids.map((id) => jsx(Card, { item: id }, id));
+    const html = (await withCacheScope('/k', () => renderToStringAsync(rows(['a', 'b', 'c']) as any))).result;
+    const islands = [...html.matchAll(/<!--krate-island:(.*?)-->/g)].map((m) => JSON.parse(m[1]));
+    expect(islands.map((i) => i.k)).toEqual(['a', 'b', 'c']);
+    expect(islands.map((i) => i.p)).toEqual([{ item: 'a' }, { item: 'b' }, { item: 'c' }]);
+    // A key left in props (createElement) is read the same way and not sent as a prop.
+    const viaProps = await renderToStringAsync(jsx(Card, { item: 'z', key: 'z' }));
+    expect(islandOf(viaProps).k).toBe('z');
+    expect(islandOf(viaProps).p).toEqual({ item: 'z' });
+    // The useId prefix follows the key, so a row keeps it when rows before it go.
+    const after = (await withCacheScope('/k', () => renderToStringAsync(rows(['b', 'c']) as any))).result;
+    const prefixes = (h: string) => [...h.matchAll(/<!--krate-island:(.*?)-->/g)].map((m) => JSON.parse(m[1]).i);
+    expect(prefixes(after)).toEqual(prefixes(html).slice(1));
+    expect(new Set(prefixes(html)).size).toBe(3);
+    // An unkeyed island has no k.
+    expect('k' in islandOf(await renderToStringAsync(jsx(Card, { item: 'u' })))).toBe(false);
+  });
+
+  it('writes the React key of a keyed real-React island as data-key', async () => {
+    const Row = clientBoundary('mr', 'Row', '/r.js', function Row() { return null; }, render, true, true) as any;
+    const html = await renderToStringAsync(jsx(Row, { n: 1 }, 'r"1'));
+    expect(html).toContain('data-key="r&quot;1"');
+  });
+
   it('throws at once, naming the export, when server code calls a client export as a function', async () => {
     const parseTheme = clientBoundary('mc', 'parseTheme', '/c.js', function parseTheme() { return null; }, render) as any;
     // A synchronous throw: a rejected promise nobody awaits would crash the renderer.

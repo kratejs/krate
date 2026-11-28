@@ -701,6 +701,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A keyed list of client islands keeps each row's state across `router.refresh()` (and any same-page
+  swap): the server writes an island's React `key` into its marker and the router pairs keyed islands by
+  key, not by position. Before, deleting the first row of an admin review list handed its optimistic
+  "hidden" state to the next row, so that row vanished too.
 - CSS signals: the destructured form (`const [size, setSize] = createCSSChoice(...)`, and the same for
   `createCSSRange`, `createCSSToggle`, `createCSSFlags`, `createCSSGroup`) no longer leaves a
   `createCSS*(...)` call in the page script. Like the handle form it now compiles to zero client JS

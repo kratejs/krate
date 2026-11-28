@@ -142,20 +142,26 @@ interface JSXElement {
   type: string | Function | object | symbol;
   props: Record<string, any>;
   children: JSXNode[];
+  /** The element's React key, when it has one (a client island carries it, see clientBoundary). */
+  key?: string;
 }
 
 export function Fragment(_props: { children?: JSXNode }): JSXNode {
   return _props.children ?? [];
 }
 
-export function jsx(type: string | Function | object | symbol, props: Record<string, any>, _key?: string): JSXElement {
+export function jsx(type: string | Function | object | symbol, props: Record<string, any>, key?: string): JSXElement {
   const { children, ...rest } = props ?? {};
   const childArray = Array.isArray(children)
     ? children.flat(Infinity)
     : children != null
     ? [children]
     : [];
-  return { type, props: rest, children: childArray };
+  const el: JSXElement = { type, props: rest, children: childArray };
+  // The automatic runtime passes the key apart; createElement leaves it in props.
+  const k = key ?? rest.key;
+  if (k != null) el.key = String(k);
+  return el;
 }
 
 export const jsxs = jsx;
@@ -283,7 +289,10 @@ function normalizeNode(node: unknown): unknown {
   if (!isReactElement(node)) return node;
   const { children, ref: _ref, ...rest } = node.props ?? {};
   const kids = Array.isArray(children) ? children.flat(Infinity) : children != null ? [children] : [];
-  return { type: node.type, props: rest, children: kids };
+  const el: JSXElement = { type: node.type as JSXElement["type"], props: rest, children: kids };
+  const k = (node as any).key;
+  if (k != null) el.key = String(k);
+  return el;
 }
 
 function foreignContext(type: any): { ctx: ForeignContext; provider: boolean } {
@@ -569,7 +578,7 @@ async function expandComponent(node: JSXElement, vals?: ContextValues): Promise<
     return { out: consumerChild(callProps)(vals?.has(ctx) ? vals.get(ctx) : ctx._currentValue), vals };
   }
   // A client boundary also gets the context values in scope (slotValues).
-  let out: unknown = fn.__krateClient ? fn(callProps, vals, RENDER_CALL) : fn(callProps);
+  let out: unknown = fn.__krateClient ? fn(callProps, vals, RENDER_CALL, node.key) : fn(callProps);
   if (isThenable(out)) out = await out;
   if (fn.__krateForeignProvider) {
     return { out, vals: new Map(vals).set(fn.__krateForeignProvider as ForeignContext, props.value) };
@@ -603,7 +612,7 @@ function renderElement(el: JSXElement): string {
       if (isThenable(e)) throw asyncInSyncRender("A lazy component");
       throw e;
     }
-    return renderElement({ type: fn, props, children });
+    return renderElement({ ...el, type: fn });
   }
   if (typeof type === "function") {
     if (isClassComponent(type)) {
@@ -614,7 +623,9 @@ function renderElement(el: JSXElement): string {
         return renderNode(classFallback(type, instance, error) as JSXNode);
       }
     }
-    const result = (type as any).__krateClient ? (type as any)({ ...props, children }, undefined, RENDER_CALL) : type({ ...props, children });
+    const result = (type as any).__krateClient
+      ? (type as any)({ ...props, children }, undefined, RENDER_CALL, el.key)
+      : type({ ...props, children });
     if (isThenable(result)) throw asyncInSyncRender(`<${componentName(type)}>`);
     return withProviderValue(type, props, () => renderNode(result));
   }
@@ -936,8 +947,13 @@ export const ISLAND_CLOSE = "<!--/krate-island-->";
 // islandOpen is the opening comment of a Preact island: its module, export,
 // chunk and props as JSON. "<", ">" and "--" are escaped (they occur only in
 // strings), so no value can end the comment or open another one.
-function islandOpen(moduleId: string, exportName: string, src: string, props: unknown, ids: string): string {
-  const json = JSON.stringify({ m: moduleId, e: exportName, s: src, i: ids, p: props })
+function islandOpen(moduleId: string, exportName: string, src: string, props: unknown, ids: string, key?: string): string {
+  const head: Record<string, unknown> = { m: moduleId, e: exportName, s: src, i: ids };
+  // The React key: the router keeps a keyed island's state by key, not by
+  // position, across a refresh (see island-swap.ts).
+  if (key != null) head.k = key;
+  head.p = props;
+  const json = JSON.stringify(head)
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e")
     .replace(/--/g, "-\\u002d");
@@ -946,22 +962,29 @@ function islandOpen(moduleId: string, exportName: string, src: string, props: un
 
 // islandIdPrefix names the next island of a component in the render that is
 // running: a hash of its module and export, and how many islands of that
-// component came before it in this document. useId() numbers from 0 inside
+// component came before it in this document (for a keyed island, how many
+// before it had its key, and a hash of the key). useId() numbers from 0 inside
 // each island, so the prefix is what keeps ids unique across the page. The
-// router pairs the n-th island of a component in the live page with the n-th
-// one in the new markup, so a page that a navigation swaps in never reuses the
-// prefix of an island the swap keeps.
+// router pairs the n-th unkeyed island of a component in the live page with
+// the n-th one in the new markup, and a keyed one with the one of the same
+// key, so a page that a navigation swaps in never reuses the prefix of an
+// island the swap keeps.
 const looseIslands = new Map<string, number>();
 
-function islandIdPrefix(moduleId: string, exportName: string): string {
-  const key = moduleId + "#" + exportName;
+function fnv36(s: string): string {
+  let h = 0x811C9DC5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(36).padStart(7, "0");
+}
+
+function islandIdPrefix(moduleId: string, exportName: string, key?: string): string {
+  const component = moduleId + "#" + exportName;
   const scope = currentRenderScope();
   const seen = scope ? (scope.islands ??= new Map<string, number>()) : looseIslands;
-  const n = seen.get(key) ?? 0;
-  seen.set(key, n + 1);
-  let h = 0x811C9DC5;
-  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 0x01000193) >>> 0;
-  return h.toString(36).padStart(7, "0") + "_" + n;
+  const counter = key == null ? component : component + "\u0000" + key;
+  const n = seen.get(counter) ?? 0;
+  seen.set(counter, n + 1);
+  return fnv36(component) + "_" + (key == null ? "" : "k" + fnv36(key) + "_") + n;
 }
 
 const warnedUncloneable = new Set<string>();
@@ -1054,14 +1077,16 @@ export function clientBoundary(
   // Called by user code, the boundary fails here and now. An async function
   // would hand back a rejected promise the caller never awaits, and that
   // unhandled rejection would take the renderer process down.
-  const Boundary = (props: Record<string, any>, vals?: ContextValues, from?: symbol): Promise<unknown> => {
+  const Boundary = (props: Record<string, any>, vals?: ContextValues, from?: symbol, key?: string): Promise<unknown> => {
     if (from !== RENDER_CALL) throw clientCallError(exportName, name);
-    return renderBoundary(props, vals);
+    return renderBoundary(props, vals, key);
   };
-  const renderBoundary = async (props: Record<string, any>, vals?: ContextValues) => {
+  const renderBoundary = async (props: Record<string, any>, vals?: ContextValues, elementKey?: string) => {
+    // A key is not a prop (React leaves it out of props too).
+    const { children, key: propKey, ...rest } = props || {};
+    const key = elementKey ?? (propKey != null ? String(propKey) : undefined);
     // Taken before the first await, so islands number in render order.
-    const ids = islandIdPrefix(moduleId, exportName);
-    const { children, ...rest } = props || {};
+    const ids = islandIdPrefix(moduleId, exportName, key);
     const slots: DeferredSlot[] = [];
     const slotCtx: FlightCtx = { hydrate: false, component: name, slots, vals };
     const data = await clientProps(rest, slotCtx, flight);
@@ -1101,10 +1126,11 @@ export function clientBoundary(
     // A real-React island (flight) mounts with createRoot, which needs an
     // element of its own; a Preact island hydrates the nodes between its two
     // comments in place.
-    if (!flight) return raw(islandOpen(moduleId, exportName, src, data, ids) + html + ISLAND_CLOSE);
+    if (!flight) return raw(islandOpen(moduleId, exportName, src, data, ids, key) + html + ISLAND_CLOSE);
+    const keyAttr = key != null ? ` data-key="${escapeHTML(key)}"` : "";
     return raw(
       propsScript(data) +
-        `<krate-island style="display:contents" data-module="${escapeHTML(moduleId)}" data-export="${escapeHTML(exportName)}" ` +
+        `<krate-island style="display:contents" data-module="${escapeHTML(moduleId)}" data-export="${escapeHTML(exportName)}"${keyAttr} ` +
         `data-src="${escapeHTML(src)}">${html}</krate-island>`,
     );
   };

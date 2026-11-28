@@ -371,8 +371,8 @@ full-page navigations (`refresh()` reloads, `prefetch()` resolves immediately).
   the query string. Add `data-krate-reload` to a form to opt out; forms with file
   inputs are left to the browser.
 - **Islands**: client components already mounted stay mounted across a swap
-  (refresh, same-page `replace`, navigation): matched by component in
-  document order, kept with their DOM and state and re-rendered in place with
+  (refresh, same-page `replace`, navigation): matched by component and
+  `key` (islands without a key in document order), kept with their DOM and state and re-rendered in place with
   new server props; on another pathname only when their props are unchanged.
   An island the new page drops is unmounted before its markup goes. See
   [islands across client navigations](/docs/features/server-components/#islands-across-client-navigations).
