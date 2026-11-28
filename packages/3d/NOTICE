@@ -1,6 +1,9 @@
 @krate/3d
 Copyright 2026 The Krate Authors
 
+This package is part of Krate (https://github.com/kratejs/krate,
+https://krate.js.org), licensed under the Apache License, Version 2.0.
+
 This package renders with Filament (https://github.com/google/filament),
 Copyright Google LLC, licensed under the Apache License 2.0. Filament is not
 bundled in this package: apps install the `filament` npm package, which

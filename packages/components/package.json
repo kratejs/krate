@@ -82,7 +82,8 @@
     "*.ts",
     "*.tsx",
     "*.css",
-    "src"
+    "src",
+    "NOTICE"
   ],
   "scripts": {
     "test": "vitest run",

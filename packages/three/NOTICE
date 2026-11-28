@@ -1,6 +1,9 @@
 @krate/three
 Copyright 2026 The Krate Authors
 
+This package is part of Krate (https://github.com/kratejs/krate,
+https://krate.js.org), licensed under the Apache License, Version 2.0.
+
 This package contains code ported from react-three-fiber
 (https://github.com/pmndrs/react-three-fiber), used under the MIT License:
 

@@ -5,6 +5,7 @@ import { missingPackages, publishAll } from './publish-packages.mjs';
 import { bootstrapVersion, needsOTP, placeholderManifest, planTrust, trustsWorkflow } from './npm-trust.mjs';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { packageNotice, platformManifest, platforms } from './platform-package.mjs';
 import { nativeTemplate, nativeTemplateKrateDep, npmPackageNames, pinNativeTemplate, releasePackages, trustedPublisher } from './release-packages.mjs';
 
 test('distTag rejects an identifier npm cannot use as a tag, before anything is published', () => {
@@ -123,4 +124,18 @@ test('the bootstrap placeholder names the repository provenance checks against',
 test('needsOTP recognises npm asking for two-factor authentication', () => {
   assert.ok(needsOTP('npm error code EOTP\nnpm error This operation requires a one-time password.'));
   assert.ok(!needsOTP('npm error code E404\nnpm error 404 Not Found'));
+});
+
+test('every published package ships a NOTICE that credits Krate', () => {
+  for (const dir of releasePackages) {
+    const pkgDir = join('packages', dir);
+    const pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
+    assert.ok(pkg.files?.includes('NOTICE'), `${pkg.name}: "files" must list NOTICE`);
+    assert.ok(existsSync(join(pkgDir, 'NOTICE')), `${pkg.name}: missing ${pkgDir}/NOTICE`);
+    assert.match(readFileSync(join(pkgDir, 'NOTICE'), 'utf8'), /https:\/\/github\.com\/kratejs\/krate/, `${pkg.name}: NOTICE must credit Krate`);
+  }
+  for (const target of platforms) {
+    assert.ok(platformManifest(target, '0.0.0').files.includes('NOTICE'), `@krate/${target.pkg}: "files" must list NOTICE`);
+  }
+  assert.match(packageNotice('@krate/x'), /^@krate\/x\n[\s\S]*https:\/\/github\.com\/kratejs\/krate/);
 });

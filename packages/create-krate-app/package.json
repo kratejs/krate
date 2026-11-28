@@ -30,7 +30,8 @@
   },
   "files": [
     "dist",
-    "templates"
+    "templates",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc",

@@ -65,7 +65,8 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "NOTICE"
   ],
   "scripts": {
     "build": "node scripts/build.mjs && tsc --emitDeclarationOnly",

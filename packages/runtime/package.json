@@ -125,7 +125,8 @@
   },
   "files": [
     "dist",
-    "!dist/**/*.test.*"
+    "!dist/**/*.test.*",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc && node bundle.cjs",

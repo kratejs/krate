@@ -1,0 +1,10 @@
+@krate/runtime
+Copyright 2026 The Krate Authors
+
+This package is part of Krate (https://github.com/kratejs/krate,
+https://krate.js.org), licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0).
+
+Under section 4(d) of the License, any redistribution of this package or of
+a Derivative Work, including a fork, must retain this NOTICE file, or the
+attribution notices it contains.

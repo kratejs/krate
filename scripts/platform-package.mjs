@@ -51,7 +51,26 @@ export function platformManifest(target, version) {
     repository: { type: 'git', url: repo.url },
     bugs: { url: repo.bugs },
     keywords: ['krate', 'ssg', 'compiler', target.os, target.cpu],
-    files: ['bin'],
+    files: ['bin', 'NOTICE'],
     publishConfig: { executableFiles: [`./bin/krate${target.ext}`, `./bin/krate-shell${target.ext}`] },
   };
+}
+
+/**
+ * The NOTICE file a Krate npm package ships. Apache-2.0 section 4(d) makes
+ * redistributions, forks included, keep it, so the credit to Krate travels
+ * with every copy of the package.
+ */
+export function packageNotice(name) {
+  return `${name}
+Copyright 2026 The Krate Authors
+
+This package is part of Krate (https://github.com/kratejs/krate,
+https://krate.js.org), licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0).
+
+Under section 4(d) of the License, any redistribution of this package or of
+a Derivative Work, including a fork, must retain this NOTICE file, or the
+attribution notices it contains.
+`;
 }

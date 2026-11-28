@@ -1,6 +1,9 @@
 @krate/konva
 Copyright 2026 The Krate Authors
 
+This package is part of Krate (https://github.com/kratejs/krate,
+https://krate.js.org), licensed under the Apache License, Version 2.0.
+
 This package contains code ported from react-konva
 (https://github.com/konvajs/react-konva), used under the MIT License:
 

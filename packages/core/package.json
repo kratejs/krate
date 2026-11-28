@@ -33,7 +33,8 @@
   "types": "./dist/index.d.ts",
   "files": [
     "bin/krate.js",
-    "dist"
+    "dist",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc",

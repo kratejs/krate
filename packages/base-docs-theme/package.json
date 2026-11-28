@@ -26,7 +26,8 @@
     "./theme.css": "./src/theme.css"
   },
   "files": [
-    "src"
+    "src",
+    "NOTICE"
   ],
   "dependencies": {
     "@krate/plugin": "workspace:*",
