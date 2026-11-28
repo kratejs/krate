@@ -3,9 +3,12 @@ package build
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,8 +48,9 @@ const pageLinkChunks = "_chunks"
 const ssrBundlesPlaceholder = "__KRATE_SSR_BUNDLES__"
 
 // pageLinkMaxRounds bounds how often the linked build runs again without the
-// pages the previous round found unsafe.
-const pageLinkMaxRounds = 4
+// pages the previous round found unsafe, or with the shared package stubs
+// made from the pages that reach them.
+const pageLinkMaxRounds = 6
 
 // pageLinkSpec is what the per-page build of a page bundle derived from the
 // page, kept so the linked build can give the page the same entry.
@@ -66,6 +70,8 @@ type pageLinkClaims struct {
 	layouts    map[string]bool
 	exports    map[string]bool
 	island     string
+	// packages are the page's package boundaries by specifier.
+	packages map[string]*pkgBoundaries
 }
 
 // linkPageBundles replaces the bundles of the run's linkable pages with the
@@ -77,16 +83,41 @@ func (r *serverBundleRun) linkPageBundles() {
 	r.linkMu.Unlock()
 	sort.Slice(specs, func(i, j int) bool { return specs[i].outPath < specs[j].outPath })
 	set := r.linkCandidates(specs)
+	// sharedFrom names, by specifier, the pages (by output path) whose
+	// package boundaries make the shared stub; nil for every page that has
+	// boundaries for the specifier.
+	var sharedFrom map[string]map[string]bool
 	for round := 0; round < pageLinkMaxRounds && len(set) >= 2; round++ {
-		l := r.newPageLink(set)
+		l := r.newPageLink(set, sharedFrom)
 		res := esbuildBuild(l.opts)
+		if len(res.Errors) > 0 && !l.mixed.Load() {
+			// A module that imports a name the shared stub of a package
+			// lacks belongs to a page without boundaries for the package
+			// (its own build imports the package); every other page's own
+			// stub had the names its modules import.
+			if kept := l.withoutUnclaimedPackages(res.Errors); len(kept) < len(set) {
+				linkDebugf("round %d: %d errors from package stubs, %d pages without them left out", round, len(res.Errors), len(set)-len(kept))
+				set = kept
+				continue
+			}
+		}
 		if len(res.Errors) > 0 || l.mixed.Load() {
+			linkDebugf("round %d: build failed (%d errors, mixed packages %v)", round, len(res.Errors), l.mixed.Load())
+			for i, e := range res.Errors {
+				if i < 5 {
+					linkDebugf("  %s", e.Text)
+				}
+			}
 			return
 		}
-		bad := l.violations(res.Metafile)
-		if len(bad) == 0 {
+		bad, next := l.violations(res.Metafile)
+		linkDebugf("round %d: %d pages, %d unsafe, shared package stubs redone %v", round, len(set), len(bad), next != nil)
+		if len(bad) == 0 && next == nil {
 			l.write(res.OutputFiles)
 			return
+		}
+		if next != nil {
+			sharedFrom = next
 		}
 		kept := set[:0:0]
 		for i, s := range set {
@@ -99,20 +130,14 @@ func (r *serverBundleRun) linkPageBundles() {
 }
 
 // linkablePage reports whether the linked build can reproduce a page's
-// bundle at all. A package boundary resolves a bare specifier to a stub of
-// the page's own exports for every importer, and baked Go HTML is one
-// virtual module the Go component shims of every page import; neither can
-// be told apart per page. A "use client" page with island stubs would stub
-// the imports of its own source file, which other pages may import.
+// bundle at all. Baked Go HTML is one virtual module the Go component shims
+// of every page import, so it cannot be told apart per page. A "use client"
+// page with island stubs would stub the imports of its own source file,
+// which other pages may import.
 func (r *serverBundleRun) linkablePage(s pageLinkSpec) bool {
 	p := s.page
 	if len(p.GoBaked) > 0 || (s.clientPage && p.IslandStubs != nil) {
 		return false
-	}
-	for _, cb := range p.ClientBoundaries {
-		if cb.Spec != "" {
-			return false
-		}
 	}
 	rel, err := filepath.Rel(r.bundleDir, s.outPath)
 	if err != nil || !filepath.IsLocal(rel) || !strings.HasSuffix(rel, ".mjs") {
@@ -123,20 +148,20 @@ func (r *serverBundleRun) linkablePage(s pageLinkSpec) bool {
 }
 
 // linkCandidates returns the pages of specs the linked build may take, in
-// order: a page is left out when its stub for a client boundary, or a server
-// export key it adds to a module, disagrees with an earlier page's.
+// order: a page is left out when an export of its stub for a client boundary
+// module, or a server export key it adds to a module, disagrees with an
+// earlier page's. Package boundaries are checked against the pages that
+// reach each shared stub once the build shows which do (see violations).
 func (r *serverBundleRun) linkCandidates(specs []pageLinkSpec) []pageLinkSpec {
-	stubs := map[string]string{}
+	stubs := map[string]*boundaryExports{}
 	keys := map[string]string{}
 	var out []pageLinkSpec
 	for _, s := range specs {
 		if !r.linkablePage(s) {
+			linkDebugf("unlinkable page %s (go baked %d, client page %v, boundaries %d)", s.page.SourcePath, len(s.page.GoBaked), s.clientPage, len(s.page.ClientBoundaries))
 			continue
 		}
-		own := map[string]string{}
-		for _, cb := range s.page.ClientBoundaries {
-			own[canonicalPath(cb.SourcePath)] = linkedBoundaryStub(cb)
-		}
+		own := pageFileBoundaries(s.page)
 		ownKeys := map[string]string{}
 		ok := true
 		for _, e := range s.page.ServerExports {
@@ -152,16 +177,22 @@ func (r *serverBundleRun) linkCandidates(specs []pageLinkSpec) []pageLinkSpec {
 			}
 			ownKeys[e.Key] = v
 		}
-		for p, stub := range own {
-			if prev, seen := stubs[p]; seen && prev != stub {
+		for p, exp := range own {
+			if prev, seen := stubs[p]; seen && !prev.agrees(exp) {
+				linkDebugf("page %s: boundary stub of %s differs from an earlier page's", s.page.SourcePath, p)
 				ok = false
 			}
 		}
 		if !ok {
+			linkDebugf("page %s left out", s.page.SourcePath)
 			continue
 		}
-		for p, stub := range own {
-			stubs[p] = stub
+		for p, exp := range own {
+			if prev, seen := stubs[p]; seen {
+				prev.merge(exp)
+			} else {
+				stubs[p] = exp
+			}
 		}
 		for k, v := range ownKeys {
 			keys[k] = v
@@ -195,18 +226,25 @@ type pageLink struct {
 	// strict lists the modules that a page which does not claim them would
 	// load differently, by category.
 	strictBoundaries, strictLayouts, strictExports, strictIslands map[string]bool
-	opts                                                          api.BuildOptions
-	mixed                                                         atomic.Bool
+	// pkgShared holds the exports of the shared stub of each package
+	// specifier.
+	pkgShared  map[string]*boundaryExports
+	sharedFrom map[string]map[string]bool
+	opts       api.BuildOptions
+	mixed      atomic.Bool
 }
 
-func (r *serverBundleRun) newPageLink(set []pageLinkSpec) *pageLink {
+func (r *serverBundleRun) newPageLink(set []pageLinkSpec, sharedFrom map[string]map[string]bool) *pageLink {
 	l := &pageLink{
 		r: r, set: set,
 		strictBoundaries: map[string]bool{}, strictLayouts: map[string]bool{}, strictExports: map[string]bool{}, strictIslands: map[string]bool{},
 	}
 	var islands, composed []api.Plugin
-	var boundaries []ClientBoundary
 	var exports []ServerExport
+	files := map[string]*boundaryExports{}
+	var fileOrder []string
+	pkgs := &linkedPackages{entryOf: map[string]int{}, shared: map[string]string{}, resolveDir: r.bundleDir}
+	pkgShared := map[string]*boundaryExports{}
 	seenExport := map[string]bool{}
 	dirs := []string{filepath.Join(r.bundleDir, pageLinkChunks)}
 	points := make([]api.EntryPoint, len(set))
@@ -220,7 +258,8 @@ func (r *serverBundleRun) newPageLink(set []pageLinkSpec) *pageLink {
 			resolveDir: dir,
 			out:        filepath.ToSlash(strings.TrimSuffix(rel, ".mjs")),
 		}
-		c := pageLinkClaims{boundaries: map[string]bool{}, layouts: map[string]bool{}, exports: map[string]bool{}}
+		c := pageLinkClaims{boundaries: map[string]bool{}, layouts: map[string]bool{}, exports: map[string]bool{}, packages: pagePackageBoundaries(p)}
+		pkgs.entryOf[e.path] = i
 		if p.IslandStubs != nil {
 			islands = append(islands, islandServerStubPluginFor(p.IslandStubs, s.absSource, []string{s.absSource, e.path}, "krate-island-stub-"+strconv.Itoa(i)))
 			c.island = canonicalPath(s.absSource)
@@ -229,6 +268,7 @@ func (r *serverBundleRun) newPageLink(set []pageLinkSpec) *pageLink {
 		if len(p.ComposedLayouts) > 0 {
 			// Each page has its own virtual page module.
 			pageModule := "krate-composed-page-" + strconv.Itoa(i)
+			pkgs.entryOf[pageModule] = i
 			e.source = composedEntrySource(pageModule, p.ComposedLayouts)
 			composed = append(composed, composedLayoutPlugin(r.root, pageModule, s.injectedSource, dir, p.ComposedLayouts, r.files))
 			for _, lay := range p.ComposedLayouts {
@@ -236,11 +276,21 @@ func (r *serverBundleRun) newPageLink(set []pageLinkSpec) *pageLink {
 				l.strictLayouts[canonicalPath(lay)] = true
 			}
 		}
-		for _, cb := range p.ClientBoundaries {
-			boundaries = append(boundaries, cb)
-			c.boundaries[canonicalPath(cb.SourcePath)] = true
-			l.strictBoundaries[canonicalPath(cb.SourcePath)] = true
+		for path, exp := range pageFileBoundaries(p) {
+			c.boundaries[path] = true
+			l.strictBoundaries[path] = true
+			if u, ok := files[path]; ok {
+				u.merge(exp)
+			} else {
+				files[path] = exp
+				fileOrder = append(fileOrder, path)
+			}
 		}
+		own := map[string]string{}
+		for spec, pb := range c.packages {
+			own[spec] = linkedPackageStub(pb.cbs)
+		}
+		pkgs.own = append(pkgs.own, own)
 		for _, se := range p.ServerExports {
 			if samePath(se.SourcePath, s.absSource) {
 				continue
@@ -257,6 +307,42 @@ func (r *serverBundleRun) newPageLink(set []pageLinkSpec) *pageLink {
 		points[i] = api.EntryPoint{InputPath: "krate-page-entry:" + strconv.Itoa(i), OutputPath: e.out}
 		dirs = append(dirs, filepath.Dir(s.outPath))
 	}
+	sort.Strings(fileOrder)
+	var boundaries []ClientBoundary
+	for _, path := range fileOrder {
+		boundaries = append(boundaries, files[path].boundaries()...)
+	}
+	// The shared stub of a specifier is made from the pages of sharedFrom
+	// that have it, in page order; when none is left, from every page that
+	// has it, so imports outside the entries still resolve to a stub and
+	// violations sees which pages reach it.
+	for i, s := range set {
+		for _, spec := range slices.Sorted(maps.Keys(l.claims[i].packages)) {
+			if from := sharedFrom[spec]; from != nil && !from[s.outPath] {
+				continue
+			}
+			if pkgShared[spec] == nil {
+				pkgShared[spec] = newBoundaryExports()
+			}
+			pkgShared[spec].merge(l.claims[i].packages[spec].exports)
+		}
+	}
+	fallback := map[string]bool{}
+	for i := range set {
+		for _, spec := range slices.Sorted(maps.Keys(l.claims[i].packages)) {
+			if pkgShared[spec] == nil {
+				pkgShared[spec] = newBoundaryExports()
+				fallback[spec] = true
+			}
+			if fallback[spec] {
+				pkgShared[spec].merge(l.claims[i].packages[spec].exports)
+			}
+		}
+	}
+	l.pkgShared, l.sharedFrom = pkgShared, sharedFrom
+	for spec, u := range pkgShared {
+		pkgs.shared[spec] = linkedPackageStub(u.boundaries())
+	}
 	// A module that gets server exports appended loads as it would without
 	// them unless the export plugin also gives it page globals the Go
 	// component plugin would not.
@@ -272,7 +358,7 @@ func (r *serverBundleRun) newPageLink(set []pageLinkSpec) *pageLink {
 	plugins = append(plugins,
 		reactServerShimPlugin(),
 		serverCSSPlugin(r.root, r.impls.res),
-		linkedBoundaryPlugin(boundaries, r.files),
+		linkedBoundaryPlugin(boundaries, pkgs, r.files),
 		unusedClientModulePlugin(r.files),
 		serverExportPlugin(exports, "", r.files),
 		goServerBundlePlugin(nil, r.root, r.files),
@@ -360,7 +446,7 @@ func pageLinkEntryPlugin(entries []pageLinkEntry) api.Plugin {
 // linkedBoundaryPlugin is clientBoundaryPlugin for the file boundaries of
 // several pages, which linkCandidates checked agree on each module's stub.
 // The render modules are imported through ssrBundlesPlaceholder.
-func linkedBoundaryPlugin(boundaries []ClientBoundary, files *serverBundleFiles) api.Plugin {
+func linkedBoundaryPlugin(boundaries []ClientBoundary, pkgs *linkedPackages, files *serverBundleFiles) api.Plugin {
 	byPath := map[string]ClientBoundary{}
 	for _, cb := range boundaries {
 		byPath[filepath.Clean(cb.SourcePath)] = cb
@@ -373,7 +459,10 @@ func linkedBoundaryPlugin(boundaries []ClientBoundary, files *serverBundleFiles)
 		Name: "krate-client-boundaries",
 		Setup: func(pb api.PluginBuild) {
 			markers.Setup(pb)
-			if len(byPath) == 0 {
+			if !pkgs.empty() {
+				pkgs.setup(pb)
+			}
+			if len(byPath) == 0 && pkgs.empty() {
 				return
 			}
 			pb.OnResolve(api.OnResolveOptions{Filter: `\.ssr\.mjs$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
@@ -402,14 +491,52 @@ func linkedBoundaryPlugin(boundaries []ClientBoundary, files *serverBundleFiles)
 	}
 }
 
+// pkgStubRef finds the package stubs that esbuild errors name.
+var pkgStubRef = regexp.MustCompile(regexp.QuoteMeta(linkedPkgNamespace) + `:([^"]+)"`)
+
+// withoutUnclaimedPackages returns the pages that have boundaries for every
+// package whose shared stub the errors name; all of them when the errors
+// name none.
+func (l *pageLink) withoutUnclaimedPackages(errs []api.Message) []pageLinkSpec {
+	specs := map[string]bool{}
+	for _, e := range errs {
+		for _, m := range pkgStubRef.FindAllStringSubmatch(e.Text, -1) {
+			specs[m[1]] = true
+		}
+	}
+	if len(specs) == 0 {
+		return l.set
+	}
+	var kept []pageLinkSpec
+	for i, s := range l.set {
+		ok := true
+		for spec := range specs {
+			if l.claims[i].packages[spec] == nil {
+				ok = false
+			}
+		}
+		if ok {
+			kept = append(kept, s)
+		}
+	}
+	return kept
+}
+
 // namespacedInput matches a metafile input of a plugin namespace
 // ("ns:path"); a Windows drive letter is a single character.
 var namespacedInput = regexp.MustCompile(`^[A-Za-z0-9_-]{2,}:`)
 
 // violations returns the indexes of the pages that reach, in the linked
 // build's import graph, a module that some page's plugins decide about and
-// their own do not: their own build loaded it differently.
-func (l *pageLink) violations(metafile string) map[int]bool {
+// their own do not: their own build loaded it differently. A page that
+// reaches the shared stub of a package specifier must have boundaries for
+// it, and each name its own stub exports must mean the same in the shared
+// one. When a shared stub disagrees with a page that reaches it, next says
+// which pages to make the stubs from in the next round (the ones that reach
+// each, less those that disagree with the earlier ones); nil when nothing
+// changes.
+func (l *pageLink) violations(metafile string) (map[int]bool, map[string]map[string]bool) {
+	reachers := map[string][]int{}
 	var meta struct {
 		Inputs map[string]struct {
 			Imports []struct {
@@ -423,7 +550,7 @@ func (l *pageLink) violations(metafile string) map[int]bool {
 		for i := range l.set {
 			bad[i] = true
 		}
-		return bad
+		return bad, nil
 	}
 	cwd := esbuildCwd(l.opts, metafile, l.entries[0].path)
 	canon := map[string]string{}
@@ -449,17 +576,28 @@ func (l *pageLink) violations(metafile string) map[int]bool {
 			continue
 		}
 		c := l.claims[i]
+		reachedPkg := map[string]bool{}
 		seen := map[string]bool{start: true}
 		queue := []string{start}
 		for len(queue) > 0 && !bad[i] {
 			key := queue[0]
 			queue = queue[1:]
+			if spec, ok := strings.CutPrefix(key, linkedPkgNamespace+":"); ok {
+				if c.packages[spec] == nil {
+					// Its own build imports the package itself.
+					linkDebugf("page %s reaches the package stub of %s without boundaries for it", l.set[i].page.SourcePath, spec)
+					bad[i] = true
+					break
+				}
+				reachedPkg[spec] = true
+			}
 			if key != start {
 				if f := fileOf(key); f != "" {
 					if (l.strictBoundaries[f] && !c.boundaries[f]) ||
 						(l.strictLayouts[f] && !c.layouts[f]) ||
 						(l.strictIslands[f] && c.island != f) ||
 						(l.strictExports[f] && !c.exports[f]) {
+						linkDebugf("page %s reaches %s (boundary %v/%v layout %v/%v island %v export %v/%v)", l.set[i].page.SourcePath, f, l.strictBoundaries[f], c.boundaries[f], l.strictLayouts[f], c.layouts[f], l.strictIslands[f], l.strictExports[f], c.exports[f])
 						bad[i] = true
 						break
 					}
@@ -473,8 +611,50 @@ func (l *pageLink) violations(metafile string) map[int]bool {
 				queue = append(queue, imp.Path)
 			}
 		}
+		if !bad[i] {
+			for spec := range reachedPkg {
+				reachers[spec] = append(reachers[spec], i)
+			}
+		}
 	}
-	return bad
+	var next map[string]map[string]bool
+	for _, spec := range slices.Sorted(maps.Keys(reachers)) {
+		built := l.pkgShared[spec]
+		agree := true
+		for _, i := range reachers[spec] {
+			if !bad[i] && !built.agrees(l.claims[i].packages[spec].exports) {
+				agree = false
+			}
+		}
+		if agree {
+			continue
+		}
+		// Make the stub from the pages that reach it, the first ones
+		// winning a name.
+		u := newBoundaryExports()
+		from := map[string]bool{}
+		for _, i := range reachers[spec] {
+			if bad[i] {
+				continue
+			}
+			own := l.claims[i].packages[spec].exports
+			if !u.agrees(own) {
+				linkDebugf("page %s: package boundary exports of %s differ from an earlier page's", l.set[i].page.SourcePath, spec)
+				bad[i] = true
+				continue
+			}
+			u.merge(own)
+			from[l.set[i].outPath] = true
+		}
+		if next == nil {
+			next = maps.Clone(l.sharedFrom)
+			if next == nil {
+				next = map[string]map[string]bool{}
+			}
+		}
+		next[spec] = from
+	}
+	return bad, next
 }
 
 // write fills in the render module imports of the outputs and writes them
@@ -561,4 +741,11 @@ func writeFileAtomic(path string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// linkDebugf logs a page-link decision when KRATE_DEBUG_PAGE_LINK is set.
+func linkDebugf(format string, args ...any) {
+	if os.Getenv("KRATE_DEBUG_PAGE_LINK") != "" {
+		fmt.Fprintf(os.Stderr, "[page-link] "+format+"\n", args...)
+	}
 }

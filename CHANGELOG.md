@@ -553,15 +553,16 @@ host code runs in the native process. Names and options may change between relea
   app modules they share are emitted once as chunks (`_chunks/`) instead of inlined into every page and
   route. Each process loads a shared module once, and its module-level state (a database pool, a
   cache) has one instance per process instead of one per page or route, as in Next.js. A page whose
-  build depends on per-page plugin output (baked Go components, package client boundaries, an
-  inconsistent boundary) stays self-contained. `krate dev` is unchanged.
+  build depends on per-page plugin output that a shared module would see differently (baked Go
+  components, or a client boundary, file or package, whose stub for some export differs from another
+  linked page's) stays self-contained. Set `KRATE_DEBUG_PAGE_LINK=1` to log why a page was not linked. `krate dev` is unchanged.
 - Node memory: the in-memory ISR, PPR region and data caches are bounded by size as well as entry
   count. `ssr.cacheMemory` (MB, default 64 per process) splits half to pages and a quarter each to
   regions and the data cache; least-recently-used entries are evicted, and an entry larger than its
   share is not cached. Before, up to 512 pages, 512 regions and 1000 data entries were kept whatever
   their size.
-- Node memory: in a container with a memory limit (cgroup v2 or v1), each Node process the server
-  starts gets `--max-old-space-size` derived from it (60% of the limit split between the processes,
+- Node memory: under a memory limit (a container or a systemd `MemoryMax`; cgroup v2 or v1, read from
+  the server's own cgroup up to the root), each Node process the server starts gets `--max-old-space-size` derived from it (60% of the limit split between the processes,
   at least 256 MB), so V8 collects garbage before the container is killed. `ssr.nodeHeapLimit` sets
   it in MB, `-1` turns it off, and a limit in `NODE_OPTIONS` wins.
 - The Node and Bun API sidecars bound their route-file cache, which also cached misses and could

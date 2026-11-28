@@ -1,6 +1,7 @@
 package build
 
 import (
+	"os"
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
@@ -49,5 +50,34 @@ func TestNodeHeapArg(t *testing.T) {
 	cfg.SSR.RendererWorkers, cfg.SSR.NodeWorkers = 0, 3
 	if n := nodeProcessCount(cfg); n != 4 {
 		t.Errorf("nodeProcessCount = %d, want 4", n)
+	}
+}
+
+func TestCgroupMemoryLimit(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"/sys/fs/cgroup/memory.max":                              "max\n",
+		"/sys/fs/cgroup/user.slice/memory.max":                   "8589934592\n",
+		"/sys/fs/cgroup/user.slice/app.service/memory.max":       "4294967296\n",
+		"/sys/fs/cgroup/memory/docker/abc/memory.limit_in_bytes": "2147483648\n",
+		"/sys/fs/cgroup/memory/memory.limit_in_bytes":            "9223372036854771712\n",
+	}
+	read := func(p string) ([]byte, error) {
+		if v, ok := files[p]; ok {
+			return []byte(v), nil
+		}
+		return nil, os.ErrNotExist
+	}
+	// systemd MemoryMax on the service's own cgroup, under a looser slice.
+	if n, ok := cgroupMemoryLimit("0::/user.slice/app.service\n", read); !ok || n != 4294967296 {
+		t.Errorf("v2 service limit = %d, %v", n, ok)
+	}
+	// A private cgroup namespace sees its own cgroup as the root.
+	if _, ok := cgroupMemoryLimit("0::/\n", read); ok {
+		t.Error("an unlimited root must report no limit")
+	}
+	// cgroup v1 with the memory controller among others.
+	if n, ok := cgroupMemoryLimit("4:cpu,cpuacct:/docker/abc\n3:memory:/docker/abc\n", read); !ok || n != 2147483648 {
+		t.Errorf("v1 limit = %d, %v", n, ok)
 	}
 }

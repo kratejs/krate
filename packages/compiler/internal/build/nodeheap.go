@@ -2,6 +2,8 @@ package build
 
 import (
 	"os"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -50,18 +52,52 @@ func derivedNodeHeapMB(limitBytes int64, processes int) int {
 }
 
 // containerMemoryLimit reads the memory limit of the cgroup the server runs
-// in (v2, then v1). It reports false when there is none.
+// in: the strictest limit on the way from its own cgroup (from
+// /proc/self/cgroup) up to the root, cgroup v2 first, then v1. A limit set by
+// systemd MemoryMax or on a host-namespace container sits on the process's
+// own cgroup, not on the root. It reports false when there is none.
 func containerMemoryLimit() (int64, bool) {
-	for _, p := range []string{"/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"} {
-		data, err := os.ReadFile(p)
-		if err != nil {
+	self, _ := os.ReadFile("/proc/self/cgroup")
+	return cgroupMemoryLimit(string(self), os.ReadFile)
+}
+
+// cgroupMemoryLimit is containerMemoryLimit over the contents of
+// /proc/self/cgroup and a file reader.
+func cgroupMemoryLimit(selfCgroup string, read func(string) ([]byte, error)) (int64, bool) {
+	v2, v1 := "/", "/"
+	for _, line := range strings.Split(selfCgroup, "\n") {
+		parts := strings.SplitN(strings.TrimSpace(line), ":", 3)
+		if len(parts) != 3 {
 			continue
 		}
-		if n, ok := parseCgroupLimit(string(data)); ok {
-			return n, true
+		switch {
+		case parts[0] == "0" && parts[1] == "":
+			v2 = parts[2]
+		case slices.Contains(strings.Split(parts[1], ","), "memory"):
+			v1 = parts[2]
 		}
 	}
-	return 0, false
+	walk := func(base, rel, file string) (int64, bool) {
+		var best int64
+		found := false
+		dir := path.Clean("/" + rel)
+		for {
+			if data, err := read(path.Join(base, dir, file)); err == nil {
+				if n, ok := parseCgroupLimit(string(data)); ok && (!found || n < best) {
+					best, found = n, true
+				}
+			}
+			if dir == "/" {
+				break
+			}
+			dir = path.Dir(dir)
+		}
+		return best, found
+	}
+	if n, ok := walk("/sys/fs/cgroup", v2, "memory.max"); ok {
+		return n, true
+	}
+	return walk("/sys/fs/cgroup/memory", v1, "memory.limit_in_bytes")
 }
 
 // parseCgroupLimit parses a cgroup memory limit. "max" (v2) and the huge

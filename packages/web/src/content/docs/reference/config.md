@@ -557,7 +557,9 @@ ssr: {
   `cache` adapter (Redis) this only bounds the local fallback.
 - **`nodeHeapLimit`** caps the V8 old-generation heap of each Node process the
   server starts (the SSR renderer and the API sidecar's workers), in MB. The
-  default `0` derives it from the container's memory limit (cgroup v2 or v1):
+  default `0` derives it from the memory limit of the server's cgroup (cgroup
+  v2 or v1: a container limit or a systemd `MemoryMax`, the strictest on the
+  way from its own cgroup to the root):
   60% of the limit split between the Node processes, at least 256 MB, so V8
   collects garbage before the container is killed instead of sizing its heap
   from the host's memory. Without a container limit V8's default is kept. `-1`
